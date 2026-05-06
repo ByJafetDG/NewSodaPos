@@ -1,0 +1,250 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// CATEGORÍAS
+// ==========================================
+model Category {
+  id        String    @id @default(uuid())
+  name      String
+  type      String    // PRODUCTO | MENU | BUFFET | INGREDIENTE
+  icon      String?
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// ==========================================
+// PRODUCTOS
+// ==========================================
+model Product {
+  id         String   @id @default(uuid())
+  name       String
+  barcode    String?  @unique
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  price      Float    // Precio de venta
+  cost       Float    @default(0)
+  unit       String   @default("UNIDAD") // UNIDAD | KG | LITRO | PORCION
+  stockQty   Float    @default(0)
+  minStock   Float    @default(0)
+  isActive   Boolean  @default(true)
+  imageUrl   String?
+
+  saleItems          SaleItem[]
+  inventoryMovements InventoryMovement[]
+
+  syncStatus String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ==========================================
+// CLIENTES / TRABAJADORES
+// ==========================================
+model Client {
+  id       String  @id @default(uuid())
+  name     String
+  phone    String?
+  email    String?
+  type     String  @default("TRABAJADOR") // TRABAJADOR | ASOCIACION | GENERAL
+  company  String?
+  notes    String?
+  isActive Boolean @default(true)
+
+  sales    Sale[]
+  payments Payment[]
+
+  syncStatus String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ==========================================
+// CAJA REGISTRADORA
+// ==========================================
+model CashRegister {
+  id            String    @id @default(uuid())
+  openedAt      DateTime  @default(now())
+  closedAt      DateTime?
+  initialAmount Float
+  finalAmount   Float?
+  salesCash     Float?
+  salesCard     Float?
+  salesSinpe    Float?
+  salesTransfer Float?
+  salesCredit   Float?
+  expensesTotal Float?
+  notes         String?
+  status        String    @default("OPEN") // OPEN | CLOSED
+
+  sales    Sale[]
+  expenses Expense[]
+
+  syncStatus String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ==========================================
+// VENTAS
+// ==========================================
+model Sale {
+  id             String   @id @default(uuid())
+  saleNumber     Int
+  date           DateTime @default(now())
+  subtotal       Float
+  discount       Float    @default(0)
+  total          Float
+  paymentMethod  String   // EFECTIVO | TARJETA | SINPE | TRANSFERENCIA | CREDITO
+  amountReceived Float?
+  change         Float?
+
+  cashRegisterId String?
+  cashRegister   CashRegister? @relation(fields: [cashRegisterId], references: [id])
+
+  isCredit Boolean @default(false)
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  items  SaleItem[]
+  status String    @default("COMPLETADA") // COMPLETADA | ANULADA
+
+  notes      String?
+  syncStatus String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([saleNumber])
+}
+
+model SaleItem {
+  id        String  @id @default(uuid())
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Float
+  unitPrice Float
+  subtotal  Float
+  notes     String?
+  createdAt DateTime @default(now())
+}
+
+// ==========================================
+// PAGOS (saldos pendientes)
+// ==========================================
+model Payment {
+  id        String   @id @default(uuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  amount    Float
+  method    String   // EFECTIVO | SINPE | TRANSFERENCIA | ASOCIACION
+  reference String?
+  notes     String?
+  date      DateTime @default(now())
+
+  syncStatus String   @default("PENDING")
+  createdAt  DateTime @default(now())
+}
+
+// ==========================================
+// EGRESOS
+// ==========================================
+model ExpenseCategory {
+  id        String    @id @default(uuid())
+  name      String
+  expenses  Expense[]
+  createdAt DateTime  @default(now())
+}
+
+model Expense {
+  id          String          @id @default(uuid())
+  description String
+  amount      Float
+  categoryId  String
+  category    ExpenseCategory @relation(fields: [categoryId], references: [id])
+  supplier    String?
+  date        DateTime        @default(now())
+  notes       String?
+
+  cashRegisterId String?
+  cashRegister   CashRegister? @relation(fields: [cashRegisterId], references: [id])
+
+  syncStatus String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ==========================================
+// INVENTARIO - MOVIMIENTOS
+// ==========================================
+model InventoryMovement {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  type      String   // ENTRADA | SALIDA | AJUSTE | VENTA
+  quantity  Float
+  cost      Float?
+  reference String?
+  notes     String?
+  date      DateTime @default(now())
+
+  syncStatus String   @default("PENDING")
+  createdAt  DateTime @default(now())
+}
+
+// ==========================================
+// COLA DE SINCRONIZACIÓN
+// ==========================================
+model SyncQueue {
+  id          Int       @id @default(autoincrement())
+  tableName   String
+  operation   String    // INSERT | UPDATE | DELETE
+  recordId    String
+  data        String
+  priority    Int       @default(1)
+  attempts    Int       @default(0)
+  lastAttempt DateTime?
+  error       String?
+  createdAt   DateTime  @default(now())
+}
+
+// ==========================================
+// CONFIGURACIÓN DEL NEGOCIO
+// ==========================================
+model BusinessConfig {
+  id            String  @id @default("default")
+  name          String  @default("Mi Soda")
+  address       String?
+  phone         String?
+  ticketHeader  String?
+  ticketFooter  String? @default("¡Gracias por su compra!")
+  printerPort   String?
+  printerModel  String?
+  drawerEnabled Boolean @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ==========================================
+// EMPLEADOS
+// ==========================================
+model Employee {
+  id              String   @id @default(uuid())
+  name            String
+  role            String   @default("CAJERO") // CAJERO | ADMIN | COCINERO
+  pin             String?
+  monthlySales    Int      @default(0)
+  lastResetMonth  String?  // format: YYYY-MM
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

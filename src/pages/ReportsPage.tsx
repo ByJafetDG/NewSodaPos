@@ -1,0 +1,454 @@
+import { useState } from 'react'
+import {
+    BarChart3, Banknote, Smartphone, CreditCard,
+    TrendingUp, ShoppingBag, PackageX, AlertTriangle, Calendar,
+    Receipt,
+} from 'lucide-react'
+import { useProductsStock } from '@/hooks/useInventory'
+import { useReportData } from '@/hooks/useReports'
+import { cn, formatCurrency } from '@/lib/utils'
+
+function getDateRange(filter: string, customFrom: string, customTo: string): [string, string] {
+    if (filter === 'Personalizado' && customFrom && customTo) return [customFrom, customTo]
+    const now = new Date()
+    const from = new Date(now)
+    const to = new Date(now)
+    to.setHours(23, 59, 59, 999) // end of today — stable key, no per-render drift
+    if (filter === 'Hoy') from.setHours(0, 0, 0, 0)
+    else if (filter === 'Semana') { from.setDate(from.getDate() - 7); from.setHours(0, 0, 0, 0) }
+    else if (filter === 'Mes')   { from.setDate(from.getDate() - 30); from.setHours(0, 0, 0, 0) }
+    else if (filter === 'Año')   { from.setFullYear(from.getFullYear() - 1); from.setHours(0, 0, 0, 0) }
+    else from.setFullYear(2000)
+    return [from.toISOString(), to.toISOString()]
+}
+
+
+const PM_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
+    EFECTIVO: { label: 'Efectivo', color: 'text-emerald-400', bg: 'bg-emerald-500', icon: <Banknote size={13} /> },
+    SINPE:    { label: 'SINPE',    color: 'text-blue-400',    bg: 'bg-blue-500',    icon: <Smartphone size={13} /> },
+    CREDITO:  { label: 'Crédito', color: 'text-violet-400',  bg: 'bg-violet-500',  icon: <CreditCard size={13} /> },
+}
+
+const DATE_FILTERS = ['Hoy', 'Semana', 'Mes', 'Año', 'Todo'] as const
+type DateFilter = typeof DATE_FILTERS[number]
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export function ReportsPage() {
+    const [dateFilter, setDateFilter] = useState<DateFilter>('Hoy')
+    const [customFrom, setCustomFrom] = useState('')
+    const [customTo, setCustomTo] = useState('')
+    const [showCustom, setShowCustom] = useState(false)
+
+    const [from, to] = getDateRange(dateFilter, customFrom, customTo)
+    const { data: reportData } = useReportData(from, to)
+    const { data: productsStock = [] } = useProductsStock()
+
+    const sales = reportData?.sales ?? []
+    const products = reportData?.products?.length ? reportData.products : productsStock
+
+    // Payment breakdown from real sales
+    const PAYMENT: Record<string, number> = { EFECTIVO: 0, SINPE: 0, CREDITO: 0 }
+    for (const s of sales) {
+        const pm = s.paymentMethod as string
+        if (pm in PAYMENT) PAYMENT[pm] += s.total
+    }
+
+    // Top products from real items
+    const productQty: Record<string, { name: string; qty: number; revenue: number }> = {}
+    for (const s of sales) {
+        for (const item of (s.items ?? [])) {
+            const name = item.product?.name ?? 'Desconocido'
+            if (!productQty[item.productId]) productQty[item.productId] = { name, qty: 0, revenue: 0 }
+            productQty[item.productId].qty += item.quantity
+            productQty[item.productId].revenue += item.subtotal
+        }
+    }
+    const TOP_PRODUCTS = Object.values(productQty).sort((a, b) => b.qty - a.qty).slice(0, 10)
+
+    // Hourly distribution
+    const HOURLY_REAL = Array(24).fill(0)
+    for (const s of sales) {
+        const h = new Date(s.date).getHours()
+        HOURLY_REAL[h] += s.total
+    }
+
+    const totalSalesAmt = sales.reduce((sum: number, s: any) => sum + s.total, 0)
+    const avgTicket = sales.length > 0 ? Math.round(totalSalesAmt / sales.length) : 0
+    const inventoryValue = products.reduce((sum: any, p: any) => sum + ((p.price ?? 0) * (p.stockQty ?? 0)), 0)
+    const pendingCredit = (reportData?.totalDebt ?? 0) - (reportData?.totalPaid ?? 0)
+
+    const effectivePayment = PAYMENT
+    const effectiveTop = TOP_PRODUCTS
+    const effectiveHourly = HOURLY_REAL
+    const recentSales = sales.slice(0, 10)
+
+    const maxPayment = Math.max(...Object.values(effectivePayment), 1)
+    const maxHourly = Math.max(...effectiveHourly, 1)
+    const maxTopQty = effectiveTop[0]?.qty ?? 1
+
+    const lowStock = products.filter((p: any) => !p.isInfinite && p.stockQty <= p.minStock && p.stockQty > 0)
+    const outOfStock = products.filter((p: any) => !p.isInfinite && p.stockQty === 0)
+
+    return (
+        <div className="flex flex-col h-full">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#192030] shrink-0">
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-cyan-500/10">
+                        <BarChart3 size={18} className="text-cyan-400" />
+                    </div>
+                    <div>
+                        <h1 className="text-[16px] font-semibold text-[#E4ECF7]">Reportes</h1>
+                        <p className="text-[12px] text-[#3D506A]">Estadísticas de ventas</p>
+                    </div>
+                </div>
+
+                {/* Date filter */}
+                <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 p-1 rounded-xl bg-[#101520] border border-[#192030]">
+                        {DATE_FILTERS.map(f => (
+                            <button
+                                key={f}
+                                onClick={() => { setDateFilter(f); setShowCustom(false) }}
+                                className={cn(
+                                    'px-3 h-7 rounded-lg text-[12px] font-medium transition-all cursor-pointer',
+                                    dateFilter === f && !showCustom
+                                        ? 'bg-cyan-500/15 text-cyan-400'
+                                        : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                )}
+                            >
+                                {f}
+                            </button>
+                        ))}
+                        <button
+                            onClick={() => setShowCustom(v => !v)}
+                            className={cn(
+                                'flex items-center gap-1 px-3 h-7 rounded-lg text-[12px] font-medium transition-all cursor-pointer',
+                                showCustom ? 'bg-cyan-500/15 text-cyan-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                            )}
+                        >
+                            <Calendar size={11} />
+                            Personalizado
+                        </button>
+                    </div>
+
+                    {/* Custom date inputs */}
+                    {showCustom && (
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#101520] border border-cyan-500/30">
+                            <input
+                                type="date"
+                                value={customFrom}
+                                onChange={e => setCustomFrom(e.target.value)}
+                                className="bg-transparent text-[12px] text-[#E4ECF7] outline-none cursor-pointer [color-scheme:dark]"
+                            />
+                            <span className="text-[11px] text-[#3D506A]">→</span>
+                            <input
+                                type="date"
+                                value={customTo}
+                                onChange={e => setCustomTo(e.target.value)}
+                                className="bg-transparent text-[12px] text-[#E4ECF7] outline-none cursor-pointer [color-scheme:dark]"
+                            />
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+                {/* Stats row */}
+                <div className="grid grid-cols-4 gap-3">
+                    <StatCard label="Total ventas" value={formatCurrency(totalSalesAmt)} sub={`${dateFilter.toLowerCase()}`} color="text-cyan-400" bg="bg-cyan-500/10" icon={<TrendingUp size={15} />} />
+                    <StatCard label="Ticket promedio" value={formatCurrency(avgTicket)} sub={`${sales.length} ventas`} color="text-emerald-400" bg="bg-emerald-500/10" icon={<ShoppingBag size={15} />} />
+                    <StatCard label="Valor inventario" value={formatCurrency(inventoryValue)} sub="en precio" color="text-blue-400" bg="bg-blue-500/10" icon={<BarChart3 size={15} />} />
+                    <StatCard label="Crédito pendiente" value={formatCurrency(Math.max(0, pendingCredit))} sub="saldo neto" color="text-amber-400" bg="bg-amber-500/10" icon={<Receipt size={15} />} />
+                </div>
+
+                {/* Payment breakdown + Top products */}
+                <div className="grid grid-cols-2 gap-4">
+                    {/* Payment methods */}
+                    <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
+                        <p className="text-[12px] font-semibold text-[#7A8FAA] mb-4">Métodos de pago</p>
+                        <div className="space-y-3">
+                            {Object.entries(effectivePayment).map(([method, amount]) => {
+                                const cfg = PM_CONFIG[method]
+                                const pct = Math.round((amount / (totalSalesAmt || 1)) * 100)
+                                const barW = Math.round((amount / maxPayment) * 100)
+                                return (
+                                    <div key={method}>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <div className={cn('flex items-center gap-1.5 text-[12px] font-medium', cfg.color)}>
+                                                {cfg.icon}
+                                                {cfg.label}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[11px] text-[#3D506A]">{pct}%</span>
+                                                <span className="text-[13px] font-semibold text-[#E4ECF7]">{formatCurrency(amount)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="h-1.5 rounded-full bg-[#1C2438]">
+                                            <div
+                                                className={cn('h-full rounded-full', cfg.bg, 'opacity-70')}
+                                                style={{ width: `${barW}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-[#192030] flex justify-between">
+                            <span className="text-[11px] text-[#3D506A]">Total</span>
+                            <span className="text-[14px] font-bold text-[#E4ECF7]">{formatCurrency(totalSalesAmt)}</span>
+                        </div>
+                    </div>
+
+                    {/* Top products */}
+                    <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
+                        <p className="text-[12px] font-semibold text-[#7A8FAA] mb-4">Top 10 productos</p>
+                        <div className="space-y-2.5">
+                            {effectiveTop.map((p, i) => {
+                                const barW = Math.round((p.qty / maxTopQty) * 100)
+                                return (
+                                    <div key={p.name} className="flex items-center gap-2.5">
+                                        <span className="text-[11px] text-[#3D506A] w-4 shrink-0 text-right">{i + 1}</span>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between mb-0.5">
+                                                <span className="text-[12px] text-[#E4ECF7] truncate">{p.name}</span>
+                                                <span className="text-[11px] text-[#3D506A] shrink-0 ml-2">{p.qty} uds</span>
+                                            </div>
+                                            <div className="h-1 rounded-full bg-[#1C2438]">
+                                                <div className="h-full rounded-full bg-cyan-500/60" style={{ width: `${barW}%` }} />
+                                            </div>
+                                        </div>
+                                        <span className="text-[12px] text-[#7A8FAA] shrink-0 w-20 text-right">{formatCurrency(p.revenue)}</span>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Sales by hour */}
+                <HourlySalesChart data={effectiveHourly} />
+
+                {/* Recent sales + Stock alerts */}
+                <div className="grid grid-cols-2 gap-4">
+                    {/* Recent sales */}
+                    <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
+                        <p className="text-[12px] font-semibold text-[#7A8FAA] mb-3">Ventas recientes</p>
+                        {recentSales.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-6 gap-2">
+                                <Receipt size={24} className="text-[#3D506A]" />
+                                <p className="text-[12px] text-[#3D506A]">Sin ventas en este período</p>
+                            </div>
+                        ) : (
+                        <div className="space-y-1">
+                            {recentSales.map((s: any) => {
+                                const cfg = PM_CONFIG[s.paymentMethod] ?? PM_CONFIG['EFECTIVO']
+                                const time = new Date(s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+                                return (
+                                    <div key={s.id} className="flex items-center justify-between py-1.5 border-b border-[#192030] last:border-0">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[11px] text-[#3D506A]">#{s.saleNumber}</span>
+                                            <span className={cn('flex items-center gap-1 text-[11px] font-medium', cfg.color)}>
+                                                {cfg.icon}
+                                                {cfg.label}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-[11px] text-[#3D506A]">{time}</span>
+                                            <span className="text-[13px] font-semibold text-[#E4ECF7]">{formatCurrency(s.total)}</span>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                        )}
+                    </div>
+
+                    {/* Stock alerts */}
+                    <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
+                        <p className="text-[12px] font-semibold text-[#7A8FAA] mb-3">Alertas de inventario</p>
+                        {lowStock.length === 0 && outOfStock.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-6 gap-2">
+                                <PackageX size={24} className="text-[#3D506A]" />
+                                <p className="text-[12px] text-[#3D506A]">Sin alertas de stock</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-1 max-h-[350px] overflow-y-auto">
+                                {outOfStock.map(p => (
+                                    <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-[#192030] last:border-0">
+                                        <div className="flex items-center gap-2">
+                                            <AlertTriangle size={12} className="text-red-400 shrink-0" />
+                                            <span className="text-[12px] text-[#E4ECF7] truncate">{p.name}</span>
+                                        </div>
+                                        <span className="text-[11px] font-semibold text-red-400 shrink-0">Agotado</span>
+                                    </div>
+                                ))}
+                                {lowStock.map(p => (
+                                    <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-[#192030] last:border-0">
+                                        <div className="flex items-center gap-2">
+                                            <AlertTriangle size={12} className="text-amber-400 shrink-0" />
+                                            <span className="text-[12px] text-[#E4ECF7] truncate">{p.name}</span>
+                                        </div>
+                                        <span className="text-[11px] font-semibold text-amber-400 shrink-0">{p.stockQty} / mín {p.minStock}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function fmtHour(h: number) {
+    if (h === 0)  return '12am'
+    if (h < 12)   return `${h}am`
+    if (h === 12) return '12pm'
+    return `${h - 12}pm`
+}
+
+function HourlySalesChart({ data }: { data: number[] }) {
+    const max = Math.max(...data, 1)
+    const peakIdx = data.indexOf(max)
+    const activeHours = data.filter(v => v > 0).length
+
+    const top3 = data
+        .map((v, h) => ({ h, v }))
+        .filter(x => x.v > 0)
+        .sort((a, b) => b.v - a.v)
+        .slice(0, 3)
+
+    return (
+        <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-5">
+                <p className="text-[12px] font-semibold text-[#7A8FAA]">Ventas por hora</p>
+                {activeHours > 0 && (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                        <span className="text-[11px] text-cyan-400 font-medium">
+                            Hora pico: {fmtHour(peakIdx)}
+                        </span>
+                    </div>
+                )}
+            </div>
+
+            {/* Chart */}
+            <div className="relative">
+                {/* Peak value label */}
+                {activeHours > 0 && (
+                    <div
+                        className="absolute -top-1 text-[9px] font-bold text-cyan-400 whitespace-nowrap"
+                        style={{ left: `calc(${(peakIdx / 24) * 100}% + ${peakIdx / 24 < 0.8 ? '4px' : '-40px'})` }}
+                    >
+                        {formatCurrency(max)}
+                    </div>
+                )}
+
+                {/* Bars */}
+                <div className="flex items-end gap-px mt-4" style={{ height: '120px' }}>
+                    {data.map((val, h) => {
+                        const heightPct = (val / max) * 100
+                        const isPeak = h === peakIdx && val > 0
+                        const isTop3 = top3.some(x => x.h === h)
+                        return (
+                            <div key={h} className="flex-1 flex items-end" style={{ height: '100%' }}>
+                                <div
+                                    className={cn(
+                                        'w-full rounded-t transition-all',
+                                        val === 0
+                                            ? 'bg-transparent'
+                                            : isPeak
+                                                ? 'bg-cyan-400'
+                                                : isTop3
+                                                    ? 'bg-cyan-500/70'
+                                                    : 'bg-cyan-500/30'
+                                    )}
+                                    style={{ height: val > 0 ? `${Math.max(heightPct, 3)}%` : '0%' }}
+                                />
+                            </div>
+                        )
+                    })}
+                </div>
+
+                {/* X-axis labels */}
+                <div className="flex gap-px mt-1.5">
+                    {data.map((_, h) => (
+                        <div key={h} className="flex-1 text-center">
+                            {(h % 4 === 0) && (
+                                <span className="text-[9px] text-[#3D506A]">{fmtHour(h)}</span>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Stats row */}
+            <div className="mt-4 pt-4 border-t border-[#192030] grid grid-cols-3 gap-4">
+                <div>
+                    <p className="text-[11px] text-[#3D506A] mb-1">Hora pico</p>
+                    <p className="text-[14px] font-bold text-cyan-400">
+                        {activeHours > 0 ? fmtHour(peakIdx) : '—'}
+                    </p>
+                </div>
+                <div>
+                    <p className="text-[11px] text-[#3D506A] mb-1">Horas activas</p>
+                    <p className="text-[14px] font-bold text-[#E4ECF7]">
+                        {activeHours > 0 ? `${activeHours}h` : '—'}
+                    </p>
+                </div>
+                <div>
+                    <p className="text-[11px] text-[#3D506A] mb-1">Máx. por hora</p>
+                    <p className="text-[14px] font-bold text-emerald-400">
+                        {activeHours > 0 ? formatCurrency(max) : '—'}
+                    </p>
+                </div>
+            </div>
+
+            {/* Top 3 hours */}
+            {top3.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                    {top3.map((x, i) => {
+                        const pct = Math.round((x.v / max) * 100)
+                        const medals = ['🥇', '🥈', '🥉']
+                        return (
+                            <div key={x.h} className="flex items-center gap-3">
+                                <span className="text-[12px] w-5 shrink-0">{medals[i]}</span>
+                                <span className="text-[12px] text-[#7A8FAA] w-12 shrink-0">{fmtHour(x.h)}</span>
+                                <div className="flex-1 h-1.5 rounded-full bg-[#1C2438]">
+                                    <div
+                                        className="h-full rounded-full bg-cyan-500/60"
+                                        style={{ width: `${pct}%` }}
+                                    />
+                                </div>
+                                <span className="text-[12px] font-semibold text-[#E4ECF7] w-24 text-right shrink-0">
+                                    {formatCurrency(x.v)}
+                                </span>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
+        </div>
+    )
+}
+
+function StatCard({ label, value, sub, color, bg, icon }: {
+    label: string; value: string; sub: string
+    color: string; bg: string; icon: React.ReactNode
+}) {
+    return (
+        <div className={cn('rounded-2xl p-4 border border-transparent', bg)}>
+            <div className={cn('flex items-center gap-1.5 mb-2', color)}>
+                {icon}
+                <p className="text-[11px] font-semibold uppercase tracking-wider opacity-80">{label}</p>
+            </div>
+            <p className={cn('text-[22px] font-bold', color)}>{value}</p>
+            <p className="text-[11px] text-[#3D506A] mt-0.5">{sub}</p>
+        </div>
+    )
+}

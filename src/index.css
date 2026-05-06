@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* App surfaces — deep navy palette */
+  --color-app-bg:       #07090F;
+  --color-sidebar-bg:   #0B0E19;
+  --color-surface-1:    #101520;
+  --color-surface-2:    #161D2E;
+  --color-surface-3:    #1C2438;
+
+  /* Borders */
+  --color-border-dim:   #192030;
+  --color-border:       #1E2A40;
+  --color-border-bright:#283A56;
+
+  /* Text */
+  --color-text-1: #E4ECF7;
+  --color-text-2: #7A8FAA;
+  --color-text-3: #3D506A;
+
+  /* Accent — warm orange */
+  --color-accent-400: #FB923C;
+  --color-accent-500: #F97316;
+  --color-accent-600: #EA6C0A;
+  --color-accent-dim:  rgba(249,115,22,0.12);
+
+  /* Status */
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger:  #EF4444;
+  --color-info:    #3B82F6;
+
+  /* Nav item colors per section */
+  --color-nav-pos:      #FB923C;
+  --color-nav-inv:      #60A5FA;
+  --color-nav-clients:  #A78BFA;
+  --color-nav-cash:     #34D399;
+  --color-nav-reports:  #22D3EE;
+  --color-nav-expenses: #F87171;
+  --color-nav-settings: #94A3B8;
+
+  /* Layout */
+  --sidebar-w: 228px;
+  --safe-edge: 18px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--color-app-bg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  color: var(--color-text-1);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-bright); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-3); }
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
