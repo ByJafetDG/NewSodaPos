@@ -72,3 +72,8 @@ html, body, #root {
   outline-offset: 2px;
   border-radius: 8px;
 }
+
+/* Push sileo toast up from the bottom edge */
+[data-sileo-viewport][data-position^="bottom"] {
+  bottom: 48px !important;
+}

@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import path from 'path'
+import { readFileSync } from 'fs'
+
+const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
 export default defineConfig(({ command }) => {
   const isElectron = process.env.ELECTRON === 'true'
@@ -49,5 +52,8 @@ export default defineConfig(({ command }) => {
       },
     },
     base: command === 'build' && isElectron ? './' : '/',
+    define: {
+      __APP_VERSION__: JSON.stringify(pkg.version),
+    },
   }
 })

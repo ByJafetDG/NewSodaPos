@@ -81,8 +81,8 @@ app.whenReady().then(async () => {
     const win = createWindow()
     if (win) {
         startSyncEngine(win)
-        // Check for updates on startup
-        autoUpdater.checkForUpdatesAndNotify()
+        autoUpdater.checkForUpdates()
+        setInterval(() => autoUpdater.checkForUpdates(), 30 * 60 * 1000)
     }
 
     app.on('activate', () => {
@@ -501,7 +501,5 @@ autoUpdater.on('update-downloaded', () => {
     mainWindow?.webContents.send('update-message', 'update-downloaded')
 })
 
-// Handle update installation
-ipcMain.handle('update:install', () => {
-    autoUpdater.quitAndInstall()
-})
+ipcMain.handle('update:install', () => autoUpdater.quitAndInstall())
+ipcMain.handle('update:check', () => autoUpdater.checkForUpdates())

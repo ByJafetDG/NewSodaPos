@@ -9,6 +9,7 @@ import { CashRegisterPage } from '@/pages/CashRegisterPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { StartupCajaModal } from '@/components/modals/StartupCajaModal'
 import { SplashScreen } from '@/components/layout/SplashScreen'
+import { UpdateModal } from '@/components/modals/UpdateModal'
 
 function PageRenderer() {
     const { currentPage } = useUIStore()
@@ -31,6 +32,7 @@ export default function App() {
             </AppLayout>
             <ToastContainer />
             <StartupCajaModal />
+            <UpdateModal />
             <SplashScreen />
         </>
     )

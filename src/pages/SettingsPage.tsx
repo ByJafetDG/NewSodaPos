@@ -3,9 +3,10 @@ import {
     Settings2, Store, Receipt, Printer, Users, Cloud,
     Monitor, Save, Plus, Trash2, ChevronRight, Wifi, WifiOff,
     RefreshCw, HardDrive, Zap, LogOut, Minimize2, Maximize2,
-    CheckCircle2, Search, Info, Edit2,
+    CheckCircle2, Search, Info, Edit2, Download,
 } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
+import { toast } from '@/components/ui/Toast'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { EmployeeFormModal } from '@/components/modals/EmployeeFormModal'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
@@ -16,7 +17,15 @@ import { useUIStore } from '@/store/uiStore'
 import { cn } from '@/lib/utils'
 import type { Employee } from '@/types'
 
-type Section = 'business' | 'ticket' | 'printer' | 'employees' | 'sync' | 'system'
+type Section = 'business' | 'ticket' | 'printer' | 'employees' | 'sync' | 'system' | 'updates'
+
+function timeAgo(date: Date) {
+    const diff = Date.now() - date.getTime()
+    const min = Math.floor(diff / 60000)
+    if (min < 1) return 'hace un momento'
+    if (min < 60) return `hace ${min} min`
+    return `hace ${Math.floor(min / 60)}h`
+}
 
 type TicketOptions = { showCashier: boolean; showChange: boolean; showHeader: boolean; showUnitPrice: boolean; currencySymbol: string }
 const DEFAULT_TICKET_OPTIONS: TicketOptions = { showCashier: true, showChange: true, showHeader: true, showUnitPrice: false, currencySymbol: '₡' }
@@ -29,6 +38,7 @@ const SECTIONS: { id: Section; label: string; desc: string; icon: React.ElementT
     { id: 'employees',  label: 'Empleados',        desc: 'Cajeros y personal',                icon: Users,    color: 'text-violet-400' },
     { id: 'sync',       label: 'Sincronización',   desc: 'Estado de la nube',                 icon: Cloud,    color: 'text-blue-400' },
     { id: 'system',     label: 'Sistema',          desc: 'Control de ventana y app',          icon: Monitor,  color: 'text-slate-400' },
+    { id: 'updates',    label: 'Actualizaciones',  desc: 'Versión y actualizaciones del app',  icon: Download, color: 'text-emerald-400' },
 ]
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -95,6 +105,49 @@ function ToggleRow({ label, description, value, onChange }: {
 export function SettingsPage() {
     const [section, setSection] = useState<Section>('business')
     const { syncInfo } = useUIStore()
+
+    const [appVersion, setAppVersion] = useState('')
+    const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date'>('idle')
+    const [lastChecked, setLastChecked] = useState<Date | null>(null)
+
+    useEffect(() => {
+        window.electronAPI?.getSystemInfo().then(info => setAppVersion(info.version))
+        const unsub = window.electronAPI?.onUpdateMessage((msg: string) => {
+            if (msg === 'update-not-available') {
+                setUpdateStatus('up-to-date')
+                setLastChecked(new Date())
+                toast.success('¡Estás al día! No hay actualizaciones disponibles.')
+            } else if (msg === 'update-available') {
+                setUpdateStatus('idle')
+                setLastChecked(new Date())
+            } else {
+                setUpdateStatus('idle')
+            }
+        })
+        return () => unsub?.()
+    }, [])
+
+    async function handleCheckUpdate() {
+        setUpdateStatus('checking')
+        try {
+            await window.electronAPI?.checkForUpdate()
+        } catch {
+            setLastChecked(new Date())
+            setUpdateStatus('idle')
+            toast.success('¡Estás al día! No hay actualizaciones disponibles.')
+            return
+        }
+        setTimeout(() => {
+            setUpdateStatus(s => {
+                if (s === 'checking') {
+                    setLastChecked(new Date())
+                    toast.success('¡Estás al día! No hay actualizaciones disponibles.')
+                    return 'idle'
+                }
+                return s
+            })
+        }, 15_000)
+    }
 
     const { data: config } = useBusinessConfig()
     const updateConfig = useUpdateConfig()
@@ -261,7 +314,7 @@ export function SettingsPage() {
                 </nav>
 
                 <div className="px-5 py-4 border-t border-[#192030]">
-                    <p className="text-[10px] text-[#3D506A] text-center">Soda POS v2.0 © 2026</p>
+                    <p className="text-[10px] text-[#3D506A] text-center">Soda POS v{__APP_VERSION__} © 2026</p>
                 </div>
             </div>
 
@@ -617,7 +670,7 @@ export function SettingsPage() {
                                 {/* App info */}
                                 <div className="flex flex-wrap gap-2">
                                     {[
-                                        { icon: <HardDrive size={11} />, label: 'Soda POS v2.0' },
+                                        { icon: <HardDrive size={11} />, label: `Soda POS v${__APP_VERSION__}` },
                                         { icon: <Cloud size={11} />,     label: 'Supabase' },
                                         { icon: <Zap size={11} />,       label: 'Electron + React' },
                                     ].map(chip => (
@@ -627,6 +680,58 @@ export function SettingsPage() {
                                         </div>
                                     ))}
                                 </div>
+                            </div>
+                        </SectionContent>
+                    )}
+
+                    {section === 'updates' && (
+                        <SectionContent
+                            icon={Download} color="text-emerald-400" iconBg="bg-emerald-500/10"
+                            title="Actualizaciones" desc="Versión instalada y búsqueda de actualizaciones"
+                        >
+                            <div className="space-y-4">
+                                <div className="rounded-xl bg-[#101520] border border-[#1E2A40] divide-y divide-[#192030]">
+                                    <div className="flex items-center justify-between px-4 py-3">
+                                        <span className="text-[12px] text-[#3D506A]">Versión instalada</span>
+                                        <span className="text-[12px] font-mono text-emerald-400">v{appVersion || '...'}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between px-4 py-3">
+                                        <span className="text-[12px] text-[#3D506A]">Última verificación</span>
+                                        <span className="text-[12px] font-mono text-[#7A8FAA]">
+                                            {lastChecked ? timeAgo(lastChecked) : 'Al iniciar el app'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between px-4 py-3">
+                                        <span className="text-[12px] text-[#3D506A]">Verificación automática</span>
+                                        <span className="text-[12px] font-mono text-[#7A8FAA]">Cada 30 min</span>
+                                    </div>
+                                </div>
+
+                                {updateStatus === 'up-to-date' && (
+                                    <div className="flex items-center gap-3 p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                                        <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                                        <p className="text-[13px] text-emerald-400 font-medium">Tienes la última versión</p>
+                                    </div>
+                                )}
+
+                                <Button
+                                    variant="primary"
+                                    size="md"
+                                    onClick={handleCheckUpdate}
+                                    loading={updateStatus === 'checking'}
+                                    disabled={!window.electronAPI}
+                                    className="gap-1.5"
+                                >
+                                    <RefreshCw size={14} />
+                                    {updateStatus === 'checking' ? 'Verificando...' : 'Buscar actualización'}
+                                </Button>
+
+                                {!window.electronAPI && (
+                                    <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/5 border border-amber-500/15 text-[11px] text-amber-500/70">
+                                        <Info size={14} className="shrink-0" />
+                                        Solo disponible en la versión de escritorio.
+                                    </div>
+                                )}
                             </div>
                         </SectionContent>
                     )}

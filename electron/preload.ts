@@ -46,6 +46,7 @@ const electronAPI = {
         };
     },
     installUpdate: () => ipcRenderer.invoke('update:install'),
+    checkForUpdate: () => ipcRenderer.invoke('update:check'),
 
     // Platform detection
     platform: process.platform,
@@ -76,6 +77,7 @@ export interface ElectronAPI {
     onDbChanged: (callback: (data: { table: string }) => void) => () => void;
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void;
     installUpdate: () => Promise<void>;
+    checkForUpdate: () => Promise<void>;
     platform: string;
     isElectron: boolean;
 }

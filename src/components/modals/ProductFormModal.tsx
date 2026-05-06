@@ -1,12 +1,46 @@
 import { useState, useEffect } from 'react'
-import { BaseModal } from './BaseModal'
-import { Button } from '@/components/atoms/Button'
+import { AnimatePresence, motion } from 'framer-motion'
+import {
+    X, ArrowLeft, Check, Package, Droplets, Layers, Utensils,
+    ScanLine, Tag, ChevronRight, DollarSign, Infinity as InfinityIcon,
+} from 'lucide-react'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
-import { cn } from '@/lib/utils'
+import { useKeyboardStore } from '@/store/keyboardStore'
+import { formatCurrency, cn } from '@/lib/utils'
 import type { Product, Category, ProductUnit } from '@/types'
 
-const DRAFT_KEY = 'pos_product_draft'
-type DraftData = { name: string; barcode: string; categoryId: string; price: string; stockQty: string; unit: ProductUnit; minStock: string; isInfinite: boolean; isActive: boolean }
+// ── Types & Constants ─────────────────────────────────────────────────────────
+
+type WizardStep = 'draft-prompt' | 'name' | 'barcode' | 'unit' | 'category' | 'numbers' | 'recap'
+const STEP_ORDER: WizardStep[] = ['name', 'barcode', 'unit', 'category', 'numbers', 'recap']
+const PROGRESS_STEPS: WizardStep[] = ['name', 'barcode', 'unit', 'category', 'numbers']
+
+const DRAFT_KEY_NEW = 'pos_product_draft_new'
+const draftKeyEdit = (id: string) => `pos_product_draft_edit_${id}`
+
+type WizardData = {
+    name: string; barcode: string; unit: ProductUnit; categoryId: string
+    price: string; stockQty: string; minStock: string; isInfinite: boolean; isActive: boolean
+}
+const EMPTY: WizardData = {
+    name: '', barcode: '', unit: 'UNIDAD', categoryId: '',
+    price: '', stockQty: '0', minStock: '1', isInfinite: false, isActive: true,
+}
+
+const UNITS: { value: ProductUnit; label: string; sub: string; icon: React.ElementType }[] = [
+    { value: 'UNIDAD',  label: 'Unidad',   sub: 'Piezas individuales', icon: Package  },
+    { value: 'KG',      label: 'Kilogramo', sub: 'Productos por peso',  icon: Layers   },
+    { value: 'LITRO',   label: 'Litro',     sub: 'Líquidos a granel',   icon: Droplets },
+    { value: 'PORCION', label: 'Porción',   sub: 'Platos / raciones',   icon: Utensils },
+]
+
+const slideVariants = {
+    enter: (dir: number) => ({ x: dir >= 0 ? 52 : -52, opacity: 0 }),
+    center: { x: 0, opacity: 1 },
+    exit:  (dir: number) => ({ x: dir >= 0 ? -52 : 52, opacity: 0 }),
+}
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface ProductFormModalProps {
     isOpen: boolean
@@ -17,23 +51,188 @@ interface ProductFormModalProps {
     isPending?: boolean
 }
 
-const UNITS: ProductUnit[] = ['UNIDAD', 'KG', 'LITRO', 'PORCION']
-const UNIT_LABELS: Record<ProductUnit, string> = {
-    UNIDAD: 'Unidad',
-    KG: 'Kg',
-    LITRO: 'Litro',
-    PORCION: 'Porción',
+// ── Main component ────────────────────────────────────────────────────────────
+
+export function ProductFormModal({ isOpen, onClose, onConfirm, product, categories, isPending }: ProductFormModalProps) {
+    const [step, setStep] = useState<WizardStep>('name')
+    const [dir, setDir]   = useState(1)
+    const [data, setData] = useState<WizardData>(EMPTY)
+
+    const draftKey = product ? draftKeyEdit(product.id) : DRAFT_KEY_NEW
+
+    useEffect(() => {
+        if (!isOpen) return
+        useKeyboardStore.getState().close()
+
+        const draft = (() => { try { return JSON.parse(localStorage.getItem(draftKey) ?? 'null') as WizardData | null } catch { return null } })()
+
+        if (product) {
+            const base: WizardData = {
+                name: product.name, barcode: product.barcode ?? '',
+                unit: product.unit, categoryId: product.categoryId,
+                price: String(product.price), stockQty: String(product.stockQty),
+                minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive,
+            }
+            if (draft?.name) { setData(draft); setStep('draft-prompt') }
+            else             { setData(base);  setStep('name') }
+        } else {
+            if (draft?.name) { setData(draft); setStep('draft-prompt') }
+            else             { setData({ ...EMPTY, categoryId: categories[0]?.id ?? '' }); setStep('name') }
+        }
+        setDir(1)
+    }, [isOpen])
+
+    useEffect(() => {
+        if (!isOpen || step === 'draft-prompt') return
+        if (!data.name && !data.price) return
+        localStorage.setItem(draftKey, JSON.stringify(data))
+    }, [data, step, isOpen])
+
+    function go(next: WizardStep, direction = 1) {
+        useKeyboardStore.getState().close()
+        setDir(direction)
+        setStep(next)
+    }
+
+    function advance(next: WizardStep) { go(next, 1) }
+
+    function back() {
+        const idx = STEP_ORDER.indexOf(step)
+        if (idx > 0) go(STEP_ORDER[idx - 1], -1)
+    }
+
+    function goToStep(s: WizardStep) {
+        const curr = STEP_ORDER.indexOf(step)
+        const next = STEP_ORDER.indexOf(s)
+        go(s, next >= curr ? 1 : -1)
+    }
+
+    function handleConfirm() {
+        if (isPending) return
+        localStorage.removeItem(draftKey)
+        onConfirm({
+            name: data.name.trim(),
+            barcode: data.barcode.trim() || null,
+            categoryId: data.categoryId,
+            price: parseFloat(data.price) || 0,
+            cost: 0,
+            unit: data.unit,
+            minStock: parseInt(data.minStock) || 1,
+            stockQty: data.isInfinite ? (product?.stockQty ?? 0) : (parseFloat(data.stockQty) || 0),
+            isInfinite: data.isInfinite,
+            isActive: data.isActive,
+            imageUrl: null,
+        })
+    }
+
+    function discardDraft() {
+        localStorage.removeItem(draftKey)
+        const base = product
+            ? { name: product.name, barcode: product.barcode ?? '', unit: product.unit, categoryId: product.categoryId, price: String(product.price), stockQty: String(product.stockQty), minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive }
+            : { ...EMPTY, categoryId: categories[0]?.id ?? '' }
+        setData(base)
+        go('name', 1)
+    }
+
+    function handleClose() { useKeyboardStore.getState().close(); onClose() }
+
+    const progressIdx = PROGRESS_STEPS.indexOf(step)
+    const activeCategories = categories.filter(c => c.isActive)
+    const catName = activeCategories.find(c => c.id === data.categoryId)?.name ?? '—'
+
+    return (
+        <AnimatePresence>
+            {isOpen && (
+                <>
+                    <motion.div
+                        key="backdrop"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+                        onClick={handleClose}
+                    />
+                    <motion.div
+                        key="panel"
+                        initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                        transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+                        className="fixed z-50 inset-x-0 mx-auto top-1/2 -translate-y-1/2 w-full max-w-sm px-4"
+                    >
+                        <div className="bg-[#0F1523] border border-[#1E2A40] rounded-2xl shadow-2xl overflow-hidden">
+
+                            {/* Header */}
+                            {step !== 'draft-prompt' && (
+                                <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                                    <div className="flex items-center gap-2">
+                                        {step !== 'name' && (
+                                            <button onClick={back} className="w-7 h-7 rounded-lg text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer">
+                                                <ArrowLeft size={14} />
+                                            </button>
+                                        )}
+                                        <h2 className="text-[15px] font-semibold text-[#E4ECF7]">
+                                            {product ? 'Editar producto' : 'Nuevo producto'}
+                                        </h2>
+                                    </div>
+                                    <button onClick={handleClose} className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-[#E4ECF7] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer">
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Progress bar */}
+                            {progressIdx >= 0 && (
+                                <div className="flex gap-1 px-5 pb-4">
+                                    {PROGRESS_STEPS.map((_, i) => (
+                                        <div key={i} className={cn(
+                                            'h-1 rounded-full transition-all duration-300',
+                                            i < progressIdx ? 'bg-orange-500 flex-1' :
+                                            i === progressIdx ? 'bg-orange-500 flex-[2]' :
+                                            'bg-[#1E2A40] flex-1'
+                                        )} />
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Step content */}
+                            <div className="overflow-hidden">
+                                <AnimatePresence mode="popLayout" custom={dir}>
+                                    <motion.div
+                                        key={step}
+                                        custom={dir}
+                                        variants={slideVariants}
+                                        initial="enter"
+                                        animate="center"
+                                        exit="exit"
+                                        transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+                                        className="px-5 pb-6"
+                                    >
+                                        {step === 'draft-prompt' && <DraftPromptStep data={data} isEdit={!!product} onContinue={() => go('name', 1)} onDiscard={discardDraft} onClose={handleClose} />}
+                                        {step === 'name'         && <NameStep value={data.name} onChange={v => setData(d => ({ ...d, name: v }))} onNext={() => advance('barcode')} />}
+                                        {step === 'barcode'      && <BarcodeStep value={data.barcode} onChange={v => setData(d => ({ ...d, barcode: v }))} onNext={() => advance('unit')} onSkip={() => { setData(d => ({ ...d, barcode: '' })); advance('unit') }} />}
+                                        {step === 'unit'         && <UnitStep value={data.unit} onSelect={u => { setData(d => ({ ...d, unit: u })); advance('category') }} />}
+                                        {step === 'category'     && <CategoryStep value={data.categoryId} categories={activeCategories} onChange={id => setData(d => ({ ...d, categoryId: id }))} onNext={() => advance('numbers')} />}
+                                        {step === 'numbers'      && <NumbersStep data={data} isEdit={!!product} onChange={patch => setData(d => ({ ...d, ...patch }))} onNext={() => advance('recap')} />}
+                                        {step === 'recap'        && <RecapStep data={data} catName={catName} isEdit={!!product} isPending={isPending} onConfirm={handleConfirm} onEdit={goToStep} />}
+                                    </motion.div>
+                                </AnimatePresence>
+                            </div>
+                        </div>
+                    </motion.div>
+                </>
+            )}
+        </AnimatePresence>
+    )
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
-    return <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-1.5">{children}</p>
+// ── Step sub-components ───────────────────────────────────────────────────────
+
+function StepQuestion({ children }: { children: React.ReactNode }) {
+    return <p className="text-[15px] font-semibold text-[#E4ECF7] mb-4">{children}</p>
 }
 
-function TextInput({ value, onChange, placeholder, mode = 'alpha' }: {
-    value: string
-    onChange: (v: string) => void
-    placeholder?: string
-    mode?: 'alpha' | 'numeric'
+function StepInput({ value, onChange, placeholder, mode = 'alpha' }: {
+    value: string; onChange: (v: string) => void; placeholder?: string; mode?: 'alpha' | 'numeric'
 }) {
     const kb = useKeyboardInput(value, onChange, { mode })
     return (
@@ -41,253 +240,257 @@ function TextInput({ value, onChange, placeholder, mode = 'alpha' }: {
             type="text"
             {...kb}
             placeholder={placeholder}
-            className="w-full h-10 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
+            className="w-full h-12 px-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[14px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
         />
     )
 }
 
-export function ProductFormModal({ isOpen, onClose, onConfirm, product, categories, isPending }: ProductFormModalProps) {
-    const [name, setName] = useState('')
-    const [barcode, setBarcode] = useState('')
-    const [categoryId, setCategoryId] = useState('')
-    const [price, setPrice] = useState('')
-    const [stockQty, setStockQty] = useState('0')
-    const [unit, setUnit] = useState<ProductUnit>('UNIDAD')
-    const [minStock, setMinStock] = useState('1')
-    const [isInfinite, setIsInfinite] = useState(false)
-    const [isActive, setIsActive] = useState(true)
-    const [hasDraft, setHasDraft] = useState(false)
-
-    useEffect(() => {
-        if (isOpen) {
-            if (product) {
-                setName(product.name)
-                setBarcode(product.barcode ?? '')
-                setCategoryId(product.categoryId)
-                setPrice(String(product.price))
-                setStockQty(String(product.stockQty))
-                setUnit(product.unit)
-                setMinStock(String(product.minStock))
-                setIsInfinite(product.isInfinite)
-                setIsActive(product.isActive)
-                setHasDraft(false)
-            } else {
-                const draft = (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as DraftData | null } catch { return null } })()
-                if (draft?.name) {
-                    setName(draft.name); setBarcode(draft.barcode ?? '')
-                    setCategoryId(draft.categoryId || (categories[0]?.id ?? ''))
-                    setPrice(draft.price ?? ''); setStockQty(draft.stockQty ?? '0')
-                    setUnit(draft.unit ?? 'UNIDAD'); setMinStock(draft.minStock ?? '1')
-                    setIsInfinite(draft.isInfinite ?? false); setIsActive(draft.isActive ?? true)
-                    setHasDraft(true)
-                } else {
-                    setName(''); setBarcode('')
-                    setCategoryId(categories[0]?.id ?? '')
-                    setPrice(''); setStockQty('0')
-                    setUnit('UNIDAD'); setMinStock('1')
-                    setIsInfinite(false); setIsActive(true)
-                    setHasDraft(false)
-                }
-            }
-        }
-    }, [isOpen, product, categories])
-
-    useEffect(() => {
-        if (!isOpen || product) return
-        if (!name && !price) return
-        const draft: DraftData = { name, barcode, categoryId, price, stockQty, unit, minStock, isInfinite, isActive }
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
-    }, [name, barcode, categoryId, price, stockQty, unit, minStock, isInfinite, isActive, isOpen, product])
-
-    function handleDiscardDraft() {
-        localStorage.removeItem(DRAFT_KEY)
-        setHasDraft(false)
-        setName(''); setBarcode('')
-        setCategoryId(categories[0]?.id ?? '')
-        setPrice(''); setStockQty('0')
-        setUnit('UNIDAD'); setMinStock('1')
-        setIsInfinite(false); setIsActive(true)
-    }
-
-    const isValid = name.trim().length > 0 && parseFloat(price) > 0 && categoryId
-
-    function handleConfirm() {
-        if (!isValid || isPending) return
-        localStorage.removeItem(DRAFT_KEY)
-        setHasDraft(false)
-        onConfirm({
-            name: name.trim(),
-            barcode: barcode.trim() || null,
-            categoryId,
-            price: parseFloat(price),
-            cost: 0,
-            unit,
-            minStock: parseInt(minStock) || 1,
-            stockQty: isInfinite ? (product?.stockQty ?? 0) : (parseFloat(stockQty) || 0),
-            isInfinite,
-            isActive,
-            imageUrl: null,
-        })
-    }
-
+function NextBtn({ onClick, disabled, label = 'Continuar' }: { onClick: () => void; disabled?: boolean; label?: string }) {
     return (
-        <BaseModal
-            isOpen={isOpen}
-            onClose={onClose}
-            title={product ? 'Editar producto' : 'Nuevo producto'}
-            width="max-w-lg"
+        <button
+            onClick={onClick}
+            disabled={disabled}
+            className="mt-4 w-full h-11 rounded-xl bg-orange-500 text-white text-[13px] font-semibold hover:bg-orange-600 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center gap-2"
         >
-            <div className="space-y-4">
-                {/* Draft recovery banner */}
-                {hasDraft && !product && (
-                    <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                        <div>
-                            <p className="text-[13px] font-semibold text-amber-400">Producto pendiente</p>
-                            <p className="text-[11px] text-[#7A8FAA]">Continúa donde lo dejaste o descarta el borrador</p>
-                        </div>
-                        <button
-                            onClick={handleDiscardDraft}
-                            className="text-[11px] font-semibold text-red-400 hover:text-red-300 transition-colors cursor-pointer ml-3 shrink-0"
-                        >
-                            Descartar
-                        </button>
-                    </div>
-                )}
-
-                {/* Name + Barcode */}
-                <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-2">
-                        <FieldLabel>Nombre *</FieldLabel>
-                        <TextInput value={name} onChange={setName} placeholder="Nombre del producto" />
-                    </div>
-                    <div>
-                        <FieldLabel>Código de barras</FieldLabel>
-                        <TextInput value={barcode} onChange={setBarcode} placeholder="Opcional" mode="alpha" />
-                    </div>
-                    <div>
-                        <FieldLabel>Unidad</FieldLabel>
-                        <div className="flex gap-1">
-                            {UNITS.map(u => (
-                                <button
-                                    key={u}
-                                    onClick={() => setUnit(u)}
-                                    className={cn(
-                                        'flex-1 h-10 rounded-xl text-[12px] font-medium border transition-all cursor-pointer',
-                                        unit === u
-                                            ? 'bg-orange-500/15 border-orange-500/30 text-orange-400'
-                                            : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:bg-[#1C2438]'
-                                    )}
-                                >
-                                    {UNIT_LABELS[u]}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Category */}
-                <div>
-                    <FieldLabel>Categoría *</FieldLabel>
-                    <div className="flex flex-wrap gap-1.5">
-                        {categories.filter(c => c.isActive).map(cat => (
-                            <button
-                                key={cat.id}
-                                onClick={() => setCategoryId(cat.id)}
-                                className={cn(
-                                    'px-3 h-8 rounded-lg text-[12px] font-medium border transition-all cursor-pointer',
-                                    categoryId === cat.id
-                                        ? 'bg-orange-500/15 border-orange-500/30 text-orange-400'
-                                        : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:bg-[#1C2438]'
-                                )}
-                            >
-                                {cat.name}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Price + Qty + Min stock */}
-                <div className="grid grid-cols-3 gap-3">
-                    <div>
-                        <FieldLabel>Precio *</FieldLabel>
-                        <TextInput value={price} onChange={setPrice} placeholder="0" mode="numeric" />
-                    </div>
-                    <div className={cn(isInfinite && 'opacity-40 pointer-events-none')}>
-                        <FieldLabel>{product ? 'Cantidad' : 'Stock inicial'}</FieldLabel>
-                        <TextInput value={isInfinite ? '∞' : stockQty} onChange={setStockQty} placeholder="0" mode="numeric" />
-                    </div>
-                    <div>
-                        <FieldLabel>Stock mínimo</FieldLabel>
-                        <TextInput value={minStock} onChange={setMinStock} placeholder="1" mode="numeric" />
-                    </div>
-                </div>
-
-                {/* Toggles */}
-                <div className="flex gap-3">
-                    <ToggleRow
-                        label="Inventario infinito"
-                        description="Sin control de stock"
-                        value={isInfinite}
-                        onChange={setIsInfinite}
-                    />
-                    <ToggleRow
-                        label="Activo"
-                        description="Visible en venta"
-                        value={isActive}
-                        onChange={setIsActive}
-                    />
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2 pt-2">
-                    <Button variant="secondary" size="md" onClick={onClose} className="flex-1">
-                        Cancelar
-                    </Button>
-                    <Button
-                        variant="primary"
-                        size="md"
-                        onClick={handleConfirm}
-                        disabled={!isValid}
-                        loading={isPending}
-                        className="flex-1"
-                    >
-                        {product ? 'Guardar cambios' : 'Crear producto'}
-                    </Button>
-                </div>
-            </div>
-        </BaseModal>
+            {label}
+            <ChevronRight size={15} />
+        </button>
     )
 }
 
-function ToggleRow({ label, description, value, onChange }: {
-    label: string
-    description: string
-    value: boolean
-    onChange: (v: boolean) => void
-}) {
+function Toggle({ label, description, value, onChange }: { label: string; description: string; value: boolean; onChange: (v: boolean) => void }) {
     return (
         <button
             onClick={() => onChange(!value)}
-            className={cn(
-                'flex-1 flex items-center justify-between px-3 py-2.5 rounded-xl border transition-all cursor-pointer text-left',
-                value
-                    ? 'bg-orange-500/8 border-orange-500/20'
-                    : 'bg-[#101520] border-[#1E2A40]'
-            )}
+            className={cn('w-full flex items-center justify-between px-3 py-2.5 rounded-xl border transition-all cursor-pointer text-left', value ? 'bg-orange-500/8 border-orange-500/20' : 'bg-[#101520] border-[#1E2A40]')}
         >
             <div>
                 <p className={cn('text-[12px] font-semibold', value ? 'text-orange-400' : 'text-[#E4ECF7]')}>{label}</p>
                 <p className="text-[11px] text-[#3D506A]">{description}</p>
             </div>
-            <div className={cn(
-                'relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0',
-                value ? 'bg-orange-500' : 'bg-[#1C2438]'
-            )}>
-                <span className={cn(
-                    'inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform',
-                    value ? 'translate-x-4.5' : 'translate-x-0.5'
-                )} />
+            <div className={cn('relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0', value ? 'bg-orange-500' : 'bg-[#1C2438]')}>
+                <span className={cn('inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform', value ? 'translate-x-4.5' : 'translate-x-0.5')} />
             </div>
         </button>
+    )
+}
+
+// ── Step: Draft prompt ────────────────────────────────────────────────────────
+
+function DraftPromptStep({ data, isEdit, onContinue, onDiscard, onClose }: {
+    data: WizardData; isEdit: boolean; onContinue: () => void; onDiscard: () => void; onClose: () => void
+}) {
+    return (
+        <div className="pt-2">
+            <div className="flex items-center justify-between mb-5">
+                <h2 className="text-[16px] font-semibold text-[#E4ECF7]">Borrador pendiente</h2>
+                <button onClick={onClose} className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-[#E4ECF7] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer">
+                    <X size={16} />
+                </button>
+            </div>
+            <div className="mb-5 p-4 rounded-xl bg-amber-500/8 border border-amber-500/20">
+                <p className="text-[12px] text-amber-400 font-semibold mb-1">{isEdit ? 'Edición sin guardar' : 'Producto sin terminar'}</p>
+                <p className="text-[14px] text-[#E4ECF7] font-semibold truncate">{data.name || '(sin nombre)'}</p>
+                {data.price ? <p className="text-[12px] text-[#7A8FAA] mt-0.5">{formatCurrency(parseFloat(data.price) || 0)}</p> : null}
+            </div>
+            <div className="space-y-2">
+                <button
+                    onClick={onContinue}
+                    className="w-full h-11 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/15 font-semibold text-[13px] transition-all cursor-pointer"
+                >
+                    Continuar borrador
+                </button>
+                <button
+                    onClick={onDiscard}
+                    className="w-full h-11 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#7A8FAA] hover:text-red-400 hover:border-red-500/20 font-semibold text-[13px] transition-all cursor-pointer"
+                >
+                    Descartar y empezar de nuevo
+                </button>
+            </div>
+        </div>
+    )
+}
+
+// ── Step: Name ────────────────────────────────────────────────────────────────
+
+function NameStep({ value, onChange, onNext }: { value: string; onChange: (v: string) => void; onNext: () => void }) {
+    return (
+        <div>
+            <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center shrink-0">
+                    <Tag size={15} className="text-orange-400" />
+                </div>
+                <StepQuestion>¿Cómo se llama el producto?</StepQuestion>
+            </div>
+            <StepInput value={value} onChange={onChange} placeholder="Ej: Casado con pollo, Refresco..." />
+            <NextBtn onClick={onNext} disabled={!value.trim()} />
+        </div>
+    )
+}
+
+// ── Step: Barcode ─────────────────────────────────────────────────────────────
+
+function BarcodeStep({ value, onChange, onNext, onSkip }: { value: string; onChange: (v: string) => void; onNext: () => void; onSkip: () => void }) {
+    return (
+        <div>
+            <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                    <ScanLine size={15} className="text-blue-400" />
+                </div>
+                <StepQuestion>¿Tiene código de barras?</StepQuestion>
+            </div>
+            <StepInput value={value} onChange={onChange} placeholder="Escanea o escribe el código" mode="alpha" />
+            <NextBtn onClick={onNext} disabled={!value.trim()} label="Continuar con código" />
+            <button onClick={onSkip} className="mt-2 w-full h-9 rounded-xl text-[12px] text-[#3D506A] hover:text-[#7A8FAA] transition-colors cursor-pointer">
+                Saltar — no tiene código
+            </button>
+        </div>
+    )
+}
+
+// ── Step: Unit ────────────────────────────────────────────────────────────────
+
+function UnitStep({ value, onSelect }: { value: ProductUnit; onSelect: (u: ProductUnit) => void }) {
+    return (
+        <div>
+            <StepQuestion>¿En qué unidad se vende?</StepQuestion>
+            <div className="grid grid-cols-2 gap-2">
+                {UNITS.map(u => {
+                    const Icon = u.icon
+                    const active = value === u.value
+                    return (
+                        <button
+                            key={u.value}
+                            onClick={() => onSelect(u.value)}
+                            className={cn(
+                                'flex items-center gap-3 p-3.5 rounded-xl border transition-all cursor-pointer text-left',
+                                active ? 'bg-orange-500/10 border-orange-500/30' : 'bg-[#101520] border-[#1E2A40] hover:border-[#283A56]'
+                            )}
+                        >
+                            <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center shrink-0', active ? 'bg-orange-500/15' : 'bg-[#1C2438]')}>
+                                <Icon size={16} className={active ? 'text-orange-400' : 'text-[#3D506A]'} />
+                            </div>
+                            <div>
+                                <p className={cn('text-[13px] font-semibold', active ? 'text-orange-400' : 'text-[#E4ECF7]')}>{u.label}</p>
+                                <p className="text-[10px] text-[#3D506A] leading-tight">{u.sub}</p>
+                            </div>
+                        </button>
+                    )
+                })}
+            </div>
+        </div>
+    )
+}
+
+// ── Step: Category ────────────────────────────────────────────────────────────
+
+function CategoryStep({ value, categories, onChange, onNext }: { value: string; categories: Category[]; onChange: (id: string) => void; onNext: () => void }) {
+    return (
+        <div>
+            <StepQuestion>¿A qué categoría pertenece?</StepQuestion>
+            <div className="flex flex-wrap gap-1.5 max-h-[200px] overflow-y-auto -mx-1 px-1 pb-1">
+                {categories.map(cat => (
+                    <button
+                        key={cat.id}
+                        onClick={() => onChange(cat.id)}
+                        className={cn(
+                            'px-3 h-9 rounded-xl text-[12px] font-medium border transition-all cursor-pointer',
+                            value === cat.id ? 'bg-orange-500/15 border-orange-500/30 text-orange-400' : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:bg-[#1C2438]'
+                        )}
+                    >
+                        {cat.name}
+                    </button>
+                ))}
+            </div>
+            <NextBtn onClick={onNext} disabled={!value} />
+        </div>
+    )
+}
+
+// ── Step: Numbers ─────────────────────────────────────────────────────────────
+
+function NumbersStep({ data, isEdit, onChange, onNext }: { data: WizardData; isEdit: boolean; onChange: (p: Partial<WizardData>) => void; onNext: () => void }) {
+    const valid = parseFloat(data.price) > 0
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-1">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                    <DollarSign size={15} className="text-emerald-400" />
+                </div>
+                <StepQuestion>Precio y existencias</StepQuestion>
+            </div>
+            <div>
+                <p className="text-[11px] text-[#3D506A] uppercase tracking-wider font-semibold mb-1.5">Precio de venta *</p>
+                <StepInput value={data.price} onChange={v => onChange({ price: v })} placeholder="0" mode="numeric" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+                <div className={cn(data.isInfinite && 'opacity-40 pointer-events-none')}>
+                    <p className="text-[11px] text-[#3D506A] uppercase tracking-wider font-semibold mb-1.5">{isEdit ? 'Cantidad' : 'Stock inicial'}</p>
+                    <StepInput value={data.isInfinite ? '∞' : data.stockQty} onChange={v => onChange({ stockQty: v })} placeholder="0" mode="numeric" />
+                </div>
+                <div>
+                    <p className="text-[11px] text-[#3D506A] uppercase tracking-wider font-semibold mb-1.5">Stock mínimo</p>
+                    <StepInput value={data.minStock} onChange={v => onChange({ minStock: v })} placeholder="1" mode="numeric" />
+                </div>
+            </div>
+            <div className="space-y-2">
+                <Toggle label="Inventario infinito" description="Sin control de stock" value={data.isInfinite} onChange={v => onChange({ isInfinite: v })} />
+                <Toggle label="Activo" description="Visible en punto de venta" value={data.isActive} onChange={v => onChange({ isActive: v })} />
+            </div>
+            <NextBtn onClick={onNext} disabled={!valid} label="Ver resumen" />
+        </div>
+    )
+}
+
+// ── Step: Recap ───────────────────────────────────────────────────────────────
+
+function RecapStep({ data, catName, isEdit, isPending, onConfirm, onEdit }: {
+    data: WizardData; catName: string; isEdit: boolean
+    isPending?: boolean; onConfirm: () => void; onEdit: (s: WizardStep) => void
+}) {
+    const rows: { label: string; value: string; step: WizardStep }[] = [
+        { label: 'Nombre',     value: data.name || '—',                                      step: 'name'     },
+        { label: 'Código',     value: data.barcode || 'Sin código de barras',                  step: 'barcode'  },
+        { label: 'Unidad',     value: UNITS.find(u => u.value === data.unit)?.label ?? '—',   step: 'unit'     },
+        { label: 'Categoría',  value: catName,                                                 step: 'category' },
+        { label: 'Precio',     value: formatCurrency(parseFloat(data.price) || 0),             step: 'numbers'  },
+        { label: 'Stock',      value: data.isInfinite ? 'Infinito' : `${data.stockQty} uds`,  step: 'numbers'  },
+        { label: 'Mín. stock', value: data.isInfinite ? '—' : data.minStock,                  step: 'numbers'  },
+        { label: 'Activo',     value: data.isActive ? 'Sí' : 'No',                            step: 'numbers'  },
+    ]
+
+    return (
+        <div>
+            <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                    <Check size={15} className="text-emerald-400" />
+                </div>
+                <StepQuestion>Confirmar producto</StepQuestion>
+            </div>
+            <div className="rounded-xl bg-[#101520] border border-[#1E2A40] divide-y divide-[#192030] mb-4">
+                {rows.map(row => (
+                    <div key={row.label} className="flex items-center justify-between px-4 py-2.5 group">
+                        <div className="flex-1 min-w-0">
+                            <p className="text-[10px] text-[#3D506A] uppercase tracking-wider">{row.label}</p>
+                            <p className="text-[13px] text-[#E4ECF7] font-medium truncate mt-0.5">{row.value}</p>
+                        </div>
+                        <button
+                            onClick={() => onEdit(row.step)}
+                            className="ml-3 px-2 py-1 rounded-lg text-[11px] text-[#3D506A] hover:text-orange-400 hover:bg-orange-500/10 transition-all cursor-pointer shrink-0"
+                        >
+                            Editar
+                        </button>
+                    </div>
+                ))}
+            </div>
+            <button
+                onClick={onConfirm}
+                disabled={isPending}
+                className="w-full h-12 rounded-xl bg-orange-500 text-white text-[14px] font-bold hover:bg-orange-600 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+                {isPending ? 'Guardando...' : (isEdit ? 'Guardar cambios' : 'Crear producto')}
+                {!isPending && <Check size={16} />}
+            </button>
+        </div>
     )
 }

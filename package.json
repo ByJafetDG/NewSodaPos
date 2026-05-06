@@ -1,7 +1,7 @@
 {
   "name": "pos-modern-v2",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "POS System for Soda El Pelón",
   "author": "Antigravity",
   "type": "module",
@@ -57,7 +57,12 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
-    ]
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "ByJafetDG",
+      "repo": "NewSodaPos"
+    }
   },
   "dependencies": {
     "@prisma/client": "^7.4.0",

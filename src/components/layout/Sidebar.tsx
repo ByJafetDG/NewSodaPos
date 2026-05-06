@@ -177,7 +177,7 @@ export function Sidebar() {
                     </div>
                     <div>
                         <p className="text-[13px] font-semibold text-[#E4ECF7] leading-tight">Soda POS</p>
-                        <p className="text-[11px] text-[#3D506A] leading-tight">v2.0</p>
+                        <p className="text-[11px] text-[#3D506A] leading-tight">v{__APP_VERSION__}</p>
                     </div>
                 </div>
             </div>

@@ -31,6 +31,7 @@ export interface ElectronAPI {
     // Updates
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void
     installUpdate: () => Promise<void>
+    checkForUpdate: () => Promise<void>
     platform: string
     isElectron: true
 }
@@ -39,4 +40,5 @@ declare global {
     interface Window {
         electronAPI?: ElectronAPI
     }
+    const __APP_VERSION__: string
 }
