@@ -307,6 +307,12 @@ export function initDb() {
   } catch {
     // Already exists
   }
+
+  try {
+    db.exec(`ALTER TABLE Product ADD COLUMN isDeleted INTEGER DEFAULT 0`);
+  } catch {
+    // Already exists
+  }
 }
 
 /**

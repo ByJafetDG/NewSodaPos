@@ -78,6 +78,7 @@ export async function getProductsStock(): Promise<any[]> {
             SELECT p.*, c.name as cat_name
             FROM Product p
             LEFT JOIN Category c ON p.categoryId = c.id
+            WHERE (p.isDeleted IS NULL OR p.isDeleted != 1)
             ORDER BY p.stockQty ASC
         `;
         const data = await window.electronAPI.dbQuery(sql);
@@ -90,6 +91,7 @@ export async function getProductsStock(): Promise<any[]> {
     const { data, error } = await supabase
         .from('Product')
         .select('*, category:Category(name)')
+        .or('isDeleted.is.null,isDeleted.eq.false')
         .order('stockQty')
 
     if (error) throw error
@@ -200,18 +202,46 @@ export async function updateProductStock(productId: string, delta: number): Prom
 }
 
 /**
- * Delete a product
+ * Delete a product. Returns { soft: true } if product has sales and was archived instead.
  */
-export async function deleteProduct(id: string): Promise<void> {
+export async function deleteProduct(id: string): Promise<{ soft: boolean }> {
+    const now = new Date().toISOString()
+
     if (window.electronAPI) {
-        await window.electronAPI.dbExecute('DELETE FROM Product WHERE id = ?', [id]);
-        return;
+        try {
+            await window.electronAPI.dbExecute(`DELETE FROM Product WHERE id = ?`, [id])
+            return { soft: false }
+        } catch (err: any) {
+            const msg: string = err?.message ?? ''
+            if (msg.includes('FOREIGN KEY') || msg.includes('constraint')) {
+                await window.electronAPI.dbExecute(
+                    `UPDATE Product SET isDeleted = 1, isActive = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+                    [now, id]
+                )
+                return { soft: true }
+            }
+            throw err
+        }
+    }
+
+    const { count } = await supabase
+        .from('SaleItem')
+        .select('id', { count: 'exact', head: true })
+        .eq('productId', id)
+
+    if ((count ?? 0) > 0) {
+        const { error } = await supabase
+            .from('Product')
+            .update({ isDeleted: true, isActive: false, updatedAt: now })
+            .eq('id', id)
+        if (error) throw error
+        return { soft: true }
     }
 
     const { error } = await supabase
         .from('Product')
         .delete()
         .eq('id', id)
-
     if (error) throw error
+    return { soft: false }
 }

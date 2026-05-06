@@ -25,7 +25,7 @@ export interface Product {
     id: string; name: string; barcode: string | null; categoryId: string
     category?: Category; price: number; cost: number; unit: ProductUnit
     stockQty: number; minStock: number; isActive: boolean; isInfinite: boolean
-    imageUrl: string | null; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
+    isDeleted?: boolean; imageUrl: string | null; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
 }
 
 export type ClientType = 'TRABAJADOR' | 'ASOCIACION' | 'GENERAL'

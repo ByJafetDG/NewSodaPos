@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Package, ArrowDownToLine } from 'lucide-react'
+import { toast } from '@/components/ui/Toast'
 import { ProductsTable } from '@/components/organisms/inventory/ProductsTable'
 import { StockEntryPanel } from '@/components/organisms/inventory/StockEntryPanel'
 import { MovementsPanel } from '@/components/organisms/inventory/MovementsPanel'
@@ -69,8 +70,12 @@ export function InventoryPage() {
 
     async function handleDeleteProductConfirm() {
         if (!deletingProduct) return
-        await deleteProduct.mutateAsync(deletingProduct.id)
+        const name = deletingProduct.name
+        const result = await deleteProduct.mutateAsync(deletingProduct.id)
         setDeletingProduct(null)
+        if (result?.soft) {
+            toast.info(`"${name}" fue archivado porque tiene ventas registradas`)
+        }
     }
 
     async function handleDeleteCategoryConfirm() {
