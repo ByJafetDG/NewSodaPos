@@ -61,7 +61,8 @@
     "publish": {
       "provider": "github",
       "owner": "ByJafetDG",
-      "repo": "NewSodaPos"
+      "repo": "NewSodaPos",
+      "releaseType": "release"
     }
   },
   "dependencies": {
