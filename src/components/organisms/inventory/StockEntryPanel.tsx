@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { ScanBarcode, ScanLine, Plus, Minus, X, ClipboardList, Package } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
@@ -26,20 +26,18 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
     const [errorMsg, setErrorMsg] = useState('')
     const [scanMode, setScanMode] = useState(false)
     const [scanFlash, setScanFlash] = useState(false)
-    const barcodeRef = useRef<HTMLInputElement>(null)
     const suppressKb = useSuppressKeyboard()
 
     const notesKb = useKeyboardInput(notes, setNotes)
-
-    useEffect(() => {
-        suppressKb.current = true
-        setTimeout(() => barcodeRef.current?.focus(), 50)
-    }, [])
-
     const barcodeKb = useKeyboardInput(barcode, setBarcode, {
         suppressRef: suppressKb,
         onEnter: handleBarcodeSubmit,
     })
+
+    useEffect(() => {
+        suppressKb.current = true
+        setTimeout(() => barcodeKb.ref.current?.focus(), 50)
+    }, [])
 
     // Auto-add product when barcode matches exactly in scan mode
     useEffect(() => {
@@ -51,7 +49,7 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
             setBarcode('')
             triggerScanFlash()
             suppressKb.current = true
-            setTimeout(() => barcodeRef.current?.focus(), 50)
+            setTimeout(() => barcodeKb.ref.current?.focus(), 50)
         }
     }, [barcode, scanMode, products])
 
@@ -91,7 +89,7 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
         addProductEntry(product)
         if (scanMode) triggerScanFlash()
         suppressKb.current = true
-        setTimeout(() => barcodeRef.current?.focus(), 50)
+        setTimeout(() => barcodeKb.ref.current?.focus(), 50)
     }
 
     function toggleScanMode() {
@@ -99,7 +97,7 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
         setScanMode(next)
         if (next) {
             suppressKb.current = true
-            setTimeout(() => barcodeRef.current?.focus(), 50)
+            setTimeout(() => barcodeKb.ref.current?.focus(), 50)
         }
     }
 
@@ -119,7 +117,7 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
         setEntries([])
         setNotes('')
         suppressKb.current = true
-        setTimeout(() => barcodeRef.current?.focus(), 50)
+        setTimeout(() => barcodeKb.ref.current?.focus(), 50)
     }
 
     return (
@@ -149,7 +147,6 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
                                 scanMode ? "text-emerald-400" : "text-[#3D506A]"
                             )} />
                             <input
-                                ref={barcodeRef}
                                 type="text"
                                 {...barcodeKb}
                                 placeholder={scanMode ? "Esperando escaneo..." : "Código de barras o nombre..."}
@@ -169,7 +166,7 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
                                         addProductEntry(product)
                                         setBarcode('')
                                         suppressKb.current = true
-                                        setTimeout(() => barcodeRef.current?.focus(), 50)
+                                        setTimeout(() => barcodeKb.ref.current?.focus(), 50)
                                     }}
                                 />
                             )}

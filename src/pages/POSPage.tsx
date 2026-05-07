@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Search, UserCircle2, ChevronDown } from 'lucide-react'
 import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
@@ -51,7 +51,6 @@ export function POSPage() {
 
     // ── Search (scan mode) ───────────────────────────────────────────────────
     const [search, setSearch] = useState('')
-    const searchRef = useRef<HTMLInputElement>(null)
     const suppressKb = useSuppressKeyboard()
     const searchKb = useKeyboardInput(search, setSearch, {
         onEnter: () => handleSearchSubmit(),
@@ -62,7 +61,7 @@ export function POSPage() {
     useEffect(() => {
         if (viewMode === 'scan') {
             suppressKb.current = true
-            setTimeout(() => searchRef.current?.focus(), 50)
+            setTimeout(() => searchKb.ref.current?.focus(), 50)
         }
     }, [items, viewMode])
 
@@ -218,7 +217,7 @@ export function POSPage() {
             setShowCreditModal(false)
             setActiveOrderId(null)
             setActiveOrderName(null)
-            if (viewMode === 'scan') setTimeout(() => searchRef.current?.focus(), 50)
+            if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
 
             const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
 
@@ -325,7 +324,6 @@ export function POSPage() {
                 <form onSubmit={handleSearchSubmit} className="flex-1 relative">
                     <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none z-10" />
                     <input
-                        ref={searchRef}
                         type="text"
                         {...searchKb}
                         placeholder={viewMode === 'scan'
@@ -380,7 +378,7 @@ export function POSPage() {
                     // Focus search silently when switching to scan — barcode scanner ready
                     if (m === 'scan') {
                         suppressKb.current = true
-                        setTimeout(() => searchRef.current?.focus(), 50)
+                        setTimeout(() => searchKb.ref.current?.focus(), 50)
                     }
                 }}
                 categories={categories}

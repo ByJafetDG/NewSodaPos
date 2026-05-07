@@ -8,7 +8,7 @@ interface OpenOpts {
     value: string
     onChange: (v: string) => void
     onEnter?: () => void
-    inputRef?: RefObject<HTMLInputElement>
+    inputRef?: RefObject<HTMLInputElement | null>
 }
 
 interface KeyboardState {
@@ -18,7 +18,7 @@ interface KeyboardState {
     cursorPos: number
     _onChange: ((v: string) => void) | null
     _onEnter: (() => void) | null
-    _inputRef: RefObject<HTMLInputElement> | null
+    _inputRef: RefObject<HTMLInputElement | null> | null
 
     open: (opts: OpenOpts) => void
     close: () => void
@@ -88,10 +88,10 @@ export const useKeyboardStore = create<KeyboardState>((set, get) => ({
         _onChange?.(next)
 
         // Restore cursor in the real input after React re-renders
-        if (_inputRef?.current) {
-            const ref = _inputRef.current
+        const domInput = _inputRef?.current
+        if (domInput) {
             requestAnimationFrame(() => {
-                ref.setSelectionRange(nextCursor, nextCursor)
+                domInput.setSelectionRange(nextCursor, nextCursor)
             })
         }
     },
