@@ -1,12 +1,15 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
     BarChart3, Banknote, Smartphone, CreditCard,
     TrendingUp, ShoppingBag, PackageX, AlertTriangle, Calendar,
-    Receipt,
+    Receipt, Search, Clock, X,
 } from 'lucide-react'
 import { useProductsStock } from '@/hooks/useInventory'
 import { useReportData } from '@/hooks/useReports'
+import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { cn, formatCurrency } from '@/lib/utils'
+import { ReportSaleModal } from '@/components/modals/ReportSaleModal'
+import { TimeWheelPicker, HOURS, MINUTES } from '@/components/ui/TimeWheelPicker'
 
 function getDateRange(filter: string, customFrom: string, customTo: string): [string, string] {
     if (filter === 'Personalizado' && customFrom && customTo) return [customFrom, customTo]
@@ -39,6 +42,30 @@ export function ReportsPage() {
     const [customFrom, setCustomFrom] = useState('')
     const [customTo, setCustomTo] = useState('')
     const [showCustom, setShowCustom] = useState(false)
+
+    // Sale detail
+    const [selectedSale, setSelectedSale] = useState<any | null>(null)
+
+    // Recent sales filters
+    const [orderSearch, setOrderSearch] = useState('')
+    const orderKb = useKeyboardInput(orderSearch, setOrderSearch, { mode: 'numeric' })
+
+    const [filterHour, setFilterHour] = useState(0)
+    const [filterMinuteIdx, setFilterMinuteIdx] = useState(0)
+    const [timeActive, setTimeActive] = useState(false)
+    const [showTimePicker, setShowTimePicker] = useState(false)
+    const timePickerRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        if (!showTimePicker) return
+        function handleOutside(e: MouseEvent) {
+            if (timePickerRef.current && !timePickerRef.current.contains(e.target as Node)) {
+                setShowTimePicker(false)
+            }
+        }
+        document.addEventListener('mousedown', handleOutside)
+        return () => document.removeEventListener('mousedown', handleOutside)
+    }, [showTimePicker])
 
     const [from, to] = getDateRange(dateFilter, customFrom, customTo)
     const { data: reportData } = useReportData(from, to)
@@ -81,7 +108,17 @@ export function ReportsPage() {
     const effectivePayment = PAYMENT
     const effectiveTop = TOP_PRODUCTS
     const effectiveHourly = HOURLY_REAL
-    const recentSales = sales.slice(0, 10)
+
+    const filteredSales = sales.filter((s: any) => {
+        if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false
+        if (timeActive) {
+            const d = new Date(s.date)
+            const saleMinutes = d.getHours() * 60 + d.getMinutes()
+            const filterMinutes = filterHour * 60 + parseInt(MINUTES[filterMinuteIdx])
+            if (saleMinutes < filterMinutes) return false
+        }
+        return true
+    })
 
     const maxPayment = Math.max(...Object.values(effectivePayment), 1)
     const maxHourly = Math.max(...effectiveHourly, 1)
@@ -92,6 +129,7 @@ export function ReportsPage() {
 
     return (
         <div className="flex flex-col h-full">
+            <ReportSaleModal sale={selectedSale} onClose={() => setSelectedSale(null)} />
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#192030] shrink-0">
                 <div className="flex items-center gap-3">
@@ -164,7 +202,7 @@ export function ReportsPage() {
                 </div>
 
                 {/* Payment breakdown + Top products */}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-4 items-start">
                     {/* Payment methods */}
                     <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
                         <p className="text-[12px] font-semibold text-[#7A8FAA] mb-4">Métodos de pago</p>
@@ -204,7 +242,7 @@ export function ReportsPage() {
                     {/* Top products */}
                     <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
                         <p className="text-[12px] font-semibold text-[#7A8FAA] mb-4">Top 10 productos</p>
-                        <div className="space-y-2.5">
+                        <div className="space-y-2.5 overflow-y-auto max-h-[163px]">
                             {effectiveTop.map((p, i) => {
                                 const barW = Math.round((p.qty / maxTopQty) * 100)
                                 return (
@@ -233,35 +271,104 @@ export function ReportsPage() {
                 {/* Recent sales + Stock alerts */}
                 <div className="grid grid-cols-2 gap-4">
                     {/* Recent sales */}
-                    <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
-                        <p className="text-[12px] font-semibold text-[#7A8FAA] mb-3">Ventas recientes</p>
-                        {recentSales.length === 0 ? (
+                    <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4 flex flex-col">
+                        <div className="flex items-center justify-between mb-3">
+                            <p className="text-[12px] font-semibold text-[#7A8FAA]">Ventas recientes</p>
+                            <span className="text-[11px] text-[#3D506A]">{filteredSales.length} ventas</span>
+                        </div>
+
+                        {/* Filters */}
+                        <div className="flex items-center gap-2 mb-3">
+                            <div className="flex-1 relative">
+                                <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none" />
+                                <input
+                                    {...orderKb}
+                                    placeholder="# orden"
+                                    className="w-full h-8 pl-7 pr-3 rounded-lg bg-[#101520] border border-[#1A2236] text-[13px] text-[#E4ECF7] placeholder-[#3D506A] outline-none focus:border-cyan-500/40 transition-colors"
+                                />
+                            </div>
+
+                            <div className="relative flex items-center gap-1" ref={timePickerRef}>
+                                <button
+                                    onClick={() => setShowTimePicker(v => !v)}
+                                    className={cn(
+                                        'flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-[12px] font-medium transition-all cursor-pointer',
+                                        timeActive
+                                            ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-400'
+                                            : 'bg-[#101520] border-[#1A2236] text-[#3D506A] hover:text-[#7A8FAA]'
+                                    )}
+                                >
+                                    <Clock size={12} />
+                                    {timeActive ? `${HOURS[filterHour]}:${MINUTES[filterMinuteIdx]}` : 'Hora'}
+                                </button>
+                                {timeActive && (
+                                    <button
+                                        onClick={() => { setTimeActive(false); setShowTimePicker(false) }}
+                                        className="w-5 h-5 rounded-full bg-[#1A2236] border border-[#1E2A40] text-[#3D506A] hover:text-[#E4ECF7] flex items-center justify-center transition-all cursor-pointer"
+                                    >
+                                        <X size={9} />
+                                    </button>
+                                )}
+
+                                {showTimePicker && (
+                                    <div className="absolute right-0 top-10 z-50 rounded-2xl bg-[#0F1623] border border-[#192030] shadow-2xl shadow-black/60 p-4 w-[160px]">
+                                        <p className="text-[11px] text-[#3D506A] text-center mb-2">Desde las</p>
+                                        <TimeWheelPicker
+                                            hour={filterHour}
+                                            minuteIndex={filterMinuteIdx}
+                                            onHourChange={h => { setFilterHour(h); setTimeActive(true) }}
+                                            onMinuteChange={mi => { setFilterMinuteIdx(mi); setTimeActive(true) }}
+                                        />
+                                        <div className="flex gap-2 mt-3">
+                                            <button
+                                                onClick={() => { setTimeActive(false); setShowTimePicker(false) }}
+                                                className="flex-1 h-7 rounded-lg bg-[#1A2236] border border-[#1E2A40] text-[11px] text-[#7A8FAA] hover:text-[#E4ECF7] transition-all cursor-pointer"
+                                            >
+                                                Limpiar
+                                            </button>
+                                            <button
+                                                onClick={() => { setTimeActive(true); setShowTimePicker(false) }}
+                                                className="flex-1 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-[11px] text-cyan-400 hover:bg-cyan-500/25 transition-all cursor-pointer"
+                                            >
+                                                Aplicar
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {filteredSales.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-6 gap-2">
                                 <Receipt size={24} className="text-[#3D506A]" />
                                 <p className="text-[12px] text-[#3D506A]">Sin ventas en este período</p>
                             </div>
                         ) : (
-                        <div className="space-y-1">
-                            {recentSales.map((s: any) => {
-                                const cfg = PM_CONFIG[s.paymentMethod] ?? PM_CONFIG['EFECTIVO']
-                                const time = new Date(s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
-                                return (
-                                    <div key={s.id} className="flex items-center justify-between py-1.5 border-b border-[#192030] last:border-0">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[11px] text-[#3D506A]">#{s.saleNumber}</span>
-                                            <span className={cn('flex items-center gap-1 text-[11px] font-medium', cfg.color)}>
-                                                {cfg.icon}
-                                                {cfg.label}
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <span className="text-[11px] text-[#3D506A]">{time}</span>
-                                            <span className="text-[13px] font-semibold text-[#E4ECF7]">{formatCurrency(s.total)}</span>
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
+                            <div className="space-y-0.5 overflow-y-auto max-h-[320px]">
+                                {filteredSales.map((s: any) => {
+                                    const cfg = PM_CONFIG[s.paymentMethod] ?? PM_CONFIG['EFECTIVO']
+                                    const time = new Date(s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+                                    return (
+                                        <button
+                                            key={s.id}
+                                            onClick={() => setSelectedSale(s)}
+                                            className="w-full flex items-center justify-between py-2 px-2 rounded-lg hover:bg-[#131C2E] transition-colors cursor-pointer border border-transparent hover:border-[#192030] group"
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[11px] text-[#3D506A] group-hover:text-[#4A6080] transition-colors">#{s.saleNumber}</span>
+                                                <span className={cn('flex items-center gap-1 text-[11px] font-medium', cfg.color)}>
+                                                    {cfg.icon}
+                                                    {cfg.label}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-[11px] text-[#3D506A]">{time}</span>
+                                                <span className="text-[13px] font-semibold text-[#E4ECF7]">{formatCurrency(s.total)}</span>
+                                            </div>
+                                        </button>
+                                    )
+                                })}
+                            </div>
                         )}
                     </div>
 

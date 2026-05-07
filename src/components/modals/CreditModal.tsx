@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Search, UserCircle2, Check } from 'lucide-react'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
+import { useKeyboardStore } from '@/store/keyboardStore'
 import { BaseModal } from './BaseModal'
 import { Button } from '@/components/atoms/Button'
 import { TotalsPanel } from '@/components/molecules/TotalsPanel'
@@ -59,7 +60,7 @@ export function CreditModal({ isOpen, onClose, total, subtotal, discount, itemCo
                         return (
                             <button
                                 key={client.id}
-                                onClick={() => onSelectClient(client.id)}
+                                onClick={() => { useKeyboardStore.getState().close(); onSelectClient(client.id) }}
                                 className={cn(
                                     'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer text-left',
                                     isSelected
@@ -70,7 +71,7 @@ export function CreditModal({ isOpen, onClose, total, subtotal, discount, itemCo
                                 <UserCircle2 size={16} className={isSelected ? 'text-violet-400' : 'text-[#3D506A]'} />
                                 <div className="flex-1 min-w-0">
                                     <p className={cn('text-[13px] font-medium truncate', isSelected ? 'text-[#E4ECF7]' : 'text-[#7A8FAA]')}>{client.name}</p>
-                                    <p className="text-[11px] text-[#3D506A]">{TYPE_LABEL[client.type]}</p>
+                                    <p className="text-[11px] text-[#3D506A]">{TYPE_LABEL[client.type]}{client.notes ? ` · ${client.notes}` : ''}</p>
                                 </div>
                                 {isSelected && <Check size={14} className="text-violet-400 shrink-0" />}
                             </button>

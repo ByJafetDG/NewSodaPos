@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase'
 export async function getReportData(from: string, to: string) {
     if (window.electronAPI) {
         const sales = await window.electronAPI.dbQuery(`
-            SELECT s.*,
+            SELECT s.*, c.name as clientName,
                    (SELECT json_group_array(json_object(
                        'productId', si.productId,
                        'quantity', si.quantity,
@@ -15,6 +15,7 @@ export async function getReportData(from: string, to: string) {
                     JOIN Product p ON si.productId = p.id
                     WHERE si.saleId = s.id) as items_json
             FROM Sale s
+            LEFT JOIN Client c ON s.clientId = c.id
             WHERE s.date >= ? AND s.date <= ? AND s.status = 'COMPLETADA'
             ORDER BY s.date DESC
         `, [from, to])
@@ -59,7 +60,7 @@ export async function getReportData(from: string, to: string) {
     const [salesRes, expensesRes, productsRes, creditSalesRes, paymentsRes] = await Promise.all([
         supabase
             .from('Sale')
-            .select('*, items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
+            .select('*, client:Client(name), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
             .gte('date', from).lte('date', to)
             .eq('status', 'COMPLETADA')
             .order('date', { ascending: false }),

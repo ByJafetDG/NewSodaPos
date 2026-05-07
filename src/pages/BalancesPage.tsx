@@ -283,7 +283,10 @@ function ClientRow({ client, pendingTotal, pendingCount, onSelect, onEdit, onDel
             <td className="px-6 py-3">
                 <div className="flex items-center gap-2.5">
                     <UserCircle2 size={18} className="text-[#3D506A] shrink-0" />
-                    <p className="text-[13px] font-medium text-[#E4ECF7]">{client.name}</p>
+                    <div>
+                        <p className="text-[13px] font-medium text-[#E4ECF7]">{client.name}</p>
+                        {client.notes && <p className="text-[11px] text-[#3D506A] truncate max-w-[180px]">{client.notes}</p>}
+                    </div>
                 </div>
             </td>
             <td className="px-4 py-3">
@@ -383,6 +386,7 @@ function ClientDetailView({ client, sales, onBack, onSettle, onSettleAll }: {
                         <div>
                             <h1 className="text-[16px] font-semibold text-[#E4ECF7]">{client.name}</h1>
                             <p className="text-[12px] text-[#3D506A]">{TYPE_LABELS[client.type]}</p>
+                            {client.notes && <p className="text-[12px] text-[#7A8FAA] mt-0.5 italic">"{client.notes}"</p>}
                         </div>
                     </div>
                 </div>

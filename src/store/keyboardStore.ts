@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { RefObject } from 'react'
 
 export type KeyboardMode = 'alpha' | 'numeric'
 
@@ -7,59 +8,91 @@ interface OpenOpts {
     value: string
     onChange: (v: string) => void
     onEnter?: () => void
+    inputRef?: RefObject<HTMLInputElement>
 }
 
 interface KeyboardState {
     isOpen: boolean
     mode: KeyboardMode
     value: string
+    cursorPos: number
     _onChange: ((v: string) => void) | null
     _onEnter: (() => void) | null
+    _inputRef: RefObject<HTMLInputElement> | null
 
     open: (opts: OpenOpts) => void
     close: () => void
     pressKey: (key: string) => void
-    syncValue: (v: string) => void  // called when external input changes (barcode scanner)
+    syncValue: (v: string) => void
+    setCursor: (pos: number) => void
 }
 
 export const useKeyboardStore = create<KeyboardState>((set, get) => ({
     isOpen: false,
     mode: 'alpha',
     value: '',
+    cursorPos: 0,
     _onChange: null,
     _onEnter: null,
+    _inputRef: null,
 
-    open: ({ mode, value, onChange, onEnter }) => {
-        set({ isOpen: true, mode, value, _onChange: onChange, _onEnter: onEnter ?? null })
+    open: ({ mode, value, onChange, onEnter, inputRef }) => {
+        set({
+            isOpen: true,
+            mode,
+            value,
+            cursorPos: value.length,
+            _onChange: onChange,
+            _onEnter: onEnter ?? null,
+            _inputRef: inputRef ?? null,
+        })
     },
 
-    close: () => set({ isOpen: false, _onChange: null, _onEnter: null }),
+    close: () => set({ isOpen: false, _onChange: null, _onEnter: null, _inputRef: null }),
 
     syncValue: (v) => {
-        // Called when barcode scanner types into the real input directly
-        set({ value: v })
+        set({ value: v, cursorPos: v.length })
         get()._onChange?.(v)
     },
 
+    setCursor: (pos) => set({ cursorPos: pos }),
+
     pressKey: (key) => {
-        const { value, _onChange, _onEnter } = get()
+        const { value, cursorPos, _onChange, _onEnter, _inputRef } = get()
+        // Read real cursor from input if available; fall back to store's cursorPos
+        const cursor = _inputRef?.current?.selectionStart ?? cursorPos
         let next = value
+        let nextCursor = cursor
 
         if (key === 'BACKSPACE') {
-            next = value.slice(0, -1)
+            if (cursor > 0) {
+                next = value.slice(0, cursor - 1) + value.slice(cursor)
+                nextCursor = cursor - 1
+            }
         } else if (key === 'CLEAR') {
             next = ''
+            nextCursor = 0
         } else if (key === 'ENTER') {
             _onEnter?.()
-            set({ isOpen: false, _onChange: null, _onEnter: null })
+            set({ isOpen: false, _onChange: null, _onEnter: null, _inputRef: null })
             return
         } else if (key === 'SPACE') {
-            next = value + ' '
+            next = value.slice(0, cursor) + ' ' + value.slice(cursor)
+            nextCursor = cursor + 1
         } else {
-            next = value + key
+            next = value.slice(0, cursor) + key + value.slice(cursor)
+            nextCursor = cursor + 1
         }
 
-        set({ value: next })
+        set({ value: next, cursorPos: nextCursor })
         _onChange?.(next)
+
+        // Restore cursor in the real input after React re-renders
+        if (_inputRef?.current) {
+            const ref = _inputRef.current
+            requestAnimationFrame(() => {
+                ref.setSelectionRange(nextCursor, nextCursor)
+            })
+        }
     },
 }))

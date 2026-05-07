@@ -44,7 +44,7 @@ function Key({ label, onPress, className, accent }: {
 }
 
 export function VirtualKeyboard() {
-    const { isOpen, mode, value, pressKey, close } = useKeyboardStore()
+    const { isOpen, mode, value, cursorPos, pressKey, close, setCursor } = useKeyboardStore()
     const [caps, setCaps] = useState(false)
 
     const press = (key: string) => {
@@ -86,11 +86,35 @@ export function VirtualKeyboard() {
 
                             {/* ── Header ───────────────────────────────────── */}
                             <div className="flex items-center gap-2 mb-0.5">
-                                <div className="flex-1 h-8 px-3 rounded-lg bg-[#101520] border border-[#1A2236] flex items-center overflow-hidden">
-                                    <span className="text-[13px] text-[#E4ECF7] truncate flex-1 font-mono">
-                                        {value || <span className="text-[#3D506A]">Escribe algo...</span>}
-                                    </span>
-                                    <span className="w-0.5 h-3.5 bg-orange-400 animate-pulse ml-1 shrink-0" />
+                                <div
+                                    className="flex-1 h-8 px-3 rounded-lg bg-[#101520] border border-[#1A2236] flex items-center overflow-x-auto cursor-text"
+                                    style={{ scrollbarWidth: 'none' }}
+                                    onPointerDown={(e) => { e.preventDefault(); setCursor(value.length) }}
+                                >
+                                    {value.length === 0 ? (
+                                        <div className="flex items-center gap-0.5">
+                                            <span className="w-0.5 h-3.5 bg-orange-400 animate-pulse inline-block shrink-0" />
+                                            <span className="text-[13px] text-[#3D506A] font-mono">Escribe algo...</span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center font-mono text-[13px] text-[#E4ECF7]">
+                                            {Array.from(value).map((char, i) => (
+                                                <span
+                                                    key={i}
+                                                    className="flex items-center"
+                                                    onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); setCursor(i) }}
+                                                >
+                                                    {i === cursorPos && (
+                                                        <span className="w-0.5 h-3.5 bg-orange-400 animate-pulse inline-block mx-px shrink-0" />
+                                                    )}
+                                                    <span className="select-none">{char === ' ' ? ' ' : char}</span>
+                                                </span>
+                                            ))}
+                                            {cursorPos === value.length && (
+                                                <span className="w-0.5 h-3.5 bg-orange-400 animate-pulse inline-block mx-px shrink-0" />
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                                 <button
                                     onPointerDown={(e) => e.preventDefault()}
