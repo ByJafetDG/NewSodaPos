@@ -4,27 +4,22 @@ import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { SearchDropdown } from '@/components/molecules/SearchDropdown'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
+import { useStockEntryStore, type StockEntry } from '@/store/stockEntryStore'
 import { cn, formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
-
-interface StockEntry {
-    productId: string
-    product: Product
-    qty: number
-}
 
 interface StockEntryPanelProps {
     products: Product[]
     onConfirm: (entries: StockEntry[], notes: string) => void
     isPending?: boolean
+    onProductNotFound?: (barcode: string) => void
 }
 
-export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPanelProps) {
+export function StockEntryPanel({ products, onConfirm, isPending, onProductNotFound }: StockEntryPanelProps) {
+    const { entries, notes, scanMode, addEntry, setQty, setNotes, setScanMode, clear } = useStockEntryStore()
+
     const [barcode, setBarcode] = useState('')
-    const [entries, setEntries] = useState<StockEntry[]>([])
-    const [notes, setNotes] = useState('')
     const [errorMsg, setErrorMsg] = useState('')
-    const [scanMode, setScanMode] = useState(false)
     const [scanFlash, setScanFlash] = useState(false)
     const suppressKb = useSuppressKeyboard()
 
@@ -39,13 +34,12 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
         setTimeout(() => barcodeKb.ref.current?.focus(), 50)
     }, [])
 
-    // Auto-add product when barcode matches exactly in scan mode
     useEffect(() => {
         if (!scanMode || !barcode.trim()) return
         const q = barcode.trim()
         const product = products.find(p => p.isActive && (p.barcode ?? '') === q)
         if (product) {
-            addProductEntry(product)
+            addEntry(product)
             setBarcode('')
             triggerScanFlash()
             suppressKb.current = true
@@ -58,18 +52,6 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
         setTimeout(() => setScanFlash(false), 500)
     }
 
-    function addProductEntry(product: Product) {
-        setEntries(prev => {
-            const existing = prev.find(e => e.productId === product.id)
-            if (existing) {
-                return prev.map(e =>
-                    e.productId === product.id ? { ...e, qty: e.qty + 1 } : e
-                )
-            }
-            return [...prev, { productId: product.id, product, qty: 1 }]
-        })
-    }
-
     function handleBarcodeSubmit() {
         const q = barcode.trim()
         if (!q) return
@@ -80,13 +62,17 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
             )
         )
         if (!product) {
-            setErrorMsg(`No se encontró: "${q}"`)
-            setTimeout(() => setErrorMsg(''), 2000)
             setBarcode('')
+            if (onProductNotFound) {
+                onProductNotFound(q)
+            } else {
+                setErrorMsg(`No se encontró: "${q}"`)
+                setTimeout(() => setErrorMsg(''), 2000)
+            }
             return
         }
         setBarcode('')
-        addProductEntry(product)
+        addEntry(product)
         if (scanMode) triggerScanFlash()
         suppressKb.current = true
         setTimeout(() => barcodeKb.ref.current?.focus(), 50)
@@ -101,21 +87,12 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
         }
     }
 
-    const setQty = useCallback((productId: string, qty: number) => {
-        if (qty <= 0) {
-            setEntries(prev => prev.filter(e => e.productId !== productId))
-            return
-        }
-        setEntries(prev => prev.map(e => e.productId === productId ? { ...e, qty } : e))
-    }, [])
-
     const totalUnits = entries.reduce((s, e) => s + e.qty, 0)
 
     function handleConfirm() {
         if (entries.length === 0 || isPending) return
         onConfirm(entries, notes)
-        setEntries([])
-        setNotes('')
+        clear()
         suppressKb.current = true
         setTimeout(() => barcodeKb.ref.current?.focus(), 50)
     }
@@ -163,7 +140,7 @@ export function StockEntryPanel({ products, onConfirm, isPending }: StockEntryPa
                                     search={barcode}
                                     allowOutOfStock
                                     onSelect={(product) => {
-                                        addProductEntry(product)
+                                        addEntry(product)
                                         setBarcode('')
                                         suppressKb.current = true
                                         setTimeout(() => barcodeKb.ref.current?.focus(), 50)
@@ -283,7 +260,6 @@ function EntryRow({
                 )}
             </div>
 
-            {/* Qty stepper */}
             <div className="flex items-center gap-1 shrink-0">
                 <button
                     onClick={() => onQtyChange(qty - 1)}

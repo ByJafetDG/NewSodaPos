@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Plus, Edit3, Trash2, Check, X, ArrowLeft, Layers, ListFilter } from 'lucide-react'
+import { Plus, Edit3, Trash2, Check, X, ArrowLeft, Layers, ListFilter, GripVertical, ChevronUp, ChevronDown } from 'lucide-react'
 import { BaseModal } from './BaseModal'
 import { Button } from '@/components/atoms/Button'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
@@ -12,7 +12,7 @@ interface ManageCategoriesModalProps {
     onClose: () => void
     categories: Category[]
     onCreate: (data: Pick<Category, 'name' | 'type'>) => void
-    onUpdate: (id: string, data: Partial<Pick<Category, 'name' | 'type' | 'isActive'>>) => void
+    onUpdate: (id: string, data: Partial<Pick<Category, 'name' | 'type' | 'isActive' | 'sortOrder'>>) => void
     onDelete: (category: Category) => void
 }
 
@@ -42,9 +42,12 @@ export function ManageCategoriesModal({
     const [editType, setEditType] = useState<CategoryType>('PRODUCTO')
     const [newName, setNewName] = useState('')
     const [newType, setNewType] = useState<CategoryType>('PRODUCTO')
+    const [localCategories, setLocalCategories] = useState<Category[]>(categories)
 
     const editNameKb = useKeyboardInput(editName, setEditName)
     const newNameKb = useKeyboardInput(newName, setNewName)
+
+    useEffect(() => { setLocalCategories(categories) }, [categories])
 
     useEffect(() => {
         if (!isOpen) {
@@ -80,6 +83,17 @@ export function ManageCategoriesModal({
         goTo('list', 1)
     }
 
+    function moveCategory(fromIndex: number, direction: -1 | 1) {
+        const toIndex = fromIndex + direction
+        if (toIndex < 0 || toIndex >= localCategories.length) return
+        const reordered = [...localCategories]
+        ;[reordered[fromIndex], reordered[toIndex]] = [reordered[toIndex], reordered[fromIndex]]
+        setLocalCategories(reordered)
+        reordered.forEach((cat, i) => {
+            if (cat.sortOrder !== i) onUpdate(cat.id, { sortOrder: i })
+        })
+    }
+
     const title =
         view === 'choice' ? 'Categorías' :
         view === 'list'   ? 'Ver categorías' :
@@ -87,7 +101,6 @@ export function ManageCategoriesModal({
 
     return (
         <BaseModal isOpen={isOpen} onClose={onClose} title="" width="max-w-md">
-            {/* Custom header */}
             <div className="flex items-center justify-between mb-4 -mt-1">
                 <div className="flex items-center gap-2">
                     {view !== 'choice' && (
@@ -200,13 +213,13 @@ export function ManageCategoriesModal({
                             transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
                             className="space-y-2 max-h-[55vh] overflow-y-auto pb-1"
                         >
-                            {categories.length === 0 && (
+                            {localCategories.length === 0 && (
                                 <div className="flex flex-col items-center justify-center py-10 text-[#3D506A]">
                                     <Layers size={32} className="mb-2 opacity-40" />
                                     <p className="text-[13px]">Sin categorías</p>
                                 </div>
                             )}
-                            {categories.map(cat => (
+                            {localCategories.map((cat, idx) => (
                                 <div key={cat.id} className="rounded-xl border border-[#1E2A40] overflow-hidden">
                                     {editingId === cat.id ? (
                                         <div className="p-3 bg-[#101520] space-y-2">
@@ -243,7 +256,24 @@ export function ManageCategoriesModal({
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="flex items-center gap-3 px-3 py-2.5">
+                                        <div className="flex items-center gap-2 px-3 py-2.5">
+                                            <div className="flex flex-col gap-0.5 shrink-0">
+                                                <button
+                                                    onClick={() => moveCategory(idx, -1)}
+                                                    disabled={idx === 0}
+                                                    className="w-5 h-5 rounded flex items-center justify-center text-[#3D506A] hover:text-[#E4ECF7] hover:bg-[#1C2438] transition-all cursor-pointer disabled:opacity-20 disabled:cursor-default"
+                                                >
+                                                    <ChevronUp size={12} />
+                                                </button>
+                                                <button
+                                                    onClick={() => moveCategory(idx, 1)}
+                                                    disabled={idx === localCategories.length - 1}
+                                                    className="w-5 h-5 rounded flex items-center justify-center text-[#3D506A] hover:text-[#E4ECF7] hover:bg-[#1C2438] transition-all cursor-pointer disabled:opacity-20 disabled:cursor-default"
+                                                >
+                                                    <ChevronDown size={12} />
+                                                </button>
+                                            </div>
+                                            <GripVertical size={13} className="shrink-0 text-[#283A56]" />
                                             <div className="flex-1 min-w-0">
                                                 <span className="text-[13px] font-medium text-[#E4ECF7]">{cat.name}</span>
                                                 <span className="ml-2 text-[11px] text-[#3D506A]">{TYPE_LABELS[cat.type]}</span>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Delete, CornerDownLeft, X, ChevronUp } from 'lucide-react'
 import { useKeyboardStore } from '@/store/keyboardStore'
@@ -46,6 +46,18 @@ function Key({ label, onPress, className, accent }: {
 export function VirtualKeyboard() {
     const { isOpen, mode, value, cursorPos, pressKey, close, setCursor } = useKeyboardStore()
     const [caps, setCaps] = useState(false)
+    const containerRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        if (!isOpen) return
+        function handlePointerDown(e: PointerEvent) {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+                close()
+            }
+        }
+        document.addEventListener('pointerdown', handlePointerDown)
+        return () => document.removeEventListener('pointerdown', handlePointerDown)
+    }, [isOpen, close])
 
     const press = (key: string) => {
         if (mode === 'alpha' && key.length === 1) {
@@ -77,7 +89,7 @@ export function VirtualKeyboard() {
                         bottom: 18,
                     }}
                 >
-                    <div className={cn(
+                    <div ref={containerRef} className={cn(
                         'w-full rounded-2xl overflow-hidden border border-[#1E2A40] shadow-2xl shadow-black/60',
                         'bg-[#090C14]/97 backdrop-blur-xl',
                         mode === 'numeric' ? 'max-w-[300px]' : 'max-w-[720px]'

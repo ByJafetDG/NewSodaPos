@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Package, ArrowDownToLine } from 'lucide-react'
+import { Package, ArrowDownToLine, ScanBarcode, PackageSearch, Plus } from 'lucide-react'
 import { toast } from '@/components/ui/Toast'
 import { ProductsTable } from '@/components/organisms/inventory/ProductsTable'
 import { StockEntryPanel } from '@/components/organisms/inventory/StockEntryPanel'
 import { MovementsPanel } from '@/components/organisms/inventory/MovementsPanel'
 import type { MovementBatch } from '@/components/organisms/inventory/MovementsPanel'
+import { BaseModal } from '@/components/modals/BaseModal'
 import { ProductFormModal } from '@/components/modals/ProductFormModal'
 import { ManageCategoriesModal } from '@/components/modals/ManageCategoriesModal'
 import { MovementDetailModal } from '@/components/modals/MovementDetailModal'
@@ -43,6 +44,7 @@ export function InventoryPage() {
     const [deletingProduct, setDeletingProduct] = useState<Product | null>(null)
     const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
     const [selectedBatch, setSelectedBatch] = useState<MovementBatch | null>(null)
+    const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null)
 
     function handleNewProduct() {
         setEditingProduct(null)
@@ -160,6 +162,7 @@ export function InventoryPage() {
                                 products={products}
                                 onConfirm={handleConfirmEntry}
                                 isPending={createMovementBatch.isPending}
+                                onProductNotFound={b => setNotFoundBarcode(b)}
                             />
                         ) : (
                             <MovementsPanel
@@ -217,6 +220,42 @@ export function InventoryPage() {
                 description={`¿Eliminar la categoría "${deletingCategory?.name}"? Los productos quedarán sin categoría.`}
                 isPending={deleteCategory.isPending}
             />
+
+            <BaseModal isOpen={notFoundBarcode !== null} onClose={() => setNotFoundBarcode(null)} title="" width="max-w-sm">
+                <div className="flex flex-col items-center text-center gap-4 py-2">
+                    <div className="w-14 h-14 rounded-2xl bg-orange-500/10 flex items-center justify-center">
+                        <PackageSearch size={28} className="text-orange-400" />
+                    </div>
+                    <div>
+                        <p className="text-[15px] font-semibold text-[#E4ECF7] mb-1">Producto no encontrado</p>
+                        {notFoundBarcode && (
+                            <div className="flex items-center justify-center gap-1.5 mb-2">
+                                <ScanBarcode size={13} className="text-[#3D506A]" />
+                                <span className="text-[12px] font-mono text-[#7A8FAA]">{notFoundBarcode}</span>
+                            </div>
+                        )}
+                        <p className="text-[13px] text-[#3D506A] leading-relaxed">
+                            Ningún producto activo tiene ese código.<br />
+                            Intenta escanearlo una vez más, o agrégalo al sistema.
+                        </p>
+                    </div>
+                    <div className="flex flex-col gap-2 w-full">
+                        <button
+                            onClick={() => setNotFoundBarcode(null)}
+                            className="w-full h-10 rounded-xl bg-[#1C2438] border border-[#283A56] text-[#E4ECF7] text-[13px] font-medium hover:bg-[#243050] transition-colors cursor-pointer"
+                        >
+                            Escanear de nuevo
+                        </button>
+                        <button
+                            onClick={() => { setNotFoundBarcode(null); handleNewProduct() }}
+                            className="w-full h-10 rounded-xl bg-orange-500/15 border border-orange-500/30 text-orange-400 text-[13px] font-medium flex items-center justify-center gap-2 hover:bg-orange-500/25 transition-colors cursor-pointer"
+                        >
+                            <Plus size={14} />
+                            Agregar producto
+                        </button>
+                    </div>
+                </div>
+            </BaseModal>
         </div>
     )
 }
