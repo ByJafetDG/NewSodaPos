@@ -15,7 +15,7 @@ function WheelColumn({ items, selectedIndex, onSelect, bg }: {
 }) {
     const ref = useRef<HTMLDivElement>(null)
     const userScrolling = useRef(false)
-    const snapTimer = useRef<ReturnType<typeof setTimeout>>()
+    const snapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
     useEffect(() => {
         if (!ref.current || userScrolling.current) return
