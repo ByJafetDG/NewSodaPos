@@ -87,6 +87,7 @@ export function POSPage() {
     const [heldOrdersView, setHeldOrdersView] = useState<'choice' | 'save' | null>(null)
     const [activeOrderId, setActiveOrderId] = useState<string | null>(null)
     const [activeOrderName, setActiveOrderName] = useState<string | null>(null)
+    const [mergeSnapshot, setMergeSnapshot] = useState<HeldOrder[] | null>(null)
 
     // Autosave: cart changes → update linked held order in store
     useEffect(() => {
@@ -136,6 +137,7 @@ export function POSPage() {
         setAmountReceived('')
         setActiveOrderId(null)
         setActiveOrderName(null)
+        setMergeSnapshot(null)
     }
 
     const handleSaveHeldOrder = (name: string) => {
@@ -217,6 +219,7 @@ export function POSPage() {
             setShowCreditModal(false)
             setActiveOrderId(null)
             setActiveOrderName(null)
+            setMergeSnapshot(null)
             if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
 
             const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
@@ -288,6 +291,39 @@ export function POSPage() {
             window.electronAPI.openDrawer(printerPort)
                 .catch((err: any) => console.warn('[Drawer]', err))
         }
+    }
+
+    const handleMergeOrders = (ids: string[]) => {
+        const toMerge = heldOrders.filter(o => ids.includes(o.id))
+        setMergeSnapshot(toMerge)
+        const itemMap = new Map<string, CartItem>()
+        for (const order of toMerge) {
+            for (const item of order.items) {
+                const existing = itemMap.get(item.id)
+                if (existing) {
+                    const newQty = existing.quantity + item.quantity
+                    itemMap.set(item.id, { ...existing, quantity: newQty, subtotal: newQty * existing.unitPrice })
+                } else {
+                    itemMap.set(item.id, { ...item })
+                }
+            }
+        }
+        const mergedDiscount = toMerge.reduce((s, o) => s + o.discount, 0)
+        loadOrder(Array.from(itemMap.values()), mergedDiscount)
+        ids.forEach(id => deleteHeldOrder(id))
+        setActiveOrderId(null)
+        setActiveOrderName(null)
+        setHeldOrdersView(null)
+    }
+
+    const handleUndoMerge = () => {
+        if (!mergeSnapshot) return
+        clearCart()
+        setAmountReceived('')
+        mergeSnapshot.forEach(order => saveHeldOrder(order.name, order.items, order.discount))
+        setMergeSnapshot(null)
+        setActiveOrderId(null)
+        setActiveOrderName(null)
     }
 
     const handleConfirmPriceEdit = () => {
@@ -386,7 +422,7 @@ export function POSPage() {
                 selectedCategory={selectedCategory}
                 onSelectCategory={setSelectedCategory}
                 heldOrdersCount={heldOrders.length}
-                onOpenHeldOrders={() => setHeldOrdersView(heldOrders.length === 0 ? 'save' : 'choice')}
+                onOpenHeldOrders={() => setHeldOrdersView((heldOrders.length === 0 && !mergeSnapshot) ? 'save' : 'choice')}
                 activeOrderName={activeOrderName}
             />
 
@@ -557,6 +593,9 @@ export function POSPage() {
                         setAmountReceived('')
                     }
                 }}
+                onMerge={handleMergeOrders}
+                hasMergeSnapshot={mergeSnapshot !== null}
+                onUndoMerge={handleUndoMerge}
             />
         </div>
     )
