@@ -148,7 +148,7 @@ ipcMain.handle('sync:force-push', async () => {
             execute(`UPDATE ${table} SET syncStatus = 'PENDING' WHERE syncStatus = 'SYNCED' OR syncStatus IS NULL`, []);
         } catch { /* table may not have syncStatus */ }
     }
-    await pushSync();
+    const pushErrors = await pushSync();
     const remaining: Record<string, number> = {};
     let totalRemaining = 0;
     for (const table of tables) {
@@ -159,7 +159,7 @@ ipcMain.handle('sync:force-push', async () => {
             totalRemaining += count;
         } catch { }
     }
-    return { totalRemaining, remaining };
+    return { totalRemaining, remaining, pushErrors };
 });
 
 // ===== Hardware: COM Port Printer Communication =====

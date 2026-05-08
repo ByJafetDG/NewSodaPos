@@ -247,8 +247,7 @@ async function pullSync() {
  * PUSH SYNC: SQLite -> Supabase
  * Uploads transactional data (Sales, Expenses, Movements)
  */
-export async function pushSync() {
-    // Check for pending items across all tables first to avoid noisy logs
+export async function pushSync(): Promise<string[]> {
     const pendingSales = query(`SELECT * FROM Sale WHERE syncStatus = 'PENDING'`) as any[];
     const pendingExpenses = query(`SELECT * FROM Expense WHERE syncStatus = 'PENDING'`) as any[];
     const pendingMovements = query(`SELECT * FROM InventoryMovement WHERE syncStatus = 'PENDING'`) as any[];
@@ -264,99 +263,13 @@ export async function pushSync() {
         pendingRegisters.length + pendingPayments.length + pendingEmployees.length +
         pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length;
 
-    if (totalPending === 0) return; // Silent if nothing to push
+    if (totalPending === 0) return [];
 
     console.log(`[SyncEngine] Pushing ${totalPending} changes to Supabase...`);
 
-    // 1. Process Sales
-    for (const sale of pendingSales) {
-        try {
-            const items = query(`SELECT * FROM SaleItem WHERE saleId = ?`, [sale.id]);
+    const errors: string[] = [];
 
-            // Upload sale
-            const { error: saleError } = await supabase.from('Sale').upsert({
-                id: sale.id,
-                saleNumber: sale.saleNumber,
-                date: sale.date,
-                subtotal: sale.subtotal,
-                discount: sale.discount,
-                total: sale.total,
-                paymentMethod: sale.paymentMethod,
-                amountReceived: sale.amountReceived,
-                change: sale.change,
-                cashRegisterId: sale.cashRegisterId,
-                isCredit: !!sale.isCredit,
-                clientId: sale.clientId,
-                status: sale.status,
-                notes: sale.notes,
-                updatedAt: new Date().toISOString()
-            });
-
-            if (saleError) throw saleError;
-
-            // Upload items
-            for (const item of items as any[]) {
-                const { error: itemError } = await supabase.from('SaleItem').upsert({
-                    id: item.id,
-                    saleId: item.saleId,
-                    productId: item.productId,
-                    quantity: item.quantity,
-                    unitPrice: item.unitPrice,
-                    subtotal: item.subtotal,
-                    notes: item.notes
-                });
-                if (itemError) throw itemError;
-            }
-
-            // Mark as synced
-            execute(`UPDATE Sale SET syncStatus = 'SYNCED' WHERE id = ?`, [sale.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push sale ${sale.id}:`, err);
-        }
-    }
-
-    // 2. Process Expenses
-    for (const exp of pendingExpenses) {
-        try {
-            const { error } = await supabase.from('Expense').upsert({
-                id: exp.id,
-                description: exp.description,
-                amount: exp.amount,
-                categoryId: exp.categoryId,
-                supplier: exp.supplier,
-                date: exp.date,
-                notes: exp.notes,
-                cashRegisterId: exp.cashRegisterId,
-                updatedAt: new Date().toISOString()
-            });
-            if (error) throw error;
-            execute(`UPDATE Expense SET syncStatus = 'SYNCED' WHERE id = ?`, [exp.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push expense ${exp.id}:`, err);
-        }
-    }
-
-    // 3. Process Inventory Movements
-    for (const mov of pendingMovements) {
-        try {
-            const { error } = await supabase.from('InventoryMovement').upsert({
-                id: mov.id,
-                productId: mov.productId,
-                type: mov.type,
-                quantity: mov.quantity,
-                cost: mov.cost,
-                reference: mov.reference,
-                notes: mov.notes,
-                date: mov.date
-            });
-            if (error) throw error;
-            execute(`UPDATE InventoryMovement SET syncStatus = 'SYNCED' WHERE id = ?`, [mov.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push movement ${mov.id}:`, err);
-        }
-    }
-
-    // 4. Process Cash Registers
+    // 1. CashRegisters — referenced by Sale and Expense (must go first)
     for (const reg of pendingRegisters) {
         try {
             const { error } = await supabase.from('CashRegister').upsert({
@@ -377,31 +290,14 @@ export async function pushSync() {
             });
             if (error) throw error;
             execute(`UPDATE CashRegister SET syncStatus = 'SYNCED' WHERE id = ?`, [reg.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push cash register ${reg.id}:`, err);
+        } catch (err: any) {
+            const msg = `CashRegister ${reg.id}: ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
         }
     }
 
-    // 5. Process Payments
-    for (const pay of pendingPayments) {
-        try {
-            const { error } = await supabase.from('Payment').upsert({
-                id: pay.id,
-                clientId: pay.clientId,
-                amount: pay.amount,
-                method: pay.method,
-                reference: pay.reference,
-                notes: pay.notes,
-                date: pay.date
-            });
-            if (error) throw error;
-            execute(`UPDATE Payment SET syncStatus = 'SYNCED' WHERE id = ?`, [pay.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push payment ${pay.id}:`, err);
-        }
-    }
-
-    // 6. Process Employees
+    // 2. Employees — independent
     for (const emp of pendingEmployees) {
         try {
             const { error } = await supabase.from('Employee').upsert({
@@ -416,12 +312,14 @@ export async function pushSync() {
             });
             if (error) throw error;
             execute(`UPDATE Employee SET syncStatus = 'SYNCED' WHERE id = ?`, [emp.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push employee ${emp.id}:`, err);
+        } catch (err: any) {
+            const msg = `Employee ${emp.id}: ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
         }
     }
 
-    // 7. Process Clients
+    // 3. Clients — referenced by Sale and Payment
     for (const client of pendingClients) {
         try {
             const { error } = await supabase.from('Client').upsert({
@@ -437,12 +335,14 @@ export async function pushSync() {
             });
             if (error) throw error;
             execute(`UPDATE Client SET syncStatus = 'SYNCED' WHERE id = ?`, [client.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push client ${client.id}:`, err);
+        } catch (err: any) {
+            const msg = `Client ${client.id}: ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
         }
     }
 
-    // 8. Process Categories
+    // 4. Categories — referenced by Product
     for (const cat of pendingCategories) {
         try {
             const { error } = await supabase.from('Category').upsert({
@@ -456,12 +356,14 @@ export async function pushSync() {
             });
             if (error) throw error;
             execute(`UPDATE Category SET syncStatus = 'SYNCED' WHERE id = ?`, [cat.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push category ${cat.id}:`, err);
+        } catch (err: any) {
+            const msg = `Category ${cat.id}: ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
         }
     }
 
-    // 9. Process Subcategories
+    // 5. Subcategories — referenced by Product (after Category)
     for (const sub of pendingSubcategories) {
         try {
             const { error } = await supabase.from('Subcategory').upsert({
@@ -475,12 +377,14 @@ export async function pushSync() {
             });
             if (error) throw error;
             execute(`UPDATE Subcategory SET syncStatus = 'SYNCED' WHERE id = ?`, [sub.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push subcategory ${sub.id}:`, err);
+        } catch (err: any) {
+            const msg = `Subcategory ${sub.id}: ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
         }
     }
 
-    // 10. Process Products
+    // 6. Products — after Category and Subcategory
     for (const prod of pendingProducts) {
         try {
             const { error } = await supabase.from('Product').upsert({
@@ -502,12 +406,123 @@ export async function pushSync() {
             });
             if (error) throw error;
             execute(`UPDATE Product SET syncStatus = 'SYNCED' WHERE id = ?`, [prod.id]);
-        } catch (err) {
-            console.error(`[SyncEngine] Failed to push product ${prod.id}:`, err);
+        } catch (err: any) {
+            const msg = `Product ${prod.id} (${prod.name}): ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
+        }
+    }
+
+    // 7. Sales + SaleItems — after CashRegister, Client, Product
+    for (const sale of pendingSales) {
+        try {
+            const items = query(`SELECT * FROM SaleItem WHERE saleId = ?`, [sale.id]);
+            const { error: saleError } = await supabase.from('Sale').upsert({
+                id: sale.id,
+                saleNumber: sale.saleNumber,
+                date: sale.date,
+                subtotal: sale.subtotal,
+                discount: sale.discount,
+                total: sale.total,
+                paymentMethod: sale.paymentMethod,
+                amountReceived: sale.amountReceived,
+                change: sale.change,
+                cashRegisterId: sale.cashRegisterId,
+                isCredit: !!sale.isCredit,
+                clientId: sale.clientId,
+                status: sale.status,
+                notes: sale.notes,
+                updatedAt: new Date().toISOString()
+            });
+            if (saleError) throw saleError;
+            for (const item of items as any[]) {
+                const { error: itemError } = await supabase.from('SaleItem').upsert({
+                    id: item.id,
+                    saleId: item.saleId,
+                    productId: item.productId,
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice,
+                    subtotal: item.subtotal,
+                    notes: item.notes
+                });
+                if (itemError) throw itemError;
+            }
+            execute(`UPDATE Sale SET syncStatus = 'SYNCED' WHERE id = ?`, [sale.id]);
+        } catch (err: any) {
+            const msg = `Sale ${sale.id} (#${sale.saleNumber}): ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
+        }
+    }
+
+    // 8. Expenses — after CashRegister
+    for (const exp of pendingExpenses) {
+        try {
+            const { error } = await supabase.from('Expense').upsert({
+                id: exp.id,
+                description: exp.description,
+                amount: exp.amount,
+                categoryId: exp.categoryId,
+                supplier: exp.supplier,
+                date: exp.date,
+                notes: exp.notes,
+                cashRegisterId: exp.cashRegisterId,
+                updatedAt: new Date().toISOString()
+            });
+            if (error) throw error;
+            execute(`UPDATE Expense SET syncStatus = 'SYNCED' WHERE id = ?`, [exp.id]);
+        } catch (err: any) {
+            const msg = `Expense ${exp.id}: ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
+        }
+    }
+
+    // 9. InventoryMovements — after Product
+    for (const mov of pendingMovements) {
+        try {
+            const { error } = await supabase.from('InventoryMovement').upsert({
+                id: mov.id,
+                productId: mov.productId,
+                type: mov.type,
+                quantity: mov.quantity,
+                cost: mov.cost,
+                reference: mov.reference,
+                notes: mov.notes,
+                date: mov.date
+            });
+            if (error) throw error;
+            execute(`UPDATE InventoryMovement SET syncStatus = 'SYNCED' WHERE id = ?`, [mov.id]);
+        } catch (err: any) {
+            const msg = `InventoryMovement ${mov.id}: ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
+        }
+    }
+
+    // 10. Payments — after Client
+    for (const pay of pendingPayments) {
+        try {
+            const { error } = await supabase.from('Payment').upsert({
+                id: pay.id,
+                clientId: pay.clientId,
+                amount: pay.amount,
+                method: pay.method,
+                reference: pay.reference,
+                notes: pay.notes,
+                date: pay.date
+            });
+            if (error) throw error;
+            execute(`UPDATE Payment SET syncStatus = 'SYNCED' WHERE id = ?`, [pay.id]);
+        } catch (err: any) {
+            const msg = `Payment ${pay.id}: ${err?.message ?? err}`;
+            console.error(`[SyncEngine] ${msg}`);
+            errors.push(msg);
         }
     }
 
     console.log('[SyncEngine] Push cycle complete.');
+    return errors;
 }
 
 /**

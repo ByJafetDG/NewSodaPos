@@ -681,7 +681,8 @@ export function SettingsPage() {
                                                     const details = Object.entries(result.remaining)
                                                         .map(([t, n]) => `${t}: ${n}`)
                                                         .join(', ')
-                                                    toast.warning(`Sync incompleto. Aún pendientes: ${details}`)
+                                                    const firstError = result.pushErrors?.[0] ?? ''
+                                                    toast.warning(`Sync incompleto (${details})${firstError ? ` — ${firstError}` : ''}`)
                                                 }
                                             } catch {
                                                 toast.error('Error al re-sincronizar')
