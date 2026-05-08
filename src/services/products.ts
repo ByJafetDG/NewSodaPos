@@ -11,8 +11,9 @@ export async function getProducts(activeOnly = true): Promise<Product[]> {
             SELECT p.*, c.name as cat_name, c.type as cat_type
             FROM Product p
             LEFT JOIN Category c ON p.categoryId = c.id
+            WHERE (p.isDeleted IS NULL OR p.isDeleted != 1)
         `;
-        if (activeOnly) sql += ' WHERE p.isActive = 1';
+        if (activeOnly) sql += ' AND p.isActive = 1';
         sql += ' ORDER BY p.name ASC';
 
         const data = await window.electronAPI.dbQuery(sql);
@@ -208,18 +209,16 @@ export async function deleteProduct(id: string): Promise<{ soft: boolean }> {
     const now = new Date().toISOString()
 
     if (window.electronAPI) {
+        // Always soft-delete in Electron so Supabase receives isDeleted:true on next push.
+        // Hard deleting from SQLite would leave Supabase with isDeleted:false forever.
         const saleItems = await window.electronAPI.dbQuery(
             'SELECT id FROM SaleItem WHERE productId = ? LIMIT 1', [id]
         )
-        if (saleItems.length > 0) {
-            await window.electronAPI.dbExecute(
-                `UPDATE Product SET isDeleted = 1, isActive = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
-                [now, id]
-            )
-            return { soft: true }
-        }
-        await window.electronAPI.dbExecute(`DELETE FROM Product WHERE id = ?`, [id])
-        return { soft: false }
+        await window.electronAPI.dbExecute(
+            `UPDATE Product SET isDeleted = 1, isActive = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+            [now, id]
+        )
+        return { soft: saleItems.length > 0 }
     }
 
     const { count } = await supabase
