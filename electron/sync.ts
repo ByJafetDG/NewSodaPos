@@ -258,10 +258,11 @@ export async function pushSync() {
     const pendingClients = query(`SELECT * FROM Client WHERE syncStatus = 'PENDING'`) as any[];
     const pendingProducts = query(`SELECT * FROM Product WHERE syncStatus = 'PENDING'`) as any[];
     const pendingCategories = query(`SELECT * FROM Category WHERE syncStatus = 'PENDING'`) as any[];
+    const pendingSubcategories = query(`SELECT * FROM Subcategory WHERE syncStatus = 'PENDING'`) as any[];
 
     const totalPending = pendingSales.length + pendingExpenses.length + pendingMovements.length +
         pendingRegisters.length + pendingPayments.length + pendingEmployees.length +
-        pendingClients.length + pendingProducts.length + pendingCategories.length;
+        pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length;
 
     if (totalPending === 0) return; // Silent if nothing to push
 
@@ -460,7 +461,26 @@ export async function pushSync() {
         }
     }
 
-    // 9. Process Products
+    // 9. Process Subcategories
+    for (const sub of pendingSubcategories) {
+        try {
+            const { error } = await supabase.from('Subcategory').upsert({
+                id: sub.id,
+                categoryId: sub.categoryId,
+                name: sub.name,
+                showDays: sub.showDays ?? null,
+                sortOrder: sub.sortOrder,
+                isActive: !!sub.isActive,
+                updatedAt: new Date().toISOString()
+            });
+            if (error) throw error;
+            execute(`UPDATE Subcategory SET syncStatus = 'SYNCED' WHERE id = ?`, [sub.id]);
+        } catch (err) {
+            console.error(`[SyncEngine] Failed to push subcategory ${sub.id}:`, err);
+        }
+    }
+
+    // 10. Process Products
     for (const prod of pendingProducts) {
         try {
             const { error } = await supabase.from('Product').upsert({

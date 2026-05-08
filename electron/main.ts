@@ -142,11 +142,11 @@ ipcMain.handle('sync:stats', async () => {
 });
 
 ipcMain.handle('sync:force-push', async () => {
-    const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Product', 'Category'];
+    const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Category', 'Subcategory', 'Product'];
     const now = new Date().toISOString();
     for (const table of tables) {
         try {
-            execute(`UPDATE ${table} SET syncStatus = 'PENDING', updatedAt = ? WHERE syncStatus = 'SYNCED'`, [now]);
+            execute(`UPDATE ${table} SET syncStatus = 'PENDING', updatedAt = ? WHERE syncStatus = 'SYNCED' OR syncStatus IS NULL`, [now]);
         } catch { /* table may not have updatedAt */ }
     }
     await pushSync();
