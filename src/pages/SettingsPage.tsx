@@ -109,6 +109,7 @@ export function SettingsPage() {
     const [appVersion, setAppVersion] = useState('')
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date'>('idle')
     const [lastChecked, setLastChecked] = useState<Date | null>(null)
+    const [forcePushing, setForcePushing] = useState(false)
 
     useEffect(() => {
         window.electronAPI?.getSystemInfo().then(info => setAppVersion(info.version))
@@ -666,6 +667,28 @@ export function SettingsPage() {
                                         </span>
                                     </div>
                                 </div>
+
+                                {/* Force re-sync */}
+                                {window.electronAPI && (
+                                    <button
+                                        onClick={async () => {
+                                            setForcePushing(true)
+                                            try {
+                                                await window.electronAPI!.forcePush()
+                                                toast.success('Re-sincronización completada')
+                                            } catch {
+                                                toast.error('Error al re-sincronizar')
+                                            } finally {
+                                                setForcePushing(false)
+                                            }
+                                        }}
+                                        disabled={forcePushing}
+                                        className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-blue-500/10 border border-blue-500/25 text-blue-400 text-[13px] font-medium hover:bg-blue-500/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <RefreshCw size={14} className={forcePushing ? 'animate-spin' : ''} />
+                                        {forcePushing ? 'Sincronizando...' : 'Forzar re-sincronización'}
+                                    </button>
+                                )}
 
                                 {/* App info */}
                                 <div className="flex flex-wrap gap-2">

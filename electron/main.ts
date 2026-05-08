@@ -22,7 +22,7 @@ if (isDev) {
 }
 
 import { initDb, query, execute, get } from './db'
-import { startSyncEngine } from './sync'
+import { startSyncEngine, pushSync } from './sync'
 
 // Disable GPU acceleration for better compatibility on some systems
 app.disableHardwareAcceleration()
@@ -139,6 +139,17 @@ ipcMain.handle('sync:stats', async () => {
         }
     }
     return { totalPending };
+});
+
+ipcMain.handle('sync:force-push', async () => {
+    const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Product', 'Category'];
+    const now = new Date().toISOString();
+    for (const table of tables) {
+        try {
+            execute(`UPDATE ${table} SET syncStatus = 'PENDING', updatedAt = ? WHERE syncStatus = 'SYNCED'`, [now]);
+        } catch { /* table may not have updatedAt */ }
+    }
+    await pushSync();
 });
 
 // ===== Hardware: COM Port Printer Communication =====

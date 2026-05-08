@@ -125,22 +125,25 @@ async function pullSync() {
             transaction(() => {
                 for (const prod of products) {
                     execute(`
-            INSERT INTO Product (id, name, barcode, categoryId, price, cost, unit, stockQty, minStock, isActive, imageUrl, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+            INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, price, cost, unit, stockQty, minStock, isActive, isInfinite, isDeleted, imageUrl, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
-              name = excluded.name,
-              barcode = excluded.barcode,
-              categoryId = excluded.categoryId,
-              price = excluded.price,
-              cost = excluded.cost,
-              unit = excluded.unit,
-              stockQty = excluded.stockQty,
-              minStock = excluded.minStock,
-              isActive = excluded.isActive,
-              imageUrl = excluded.imageUrl,
-              syncStatus = 'SYNCED',
-              updatedAt = excluded.updatedAt
-          `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.imageUrl, prod.updatedAt]);
+              name =          CASE WHEN Product.syncStatus = 'PENDING' THEN Product.name          ELSE excluded.name          END,
+              barcode =       CASE WHEN Product.syncStatus = 'PENDING' THEN Product.barcode       ELSE excluded.barcode       END,
+              categoryId =    CASE WHEN Product.syncStatus = 'PENDING' THEN Product.categoryId    ELSE excluded.categoryId    END,
+              subcategoryId = CASE WHEN Product.syncStatus = 'PENDING' THEN Product.subcategoryId ELSE excluded.subcategoryId END,
+              price =         CASE WHEN Product.syncStatus = 'PENDING' THEN Product.price         ELSE excluded.price         END,
+              cost =          CASE WHEN Product.syncStatus = 'PENDING' THEN Product.cost          ELSE excluded.cost          END,
+              unit =          CASE WHEN Product.syncStatus = 'PENDING' THEN Product.unit          ELSE excluded.unit          END,
+              stockQty =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.stockQty      ELSE excluded.stockQty      END,
+              minStock =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.minStock      ELSE excluded.minStock      END,
+              isActive =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.isActive      ELSE excluded.isActive      END,
+              isInfinite =    CASE WHEN Product.syncStatus = 'PENDING' THEN Product.isInfinite    ELSE excluded.isInfinite    END,
+              isDeleted =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.isDeleted     ELSE excluded.isDeleted     END,
+              imageUrl =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.imageUrl      ELSE excluded.imageUrl      END,
+              syncStatus =    CASE WHEN Product.syncStatus = 'PENDING' THEN 'PENDING'             ELSE 'SYNCED'               END,
+              updatedAt =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.updatedAt     ELSE excluded.updatedAt     END
+          `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, prod.updatedAt]);
                 }
             });
         }
@@ -153,19 +156,20 @@ async function pullSync() {
             transaction(() => {
                 for (const client of clients) {
                     execute(`
-            INSERT INTO Client (id, name, phone, email, type, company, notes, isActive, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+            INSERT INTO Client (id, name, phone, email, type, company, notes, code, isActive, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
-              name = excluded.name,
-              phone = excluded.phone,
-              email = excluded.email,
-              type = excluded.type,
-              company = excluded.company,
-              notes = excluded.notes,
-              isActive = excluded.isActive,
-              syncStatus = 'SYNCED',
-              updatedAt = excluded.updatedAt
-          `, [client.id, client.name, client.phone, client.email, client.type, client.company, client.notes, client.isActive ? 1 : 0, client.updatedAt]);
+              name =    CASE WHEN Client.syncStatus = 'PENDING' THEN Client.name    ELSE excluded.name    END,
+              phone =   CASE WHEN Client.syncStatus = 'PENDING' THEN Client.phone   ELSE excluded.phone   END,
+              email =   CASE WHEN Client.syncStatus = 'PENDING' THEN Client.email   ELSE excluded.email   END,
+              type =    CASE WHEN Client.syncStatus = 'PENDING' THEN Client.type    ELSE excluded.type    END,
+              company = CASE WHEN Client.syncStatus = 'PENDING' THEN Client.company ELSE excluded.company END,
+              notes =   CASE WHEN Client.syncStatus = 'PENDING' THEN Client.notes   ELSE excluded.notes   END,
+              code =    CASE WHEN Client.syncStatus = 'PENDING' THEN Client.code    ELSE excluded.code    END,
+              isActive= CASE WHEN Client.syncStatus = 'PENDING' THEN Client.isActive ELSE excluded.isActive END,
+              syncStatus = CASE WHEN Client.syncStatus = 'PENDING' THEN 'PENDING' ELSE 'SYNCED' END,
+              updatedAt =  CASE WHEN Client.syncStatus = 'PENDING' THEN Client.updatedAt ELSE excluded.updatedAt END
+          `, [client.id, client.name, client.phone, client.email, client.type, client.company, client.notes, client.code ?? null, client.isActive ? 1 : 0, client.updatedAt]);
                 }
             });
         }
@@ -243,7 +247,7 @@ async function pullSync() {
  * PUSH SYNC: SQLite -> Supabase
  * Uploads transactional data (Sales, Expenses, Movements)
  */
-async function pushSync() {
+export async function pushSync() {
     // Check for pending items across all tables first to avoid noisy logs
     const pendingSales = query(`SELECT * FROM Sale WHERE syncStatus = 'PENDING'`) as any[];
     const pendingExpenses = query(`SELECT * FROM Expense WHERE syncStatus = 'PENDING'`) as any[];
@@ -464,12 +468,15 @@ async function pushSync() {
                 name: prod.name,
                 barcode: prod.barcode,
                 categoryId: prod.categoryId,
+                subcategoryId: prod.subcategoryId ?? null,
                 price: prod.price,
                 cost: prod.cost,
                 unit: prod.unit,
                 stockQty: prod.stockQty,
                 minStock: prod.minStock,
                 isActive: !!prod.isActive,
+                isInfinite: !!prod.isInfinite,
+                isDeleted: !!prod.isDeleted,
                 imageUrl: prod.imageUrl,
                 updatedAt: new Date().toISOString()
             });
@@ -565,22 +572,25 @@ function setupRealtimeSubscriptions() {
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
                 execute(`
-          INSERT INTO Product (id, name, barcode, categoryId, price, cost, unit, stockQty, minStock, isActive, imageUrl, syncStatus, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+          INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, price, cost, unit, stockQty, minStock, isActive, isInfinite, isDeleted, imageUrl, syncStatus, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
           ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            barcode = excluded.barcode,
-            categoryId = excluded.categoryId,
-            price = excluded.price,
-            cost = excluded.cost,
-            unit = excluded.unit,
-            stockQty = excluded.stockQty,
-            minStock = excluded.minStock,
-            isActive = excluded.isActive,
-            imageUrl = excluded.imageUrl,
-            syncStatus = 'SYNCED',
-            updatedAt = excluded.updatedAt
-        `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.imageUrl, prod.updatedAt]);
+            name =          CASE WHEN Product.syncStatus = 'PENDING' THEN Product.name          ELSE excluded.name          END,
+            barcode =       CASE WHEN Product.syncStatus = 'PENDING' THEN Product.barcode       ELSE excluded.barcode       END,
+            categoryId =    CASE WHEN Product.syncStatus = 'PENDING' THEN Product.categoryId    ELSE excluded.categoryId    END,
+            subcategoryId = CASE WHEN Product.syncStatus = 'PENDING' THEN Product.subcategoryId ELSE excluded.subcategoryId END,
+            price =         CASE WHEN Product.syncStatus = 'PENDING' THEN Product.price         ELSE excluded.price         END,
+            cost =          CASE WHEN Product.syncStatus = 'PENDING' THEN Product.cost          ELSE excluded.cost          END,
+            unit =          CASE WHEN Product.syncStatus = 'PENDING' THEN Product.unit          ELSE excluded.unit          END,
+            stockQty =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.stockQty      ELSE excluded.stockQty      END,
+            minStock =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.minStock      ELSE excluded.minStock      END,
+            isActive =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.isActive      ELSE excluded.isActive      END,
+            isInfinite =    CASE WHEN Product.syncStatus = 'PENDING' THEN Product.isInfinite    ELSE excluded.isInfinite    END,
+            isDeleted =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.isDeleted     ELSE excluded.isDeleted     END,
+            imageUrl =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.imageUrl      ELSE excluded.imageUrl      END,
+            syncStatus =    CASE WHEN Product.syncStatus = 'PENDING' THEN 'PENDING'             ELSE 'SYNCED'               END,
+            updatedAt =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.updatedAt     ELSE excluded.updatedAt     END
+        `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, prod.updatedAt]);
                 notifyUI('Product');
             }
         })

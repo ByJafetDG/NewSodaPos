@@ -29,6 +29,7 @@ const electronAPI = {
 
     // Sync
     getSyncStats: () => ipcRenderer.invoke('sync:stats'),
+    forcePush: () => ipcRenderer.invoke('sync:force-push'),
     onDbChanged: (callback: (data: { table: string }) => void) => {
         const subscription = (_event: any, data: any) => callback(data);
         ipcRenderer.on('db-changed', subscription);
@@ -74,6 +75,7 @@ export interface ElectronAPI {
     openDrawer: (printerName: string) => Promise<any>;
     sendEmail: (payload: any) => Promise<any>;
     getSyncStats: () => Promise<any>;
+    forcePush: () => Promise<void>;
     onDbChanged: (callback: (data: { table: string }) => void) => () => void;
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void;
     installUpdate: () => Promise<void>;

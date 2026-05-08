@@ -208,20 +208,18 @@ export async function deleteProduct(id: string): Promise<{ soft: boolean }> {
     const now = new Date().toISOString()
 
     if (window.electronAPI) {
-        try {
-            await window.electronAPI.dbExecute(`DELETE FROM Product WHERE id = ?`, [id])
-            return { soft: false }
-        } catch (err: any) {
-            const msg: string = err?.message ?? ''
-            if (msg.includes('FOREIGN KEY') || msg.includes('constraint')) {
-                await window.electronAPI.dbExecute(
-                    `UPDATE Product SET isDeleted = 1, isActive = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
-                    [now, id]
-                )
-                return { soft: true }
-            }
-            throw err
+        const saleItems = await window.electronAPI.dbQuery(
+            'SELECT id FROM SaleItem WHERE productId = ? LIMIT 1', [id]
+        )
+        if (saleItems.length > 0) {
+            await window.electronAPI.dbExecute(
+                `UPDATE Product SET isDeleted = 1, isActive = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+                [now, id]
+            )
+            return { soft: true }
         }
+        await window.electronAPI.dbExecute(`DELETE FROM Product WHERE id = ?`, [id])
+        return { soft: false }
     }
 
     const { count } = await supabase

@@ -27,6 +27,7 @@ export interface ElectronAPI {
         Promise<{ success: boolean, error?: any }>
     // Sync
     getSyncStats: () => Promise<{ totalPending: number }>
+    forcePush: () => Promise<void>
     onDbChanged: (callback: (data: { table: string }) => void) => () => void
     // Updates
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void
