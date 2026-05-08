@@ -5,11 +5,12 @@ import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
-import type { Product, Category } from '@/types'
+import type { Product, Category, Subcategory } from '@/types'
 
 interface ProductsTableProps {
     products: Product[]
     categories: Category[]
+    subcategories: Subcategory[]
     onNew: () => void
     onEdit: (product: Product) => void
     onDelete: (product: Product) => void
@@ -41,6 +42,7 @@ function StockCell({ product }: { product: Product }) {
 export function ProductsTable({
     products,
     categories,
+    subcategories,
     onNew,
     onEdit,
     onDelete,
@@ -157,6 +159,7 @@ export function ProductsTable({
                                         <ProductRow
                                             key={product.id}
                                             product={product}
+                                            subName={subcategories.find(s => s.id === product.subcategoryId)?.name ?? null}
                                             onEdit={onEdit}
                                             onDelete={onDelete}
                                             onToggle={onToggle}
@@ -175,6 +178,7 @@ export function ProductsTable({
                                         <ProductRow
                                             key={product.id}
                                             product={product}
+                                            subName={subcategories.find(s => s.id === product.subcategoryId)?.name ?? null}
                                             onEdit={onEdit}
                                             onDelete={onDelete}
                                             onToggle={onToggle}
@@ -192,11 +196,13 @@ export function ProductsTable({
 
 function ProductRow({
     product,
+    subName,
     onEdit,
     onDelete,
     onToggle,
 }: {
     product: Product
+    subName: string | null
     onEdit: (p: Product) => void
     onDelete: (p: Product) => void
     onToggle: (p: Product) => void
@@ -209,8 +215,13 @@ function ProductRow({
             )}
         >
             <td className="px-4 py-3">
-                <span className="font-medium text-[#E4ECF7]">{product.name}</span>
-                <span className="ml-2 text-[10px] text-[#3D506A]">{product.unit}</span>
+                <div className="flex items-baseline gap-2">
+                    <span className="font-medium text-[#E4ECF7]">{product.name}</span>
+                    <span className="text-[10px] text-[#3D506A]">{product.unit}</span>
+                </div>
+                {subName && (
+                    <span className="text-[10px] text-violet-400 mt-0.5 block">{subName}</span>
+                )}
             </td>
             <td className="px-3 py-3">
                 <span className="font-mono text-[12px] text-[#7A8FAA]">

@@ -12,6 +12,7 @@ import { MovementDetailModal } from '@/components/modals/MovementDetailModal'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct } from '@/hooks/useProducts'
 import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory } from '@/hooks/useCategories'
+import { useSubcategories } from '@/hooks/useSubcategories'
 import { useInventoryMovements, useCreateMovementBatch, useUpdateMovement, useDeleteMovement } from '@/hooks/useInventory'
 import type { InventoryMovement } from '@/types'
 import { cn } from '@/lib/utils'
@@ -23,6 +24,7 @@ type EntrySubTab = 'ingresar' | 'movimientos'
 export function InventoryPage() {
     const { data: products = [] } = useProducts()
     const { data: categories = [] } = useCategories()
+    const { data: subcategories = [] } = useSubcategories()
     const { data: movements = [] } = useInventoryMovements()
 
     const createProduct = useCreateProduct()
@@ -131,6 +133,7 @@ export function InventoryPage() {
                     <ProductsTable
                         products={products}
                         categories={categories}
+                        subcategories={subcategories}
                         onNew={handleNewProduct}
                         onEdit={handleEditProduct}
                         onDelete={p => setDeletingProduct(p)}
