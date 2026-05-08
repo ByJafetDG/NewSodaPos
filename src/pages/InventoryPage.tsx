@@ -22,7 +22,7 @@ type MainTab = 'products' | 'entry'
 type EntrySubTab = 'ingresar' | 'movimientos'
 
 export function InventoryPage() {
-    const { data: products = [] } = useProducts()
+    const { data: products = [] } = useProducts(false)
     const { data: categories = [] } = useCategories()
     const { data: subcategories = [] } = useSubcategories()
     const { data: movements = [] } = useInventoryMovements()
