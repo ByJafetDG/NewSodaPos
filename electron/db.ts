@@ -219,6 +219,19 @@ export function initDb() {
       createdAt TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS Subcategory (
+      id TEXT PRIMARY KEY,
+      categoryId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      showDays TEXT DEFAULT NULL,
+      sortOrder INTEGER DEFAULT 0,
+      isActive INTEGER DEFAULT 1,
+      syncStatus TEXT DEFAULT 'PENDING',
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (categoryId) REFERENCES Category(id)
+    );
+
     CREATE TABLE IF NOT EXISTS Employee (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -310,6 +323,12 @@ export function initDb() {
 
   try {
     db.exec(`ALTER TABLE Product ADD COLUMN isDeleted INTEGER DEFAULT 0`);
+  } catch {
+    // Already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE Product ADD COLUMN subcategoryId TEXT`);
   } catch {
     // Already exists
   }

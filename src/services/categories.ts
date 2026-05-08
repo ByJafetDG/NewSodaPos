@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { deleteSubcategoriesByCategoryId } from '@/services/subcategories'
 import type { Category } from '@/types'
 
 /**
@@ -117,15 +118,11 @@ export async function updateCategory(
  */
 export async function deleteCategory(id: string): Promise<void> {
     if (window.electronAPI) {
-        // Check local products
         const products = await window.electronAPI.dbQuery('SELECT id FROM Product WHERE categoryId = ?', [id]);
         if (products.length > 0) {
             throw new Error(`No se puede eliminar: hay ${products.length} producto(s) en esta categoría`);
         }
-
-        // For hard delete in local, it's tricky to sync unless we use a SyncQueue for deletions.
-        // For now, let's just do isActive = 0 or a hard delete and assume user wants it gone.
-        // If we want it to sync delete, we need to track deletions.
+        await deleteSubcategoriesByCategoryId(id)
         await window.electronAPI.dbExecute('DELETE FROM Category WHERE id = ?', [id]);
         return;
     }
@@ -140,6 +137,8 @@ export async function deleteCategory(id: string): Promise<void> {
     if ((count ?? 0) > 0) {
         throw new Error(`No se puede eliminar: hay ${count} producto(s) en esta categoría`)
     }
+
+    await deleteSubcategoriesByCategoryId(id)
 
     const { error } = await supabase
         .from('Category')

@@ -19,11 +19,17 @@ export interface Category {
     sortOrder: number; isActive: boolean; createdAt: Date; updatedAt: Date
 }
 
+export interface Subcategory {
+    id: string; categoryId: string; name: string
+    showDays: number[] | null  // 0=Dom,1=Lun..6=Sab; null=siempre
+    sortOrder: number; isActive: boolean; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
+}
+
 export type ProductUnit = 'UNIDAD' | 'KG' | 'LITRO' | 'PORCION'
 export type SyncStatus = 'PENDING' | 'SYNCED' | 'ERROR'
 export interface Product {
     id: string; name: string; barcode: string | null; categoryId: string
-    category?: Category; price: number; cost: number; unit: ProductUnit
+    subcategoryId?: string | null; category?: Category; price: number; cost: number; unit: ProductUnit
     stockQty: number; minStock: number; isActive: boolean; isInfinite: boolean
     isDeleted?: boolean; imageUrl: string | null; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
 }

@@ -15,6 +15,8 @@ import { sendReceiptEmail } from '@/services/emailReceipt'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
 import { SearchDropdown } from '@/components/molecules/SearchDropdown'
 import { ProductCatalog } from '@/components/organisms/pos/ProductCatalog'
+import { SegmentedCatalog } from '@/components/organisms/pos/SegmentedCatalog'
+import { useSubcategories } from '@/hooks/useSubcategories'
 import { CartTable } from '@/components/organisms/pos/CartTable'
 import { CartPanel } from '@/components/organisms/pos/CartPanel'
 import { PaymentPanel } from '@/components/organisms/pos/PaymentPanel'
@@ -32,6 +34,7 @@ export function POSPage() {
     // ── Data ────────────────────────────────────────────────────────────────
     const { data: products = [], isLoading } = useProducts()
     const { data: categories = [] } = useCategories()
+    const { data: subcategories = [] } = useSubcategories()
     const { data: clients = [] } = useClients()
     const { data: employees = [] } = useEmployees()
     const createSale = useCreateSale()
@@ -347,6 +350,19 @@ export function POSPage() {
             normalizeStr(categories.find(c => c.id === p.categoryId)?.name ?? '').includes(q)
     })
 
+    // ── Segmented grid: subcategories of selected category visible today ─────
+    const today = new Date().getDay()
+    const visibleSubcats = selectedCategory
+        ? subcategories
+            .filter(s =>
+                s.categoryId === selectedCategory &&
+                s.isActive &&
+                (!s.showDays || s.showDays.includes(today))
+            )
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+        : []
+    const useSegmented = viewMode === 'grid' && selectedCategory !== null && visibleSubcats.length > 0
+
     if (isLoading) {
         return <Spinner size={40} label="Cargando productos..." className="h-full" />
     }
@@ -474,17 +490,26 @@ export function POSPage() {
                 {/* ═══ GRID MODE: product catalog left, cart+payment right ═══ */}
                 {viewMode === 'grid' && (
                     <>
-                        {/* Left: product catalog */}
-                        <div className="flex-1 min-w-0 overflow-hidden border-r border-[#192030]">
-                            <ProductCatalog
-                                products={gridProducts}
-                                categories={categories}
-                                cartItems={items}
-                                selectedCategory={selectedCategory}
-                                onSelectCategory={setSelectedCategory}
-                                onAddProduct={tryAddProduct}
-                                hideCategoryBar
-                            />
+                        {/* Left: product catalog (segmented or flat) */}
+                        <div className="flex-1 min-w-0 overflow-hidden border-r border-[#192030] flex flex-col">
+                            {useSegmented ? (
+                                <SegmentedCatalog
+                                    products={gridProducts}
+                                    subcategories={visibleSubcats}
+                                    cartItems={items}
+                                    onAddProduct={tryAddProduct}
+                                />
+                            ) : (
+                                <ProductCatalog
+                                    products={gridProducts}
+                                    categories={categories}
+                                    cartItems={items}
+                                    selectedCategory={selectedCategory}
+                                    onSelectCategory={setSelectedCategory}
+                                    onAddProduct={tryAddProduct}
+                                    hideCategoryBar
+                                />
+                            )}
                         </div>
 
                         {/* Right: cart (fixed height) + payment (remaining) */}

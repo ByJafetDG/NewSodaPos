@@ -107,9 +107,9 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
 
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(`
-            INSERT INTO Product (id, name, barcode, categoryId, price, cost, minStock, stockQty, isActive, isInfinite, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'PENDING', ?)
-        `, [id, input.name, input.barcode || null, input.categoryId, input.price, input.cost || 0, input.minStock || 0, input.stockQty || 0, input.isInfinite ? 1 : 0, now]);
+            INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, price, cost, minStock, stockQty, isActive, isInfinite, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'PENDING', ?)
+        `, [id, input.name, input.barcode || null, input.categoryId, input.subcategoryId ?? null, input.price, input.cost || 0, input.minStock || 0, input.stockQty || 0, input.isInfinite ? 1 : 0, now]);
 
         return { ...input, id, isActive: true, updatedAt: now } as unknown as Product;
     }
