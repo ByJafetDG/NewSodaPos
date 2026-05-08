@@ -33,6 +33,7 @@ export interface ElectronAPI {
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void
     installUpdate: () => Promise<void>
     checkForUpdate: () => Promise<void>
+    openDevTools: () => Promise<void>
     platform: string
     isElectron: true
 }

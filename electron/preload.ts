@@ -48,6 +48,7 @@ const electronAPI = {
     },
     installUpdate: () => ipcRenderer.invoke('update:install'),
     checkForUpdate: () => ipcRenderer.invoke('update:check'),
+    openDevTools: () => ipcRenderer.invoke('devtools:open'),
 
     // Platform detection
     platform: process.platform,

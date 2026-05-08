@@ -668,7 +668,16 @@ export function SettingsPage() {
                                     </div>
                                 </div>
 
-                                {/* Force re-sync */}
+                                {/* DevTools + Force re-sync */}
+                                {window.electronAPI && (
+                                    <button
+                                        onClick={() => window.electronAPI!.openDevTools()}
+                                        className="w-full flex items-center justify-center gap-2 h-9 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#3D506A] text-[12px] font-medium hover:text-[#7A8FAA] hover:bg-[#1C2438] transition-colors cursor-pointer"
+                                    >
+                                        <Monitor size={13} />
+                                        Abrir consola (DevTools)
+                                    </button>
+                                )}
                                 {window.electronAPI && (
                                     <button
                                         onClick={async () => {
@@ -682,7 +691,7 @@ export function SettingsPage() {
                                                         .map(([t, n]) => `${t}: ${n}`)
                                                         .join(', ')
                                                     const firstError = result.pushErrors?.[0] ?? ''
-                                                    toast.warning(`Sync incompleto (${details})${firstError ? ` — ${firstError}` : ''}`)
+                                                    toast.warning(`Sync incompleto (${details})${firstError ? ` — ${firstError}` : ''}`, 15000)
                                                 }
                                             } catch {
                                                 toast.error('Error al re-sincronizar')

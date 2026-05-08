@@ -524,3 +524,4 @@ autoUpdater.on('update-downloaded', () => {
 
 ipcMain.handle('update:install', () => autoUpdater.quitAndInstall())
 ipcMain.handle('update:check', () => autoUpdater.checkForUpdates())
+ipcMain.handle('devtools:open', () => mainWindow?.webContents.openDevTools())
