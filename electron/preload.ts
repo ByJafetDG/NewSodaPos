@@ -37,6 +37,11 @@ const electronAPI = {
             ipcRenderer.removeListener('db-changed', subscription);
         };
     },
+    onSyncLog: (callback: (data: { level: string; msg: string }) => void) => {
+        const subscription = (_event: any, data: any) => callback(data);
+        ipcRenderer.on('sync-log', subscription);
+        return () => { ipcRenderer.removeListener('sync-log', subscription); };
+    },
 
     // Updates
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => {

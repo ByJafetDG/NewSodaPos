@@ -10,6 +10,13 @@ function notifyUI(table: string) {
     }
 }
 
+function logError(msg: string) {
+    console.error(`[SyncEngine] ${msg}`);
+    if (windowRef && !windowRef.isDestroyed()) {
+        windowRef.webContents.send('sync-log', { level: 'error', msg });
+    }
+}
+
 /**
  * Sync Engine - Handles background synchronization between SQLite and Supabase
  */
@@ -286,13 +293,14 @@ export async function pushSync(): Promise<string[]> {
                 expensesTotal: reg.expensesTotal,
                 notes: reg.notes,
                 status: reg.status,
+                syncStatus: 'SYNCED',
                 updatedAt: new Date().toISOString()
             });
             if (error) throw error;
             execute(`UPDATE CashRegister SET syncStatus = 'SYNCED' WHERE id = ?`, [reg.id]);
         } catch (err: any) {
             const msg = `CashRegister ${reg.id}: ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
@@ -314,7 +322,7 @@ export async function pushSync(): Promise<string[]> {
             execute(`UPDATE Employee SET syncStatus = 'SYNCED' WHERE id = ?`, [emp.id]);
         } catch (err: any) {
             const msg = `Employee ${emp.id}: ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
@@ -331,13 +339,14 @@ export async function pushSync(): Promise<string[]> {
                 company: client.company,
                 notes: client.notes,
                 isActive: !!client.isActive,
+                syncStatus: 'SYNCED',
                 updatedAt: new Date().toISOString()
             });
             if (error) throw error;
             execute(`UPDATE Client SET syncStatus = 'SYNCED' WHERE id = ?`, [client.id]);
         } catch (err: any) {
             const msg = `Client ${client.id}: ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
@@ -358,7 +367,7 @@ export async function pushSync(): Promise<string[]> {
             execute(`UPDATE Category SET syncStatus = 'SYNCED' WHERE id = ?`, [cat.id]);
         } catch (err: any) {
             const msg = `Category ${cat.id}: ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
@@ -373,13 +382,14 @@ export async function pushSync(): Promise<string[]> {
                 showDays: sub.showDays ?? null,
                 sortOrder: sub.sortOrder,
                 isActive: !!sub.isActive,
+                syncStatus: 'SYNCED',
                 updatedAt: new Date().toISOString()
             });
             if (error) throw error;
             execute(`UPDATE Subcategory SET syncStatus = 'SYNCED' WHERE id = ?`, [sub.id]);
         } catch (err: any) {
             const msg = `Subcategory ${sub.id}: ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
@@ -402,6 +412,7 @@ export async function pushSync(): Promise<string[]> {
                 isInfinite: !!prod.isInfinite,
                 isDeleted: !!prod.isDeleted,
                 imageUrl: prod.imageUrl,
+                syncStatus: 'SYNCED',
                 updatedAt: new Date().toISOString()
             });
             if (error) throw error;
@@ -426,12 +437,12 @@ export async function pushSync(): Promise<string[]> {
                     console.log(`[SyncEngine] Product ${prod.id} (${prod.name}): barcode conflict resolved, barcode cleared.`);
                 } catch (retryErr: any) {
                     const msg = `Product ${prod.id} (${prod.name}) retry: ${retryErr?.message ?? retryErr}`;
-                    console.error(`[SyncEngine] ${msg}`);
+                    logError(msg);
                     errors.push(msg);
                 }
             } else {
                 const msg = `Product ${prod.id} (${prod.name}): ${errMsg}`;
-                console.error(`[SyncEngine] ${msg}`);
+                logError(msg);
                 errors.push(msg);
             }
         }
@@ -456,6 +467,7 @@ export async function pushSync(): Promise<string[]> {
                 clientId: sale.clientId,
                 status: sale.status,
                 notes: sale.notes,
+                syncStatus: 'SYNCED',
                 updatedAt: new Date().toISOString()
             });
             if (saleError) throw saleError;
@@ -474,7 +486,7 @@ export async function pushSync(): Promise<string[]> {
             execute(`UPDATE Sale SET syncStatus = 'SYNCED' WHERE id = ?`, [sale.id]);
         } catch (err: any) {
             const msg = `Sale ${sale.id} (#${sale.saleNumber}): ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
@@ -497,7 +509,7 @@ export async function pushSync(): Promise<string[]> {
             execute(`UPDATE Expense SET syncStatus = 'SYNCED' WHERE id = ?`, [exp.id]);
         } catch (err: any) {
             const msg = `Expense ${exp.id}: ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
@@ -513,13 +525,14 @@ export async function pushSync(): Promise<string[]> {
                 cost: mov.cost,
                 reference: mov.reference,
                 notes: mov.notes,
-                date: mov.date
+                date: mov.date,
+                syncStatus: 'SYNCED'
             });
             if (error) throw error;
             execute(`UPDATE InventoryMovement SET syncStatus = 'SYNCED' WHERE id = ?`, [mov.id]);
         } catch (err: any) {
             const msg = `InventoryMovement ${mov.id}: ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
@@ -534,13 +547,14 @@ export async function pushSync(): Promise<string[]> {
                 method: pay.method,
                 reference: pay.reference,
                 notes: pay.notes,
-                date: pay.date
+                date: pay.date,
+                syncStatus: 'SYNCED'
             });
             if (error) throw error;
             execute(`UPDATE Payment SET syncStatus = 'SYNCED' WHERE id = ?`, [pay.id]);
         } catch (err: any) {
             const msg = `Payment ${pay.id}: ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
+            logError(msg);
             errors.push(msg);
         }
     }
