@@ -8,6 +8,7 @@ import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { useSubcategories } from '@/hooks/useSubcategories'
 import { formatCurrency, cn } from '@/lib/utils'
+import { toast } from '@/components/ui/Toast'
 import type { Product, Category, ProductUnit, Subcategory } from '@/types'
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
@@ -221,7 +222,21 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
                                     >
                                         {step === 'draft-prompt'  && <DraftPromptStep data={data} isEdit={!!product} onContinue={() => go('name', 1)} onDiscard={discardDraft} onClose={handleClose} />}
                                         {step === 'name'          && <NameStep value={data.name} onChange={v => setData(d => ({ ...d, name: v }))} onNext={() => advance('barcode')} />}
-                                        {step === 'barcode'       && <BarcodeStep value={data.barcode} onChange={v => setData(d => ({ ...d, barcode: v }))} onNext={() => advance('unit')} onSkip={() => { setData(d => ({ ...d, barcode: '' })); advance('unit') }} />}
+                                        {step === 'barcode'       && <BarcodeStep value={data.barcode} onChange={v => setData(d => ({ ...d, barcode: v }))} onNext={async () => {
+                                            const barcode = data.barcode.trim()
+                                            if (barcode && window.electronAPI) {
+                                                const rows = await window.electronAPI.dbQuery(
+                                                    `SELECT name FROM Product WHERE barcode = ? AND id != ? AND (isDeleted IS NULL OR isDeleted != 1) LIMIT 1`,
+                                                    [barcode, product?.id ?? '']
+                                                )
+                                                if (rows.length > 0) {
+                                                    toast.error(`Ese código ya pertenece a "${rows[0].name}"`)
+                                                    setData(d => ({ ...d, barcode: '' }))
+                                                    return
+                                                }
+                                            }
+                                            advance('unit')
+                                        }} onSkip={() => { setData(d => ({ ...d, barcode: '' })); advance('unit') }} />}
                                         {step === 'unit'          && <UnitStep value={data.unit} onSelect={u => { setData(d => ({ ...d, unit: u })); advance('category') }} />}
                                         {step === 'category'      && <CategoryStep value={data.categoryId} categories={activeCategories} onChange={id => setData(d => ({ ...d, categoryId: id, subcategoryId: '' }))} onNext={() => catSubcats.length > 0 ? advance('subcategory') : advance('numbers')} />}
                                         {step === 'subcategory'   && <SubcategoryStep value={data.subcategoryId} subcategories={catSubcats} onChange={id => setData(d => ({ ...d, subcategoryId: id }))} onNext={() => advance('numbers')} onSkip={() => { setData(d => ({ ...d, subcategoryId: '' })); advance('numbers') }} />}

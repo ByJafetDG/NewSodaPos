@@ -407,9 +407,33 @@ export async function pushSync(): Promise<string[]> {
             if (error) throw error;
             execute(`UPDATE Product SET syncStatus = 'SYNCED' WHERE id = ?`, [prod.id]);
         } catch (err: any) {
-            const msg = `Product ${prod.id} (${prod.name}): ${err?.message ?? err}`;
-            console.error(`[SyncEngine] ${msg}`);
-            errors.push(msg);
+            const errMsg: string = err?.message ?? String(err);
+            if (errMsg.includes('Product_barcode_key')) {
+                // Barcode conflict — null it out locally and retry without it
+                execute(`UPDATE Product SET barcode = NULL WHERE id = ?`, [prod.id]);
+                try {
+                    const { error: retryErr } = await supabase.from('Product').upsert({
+                        id: prod.id, name: prod.name, barcode: null,
+                        categoryId: prod.categoryId, subcategoryId: prod.subcategoryId ?? null,
+                        price: prod.price, cost: prod.cost, unit: prod.unit,
+                        stockQty: prod.stockQty, minStock: prod.minStock,
+                        isActive: !!prod.isActive, isInfinite: !!prod.isInfinite,
+                        isDeleted: !!prod.isDeleted, imageUrl: prod.imageUrl,
+                        updatedAt: new Date().toISOString()
+                    });
+                    if (retryErr) throw retryErr;
+                    execute(`UPDATE Product SET syncStatus = 'SYNCED' WHERE id = ?`, [prod.id]);
+                    console.log(`[SyncEngine] Product ${prod.id} (${prod.name}): barcode conflict resolved, barcode cleared.`);
+                } catch (retryErr: any) {
+                    const msg = `Product ${prod.id} (${prod.name}) retry: ${retryErr?.message ?? retryErr}`;
+                    console.error(`[SyncEngine] ${msg}`);
+                    errors.push(msg);
+                }
+            } else {
+                const msg = `Product ${prod.id} (${prod.name}): ${errMsg}`;
+                console.error(`[SyncEngine] ${msg}`);
+                errors.push(msg);
+            }
         }
     }
 
