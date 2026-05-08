@@ -19,11 +19,15 @@ export function SegmentedCatalog({ products, subcategories, cartItems, onAddProd
     grouped.set(null, [])
 
     for (const product of products) {
-        if (product.subcategoryId && !visibleSubcatIds.has(product.subcategoryId)) continue
-        const key = product.subcategoryId && visibleSubcatIds.has(product.subcategoryId)
-            ? product.subcategoryId
-            : null
-        grouped.get(key)?.push(product)
+        const ids = product.subcategoryIds ?? []
+        const matchedSubs = ids.filter(id => visibleSubcatIds.has(id))
+        if (matchedSubs.length > 0) {
+            for (const subId of matchedSubs) {
+                grouped.get(subId)!.push(product)
+            }
+        } else {
+            grouped.get(null)!.push(product)
+        }
     }
 
     const generalProds = grouped.get(null) ?? []

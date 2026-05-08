@@ -232,6 +232,12 @@ export function initDb() {
       FOREIGN KEY (categoryId) REFERENCES Category(id)
     );
 
+    CREATE TABLE IF NOT EXISTS ProductSubcategory (
+      productId TEXT NOT NULL,
+      subcategoryId TEXT NOT NULL,
+      PRIMARY KEY (productId, subcategoryId)
+    );
+
     CREATE TABLE IF NOT EXISTS Employee (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -331,6 +337,17 @@ export function initDb() {
     db.exec(`ALTER TABLE Product ADD COLUMN subcategoryId TEXT`);
   } catch {
     // Already exists
+  }
+
+  // Migrate existing subcategoryId → ProductSubcategory junction table
+  try {
+    db.exec(`
+      INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId)
+      SELECT id, subcategoryId FROM Product
+      WHERE subcategoryId IS NOT NULL AND subcategoryId != ''
+    `);
+  } catch {
+    // Already migrated or table missing
   }
 }
 

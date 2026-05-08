@@ -1,8 +1,9 @@
 import { useState, Fragment } from 'react'
-import { Search, Plus, Settings2, Edit3, Trash2, Package, Infinity } from 'lucide-react'
+import { Search, Plus, Settings2, Edit3, Trash2, Package, Infinity, Eye } from 'lucide-react'
 import { Badge } from '@/components/atoms/Badge'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
+import { POSPreviewModal } from '@/components/modals/POSPreviewModal'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import type { Product, Category, Subcategory } from '@/types'
@@ -51,12 +52,24 @@ export function ProductsTable({
 }: ProductsTableProps) {
     const [search, setSearch] = useState('')
     const [selectedCat, setSelectedCat] = useState<string | null>(null)
+    const [selectedSub, setSelectedSub] = useState<string | null>(null)
+    const [previewOpen, setPreviewOpen] = useState(false)
     const searchKb = useKeyboardInput(search, setSearch, { mode: 'alpha' })
 
-    const filtered = products.filter(p =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        (p.barcode ?? '').includes(search)
-    )
+    const catSubcategories = selectedCat
+        ? subcategories.filter(s => s.categoryId === selectedCat && s.isActive)
+        : []
+
+    function selectCat(id: string | null) {
+        setSelectedCat(id)
+        setSelectedSub(null)
+    }
+
+    const filtered = products.filter(p => {
+        const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) || (p.barcode ?? '').includes(search)
+        const matchSub = !selectedSub || (p.subcategoryIds ?? []).includes(selectedSub)
+        return matchSearch && matchSub
+    })
 
     const grouped = categories
         .filter(c => c.isActive)
@@ -96,7 +109,7 @@ export function ProductsTable({
             {categories.filter(c => c.isActive).length > 0 && (
                 <div className="flex items-center gap-1.5 px-4 py-2 border-b border-[#192030] overflow-x-auto shrink-0">
                     <button
-                        onClick={() => setSelectedCat(null)}
+                        onClick={() => selectCat(null)}
                         className={cn(
                             'px-3 h-7 rounded-lg text-[12px] font-medium border transition-all cursor-pointer whitespace-nowrap',
                             !selectedCat
@@ -109,7 +122,7 @@ export function ProductsTable({
                     {categories.filter(c => c.isActive).map(cat => (
                         <button
                             key={cat.id}
-                            onClick={() => setSelectedCat(selectedCat === cat.id ? null : cat.id)}
+                            onClick={() => selectCat(selectedCat === cat.id ? null : cat.id)}
                             className={cn(
                                 'px-3 h-7 rounded-lg text-[12px] font-medium border transition-all cursor-pointer whitespace-nowrap',
                                 selectedCat === cat.id
@@ -122,6 +135,59 @@ export function ProductsTable({
                     ))}
                 </div>
             )}
+
+            {/* Vista POS button — when a category is selected */}
+            {selectedCat && (
+                <div className="flex justify-end px-4 py-1.5 border-b border-[#192030] shrink-0 bg-[#0D1020]/40">
+                    <button
+                        onClick={() => setPreviewOpen(true)}
+                        className="flex items-center gap-1.5 px-3 h-7 rounded-lg text-[11px] font-medium bg-violet-500/10 border border-violet-500/20 text-violet-400 hover:bg-violet-500/20 transition-all cursor-pointer"
+                    >
+                        <Eye size={12} />
+                        Vista POS
+                    </button>
+                </div>
+            )}
+
+            {/* Subcategory filter pills — only when a category is selected and has subcategories */}
+            {catSubcategories.length > 0 && (
+                <div className="flex items-center gap-1.5 px-4 py-1.5 border-b border-[#192030] overflow-x-auto shrink-0 bg-[#0D1020]/40">
+                    <button
+                        onClick={() => setSelectedSub(null)}
+                        className={cn(
+                            'px-2.5 h-6 rounded-md text-[11px] font-medium border transition-all cursor-pointer whitespace-nowrap',
+                            !selectedSub
+                                ? 'bg-violet-500/15 border-violet-500/30 text-violet-400'
+                                : 'bg-transparent border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        Todas
+                    </button>
+                    {catSubcategories.map(sub => (
+                        <button
+                            key={sub.id}
+                            onClick={() => setSelectedSub(selectedSub === sub.id ? null : sub.id)}
+                            className={cn(
+                                'px-2.5 h-6 rounded-md text-[11px] font-medium border transition-all cursor-pointer whitespace-nowrap',
+                                selectedSub === sub.id
+                                    ? 'bg-violet-500/15 border-violet-500/30 text-violet-400'
+                                    : 'bg-transparent border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA]'
+                            )}
+                        >
+                            {sub.name}
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            {/* POS Preview Modal */}
+            <POSPreviewModal
+                isOpen={previewOpen}
+                onClose={() => setPreviewOpen(false)}
+                category={categories.find(c => c.id === selectedCat) ?? null}
+                products={products}
+                subcategories={subcategories}
+            />
 
             {/* Table */}
             <div className="flex-1 overflow-y-auto">
@@ -159,7 +225,7 @@ export function ProductsTable({
                                         <ProductRow
                                             key={product.id}
                                             product={product}
-                                            subName={subcategories.find(s => s.id === product.subcategoryId)?.name ?? null}
+                                            subNames={subcategories.filter(s => (product.subcategoryIds ?? []).includes(s.id)).map(s => s.name)}
                                             onEdit={onEdit}
                                             onDelete={onDelete}
                                             onToggle={onToggle}
@@ -178,7 +244,7 @@ export function ProductsTable({
                                         <ProductRow
                                             key={product.id}
                                             product={product}
-                                            subName={subcategories.find(s => s.id === product.subcategoryId)?.name ?? null}
+                                            subNames={subcategories.filter(s => (product.subcategoryIds ?? []).includes(s.id)).map(s => s.name)}
                                             onEdit={onEdit}
                                             onDelete={onDelete}
                                             onToggle={onToggle}
@@ -196,13 +262,13 @@ export function ProductsTable({
 
 function ProductRow({
     product,
-    subName,
+    subNames,
     onEdit,
     onDelete,
     onToggle,
 }: {
     product: Product
-    subName: string | null
+    subNames: string[]
     onEdit: (p: Product) => void
     onDelete: (p: Product) => void
     onToggle: (p: Product) => void
@@ -219,8 +285,8 @@ function ProductRow({
                     <span className="font-medium text-[#E4ECF7]">{product.name}</span>
                     <span className="text-[10px] text-[#3D506A]">{product.unit}</span>
                 </div>
-                {subName && (
-                    <span className="text-[10px] text-violet-400 mt-0.5 block">{subName}</span>
+                {subNames.length > 0 && (
+                    <span className="text-[10px] text-violet-400 mt-0.5 block">{subNames.join(', ')}</span>
                 )}
             </td>
             <td className="px-3 py-3">

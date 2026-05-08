@@ -24,6 +24,16 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
     if (mainWindow) windowRef = mainWindow;
     console.log(`[SyncEngine] Starting... ${readOnly ? '(READ-ONLY — push disabled in dev mode)' : ''}`);
 
+    // In dev/read-only mode, reset all local PENDING records to SYNCED so the
+    // initial pullSync overwrites them with Supabase data instead of preserving stale local data.
+    if (readOnly) {
+        const masterTables = ['Product', 'Category', 'Client', 'Employee', 'Subcategory', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment'];
+        for (const t of masterTables) {
+            try { execute(`UPDATE ${t} SET syncStatus = 'SYNCED' WHERE syncStatus = 'PENDING' OR syncStatus IS NULL`, []); } catch {}
+        }
+        console.log('[SyncEngine] Dev mode: reset local syncStatus to SYNCED — Supabase will overwrite on pull.');
+    }
+
     // HOTFIX: Resolve saleNumber conflicts by shifting pending sales forward once
     // This clears the conflict with existing sales in Supabase (like #60, #61)
     try {
@@ -246,6 +256,127 @@ async function pullSync() {
                 }
             });
         }
+        // 7. Sync ProductSubcategory junction table
+        const { data: productSubcats, error: psError } = await supabase.from('ProductSubcategory').select('*');
+        if (psError) throw psError;
+        if (productSubcats) {
+            transaction(() => {
+                execute('DELETE FROM ProductSubcategory', []);
+                for (const ps of productSubcats) {
+                    execute(
+                        'INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId) VALUES (?, ?)',
+                        [ps.productId, ps.subcategoryId]
+                    );
+                }
+            });
+        }
+
+        // 8. Sync Subcategories (referenced by Product)
+        const { data: subcategories, error: subError } = await supabase.from('Subcategory').select('*');
+        if (subError) throw subError;
+        if (subcategories) {
+            transaction(() => {
+                for (const sub of subcategories) {
+                    execute(`
+                        INSERT INTO Subcategory (id, categoryId, name, showDays, sortOrder, isActive, syncStatus, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                          categoryId = excluded.categoryId,
+                          name = excluded.name,
+                          showDays = excluded.showDays,
+                          sortOrder = excluded.sortOrder,
+                          isActive = excluded.isActive,
+                          syncStatus = 'SYNCED',
+                          updatedAt = excluded.updatedAt
+                    `, [sub.id, sub.categoryId, sub.name, sub.showDays ?? null, sub.sortOrder, sub.isActive ? 1 : 0, sub.updatedAt]);
+                }
+            });
+        }
+
+        // 8. Sync CashRegisters (parent of Sale and Expense)
+        const { data: registers, error: regError } = await supabase.from('CashRegister').select('*');
+        if (regError) throw regError;
+        if (registers) {
+            transaction(() => {
+                for (const reg of registers) {
+                    execute(`
+                        INSERT OR REPLACE INTO CashRegister (id, openedAt, closedAt, initialAmount, finalAmount, salesCash, salesCard, salesSinpe, salesTransfer, salesCredit, expensesTotal, notes, status, syncStatus, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                    `, [reg.id, reg.openedAt, reg.closedAt ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
+                }
+            });
+        }
+
+        // 9. Sync Sales (depends on CashRegister, Client)
+        const { data: sales, error: saleError } = await supabase.from('Sale').select('*');
+        if (saleError) throw saleError;
+        if (sales) {
+            transaction(() => {
+                for (const sale of sales) {
+                    execute(`
+                        INSERT OR REPLACE INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                    `, [sale.id, sale.saleNumber, sale.date, sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt]);
+                }
+            });
+        }
+
+        // 10. Sync SaleItems (depends on Sale, Product)
+        const { data: saleItems, error: saleItemError } = await supabase.from('SaleItem').select('*');
+        if (saleItemError) throw saleItemError;
+        if (saleItems) {
+            transaction(() => {
+                for (const item of saleItems) {
+                    execute(`
+                        INSERT OR REPLACE INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    `, [item.id, item.saleId, item.productId, item.quantity, item.unitPrice, item.subtotal, item.notes ?? null]);
+                }
+            });
+        }
+
+        // 11. Sync Expenses (depends on CashRegister, ExpenseCategory)
+        const { data: expenses, error: expError } = await supabase.from('Expense').select('*');
+        if (expError) throw expError;
+        if (expenses) {
+            transaction(() => {
+                for (const exp of expenses) {
+                    execute(`
+                        INSERT OR REPLACE INTO Expense (id, description, amount, categoryId, supplier, date, notes, cashRegisterId, syncStatus, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                    `, [exp.id, exp.description, exp.amount, exp.categoryId, exp.supplier ?? null, exp.date, exp.notes ?? null, exp.cashRegisterId ?? null, exp.updatedAt]);
+                }
+            });
+        }
+
+        // 12. Sync InventoryMovements (depends on Product)
+        const { data: movements, error: movError } = await supabase.from('InventoryMovement').select('*');
+        if (movError) throw movError;
+        if (movements) {
+            transaction(() => {
+                for (const mov of movements) {
+                    execute(`
+                        INSERT OR REPLACE INTO InventoryMovement (id, productId, type, quantity, cost, reference, notes, date, syncStatus)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED')
+                    `, [mov.id, mov.productId, mov.type, mov.quantity, mov.cost ?? null, mov.reference ?? null, mov.notes ?? null, mov.date]);
+                }
+            });
+        }
+
+        // 13. Sync Payments (depends on Client)
+        const { data: payments, error: payError } = await supabase.from('Payment').select('*');
+        if (payError) throw payError;
+        if (payments) {
+            transaction(() => {
+                for (const pay of payments) {
+                    execute(`
+                        INSERT OR REPLACE INTO Payment (id, clientId, amount, method, reference, notes, date, syncStatus)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED')
+                    `, [pay.id, pay.clientId, pay.amount, pay.method, pay.reference ?? null, pay.notes ?? null, pay.date]);
+                }
+            });
+        }
+
         console.log('[SyncEngine] Pull items success.');
     } catch (err) {
         console.error('[SyncEngine] Pull failed:', err);
@@ -447,6 +578,19 @@ export async function pushSync(): Promise<string[]> {
                 logError(msg);
                 errors.push(msg);
             }
+            continue;
+        }
+        // Sync ProductSubcategory for this product
+        try {
+            const subcatRows = query('SELECT subcategoryId FROM ProductSubcategory WHERE productId = ?', [prod.id]) as any[];
+            await supabase.from('ProductSubcategory').delete().eq('productId', prod.id);
+            if (subcatRows.length > 0) {
+                await supabase.from('ProductSubcategory').insert(
+                    subcatRows.map(r => ({ productId: prod.id, subcategoryId: r.subcategoryId }))
+                );
+            }
+        } catch (subErr: any) {
+            logError(`ProductSubcategory for ${prod.id}: ${subErr?.message ?? subErr}`);
         }
     }
 
@@ -666,6 +810,23 @@ function setupRealtimeSubscriptions() {
             syncStatus =    CASE WHEN Product.syncStatus = 'PENDING' THEN 'PENDING'             ELSE 'SYNCED'               END,
             updatedAt =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.updatedAt     ELSE excluded.updatedAt     END
         `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, prod.updatedAt]);
+                notifyUI('Product');
+            }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ProductSubcategory' }, (payload) => {
+            if (payload.eventType === 'INSERT') {
+                const ps = payload.new as any;
+                if (!ps?.productId || !ps?.subcategoryId) return;
+                try {
+                    execute('INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId) VALUES (?, ?)', [ps.productId, ps.subcategoryId]);
+                } catch {}
+                notifyUI('Product');
+            } else if (payload.eventType === 'DELETE') {
+                const ps = payload.old as any;
+                if (!ps?.productId || !ps?.subcategoryId) return;
+                try {
+                    execute('DELETE FROM ProductSubcategory WHERE productId = ? AND subcategoryId = ?', [ps.productId, ps.subcategoryId]);
+                } catch {}
                 notifyUI('Product');
             }
         })

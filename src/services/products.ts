@@ -1,52 +1,54 @@
 import { supabase } from '@/lib/supabase'
 import type { Product } from '@/types'
 
-/**
- * Get all active products with their category
- */
 export async function getProducts(activeOnly = true): Promise<Product[]> {
     if (window.electronAPI) {
-        // Use local SQLite in Electron
         let sql = `
-            SELECT p.*, c.name as cat_name, c.type as cat_type
+            SELECT p.*, c.name as cat_name, c.type as cat_type,
+              GROUP_CONCAT(ps.subcategoryId) as subcatIds
             FROM Product p
             LEFT JOIN Category c ON p.categoryId = c.id
+            LEFT JOIN ProductSubcategory ps ON p.id = ps.productId
             WHERE (p.isDeleted IS NULL OR p.isDeleted != 1)
         `;
         if (activeOnly) sql += ' AND p.isActive = 1';
-        sql += ' ORDER BY p.name ASC';
+        sql += ' GROUP BY p.id ORDER BY p.name ASC';
 
         const data = await window.electronAPI.dbQuery(sql);
         return data.map(p => ({
             ...p,
             isActive: !!p.isActive,
             isInfinite: !!p.isInfinite,
-            category: { id: p.categoryId, name: p.cat_name, type: p.cat_type }
+            category: { id: p.categoryId, name: p.cat_name, type: p.cat_type },
+            subcategoryIds: p.subcatIds ? p.subcatIds.split(',') : [],
         })) as unknown as Product[];
     }
 
     let query = supabase
         .from('Product')
-        .select('*, category:Category(*)')
+        .select('*, category:Category(*), productSubcategories:ProductSubcategory(subcategoryId)')
         .order('name')
 
     if (activeOnly) query = query.eq('isActive', true)
 
     const { data, error } = await query
     if (error) throw error
-    return (data ?? []) as unknown as Product[]
+    return (data ?? []).map((p: any) => ({
+        ...p,
+        subcategoryIds: (p.productSubcategories ?? []).map((ps: any) => ps.subcategoryId),
+    })) as unknown as Product[]
 }
 
-/**
- * Get product by barcode
- */
 export async function getProductByBarcode(barcode: string): Promise<Product | null> {
     if (window.electronAPI) {
         const sql = `
-            SELECT p.*, c.name as cat_name, c.type as cat_type
+            SELECT p.*, c.name as cat_name, c.type as cat_type,
+              GROUP_CONCAT(ps.subcategoryId) as subcatIds
             FROM Product p
             LEFT JOIN Category c ON p.categoryId = c.id
+            LEFT JOIN ProductSubcategory ps ON p.id = ps.productId
             WHERE p.barcode = ? AND p.isActive = 1
+            GROUP BY p.id
             LIMIT 1
         `;
         const data = await window.electronAPI.dbQuery(sql, [barcode]);
@@ -55,121 +57,162 @@ export async function getProductByBarcode(barcode: string): Promise<Product | nu
         return {
             ...p,
             isActive: !!p.isActive,
-            category: { id: p.categoryId, name: p.cat_name, type: p.cat_type }
+            category: { id: p.categoryId, name: p.cat_name, type: p.cat_type },
+            subcategoryIds: p.subcatIds ? p.subcatIds.split(',') : [],
         } as unknown as Product;
     }
 
     const { data, error } = await supabase
         .from('Product')
-        .select('*, category:Category(*)')
+        .select('*, category:Category(*), productSubcategories:ProductSubcategory(subcategoryId)')
         .eq('barcode', barcode)
         .eq('isActive', true)
         .maybeSingle()
 
     if (error) throw error
-    return data as unknown as Product | null
+    if (!data) return null
+    return {
+        ...data,
+        subcategoryIds: ((data as any).productSubcategories ?? []).map((ps: any) => ps.subcategoryId),
+    } as unknown as Product
 }
 
-/**
- * Get products stock levels
- */
 export async function getProductsStock(): Promise<any[]> {
     if (window.electronAPI) {
         const sql = `
-            SELECT p.*, c.name as cat_name
+            SELECT p.*, c.name as cat_name,
+              GROUP_CONCAT(ps.subcategoryId) as subcatIds
             FROM Product p
             LEFT JOIN Category c ON p.categoryId = c.id
+            LEFT JOIN ProductSubcategory ps ON p.id = ps.productId
             WHERE (p.isDeleted IS NULL OR p.isDeleted != 1)
+            GROUP BY p.id
             ORDER BY p.stockQty ASC
         `;
         const data = await window.electronAPI.dbQuery(sql);
         return data.map(p => ({
             ...p,
-            category: { name: p.cat_name }
+            category: { name: p.cat_name },
+            subcategoryIds: p.subcatIds ? p.subcatIds.split(',') : [],
         }));
     }
 
     const { data, error } = await supabase
         .from('Product')
-        .select('*, category:Category(name)')
+        .select('*, category:Category(name), productSubcategories:ProductSubcategory(subcategoryId)')
         .or('isDeleted.is.null,isDeleted.eq.false')
         .order('stockQty')
 
     if (error) throw error
-    return data ?? []
+    return (data ?? []).map((p: any) => ({
+        ...p,
+        subcategoryIds: (p.productSubcategories ?? []).map((ps: any) => ps.subcategoryId),
+    }))
 }
 
-/**
- * Create a new product
- */
 export async function createProduct(input: Partial<Product>): Promise<Product> {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
+    const { subcategoryIds, ...productInput } = input as any
 
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(`
             INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, price, cost, minStock, stockQty, isActive, isInfinite, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'PENDING', ?)
-        `, [id, input.name, input.barcode || null, input.categoryId, input.subcategoryId ?? null, input.price, input.cost || 0, input.minStock || 0, input.stockQty || 0, input.isInfinite ? 1 : 0, now]);
+            VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, 'PENDING', ?)
+        `, [id, productInput.name, productInput.barcode || null, productInput.categoryId, productInput.price, productInput.cost || 0, productInput.minStock || 0, productInput.stockQty || 0, productInput.isInfinite ? 1 : 0, now]);
 
-        return { ...input, id, isActive: true, updatedAt: now } as unknown as Product;
+        if (subcategoryIds?.length) {
+            for (const subId of subcategoryIds) {
+                await window.electronAPI.dbExecute(
+                    `INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId) VALUES (?, ?)`,
+                    [id, subId]
+                );
+            }
+        }
+
+        return { ...productInput, id, isActive: true, subcategoryIds: subcategoryIds ?? [], updatedAt: now } as unknown as Product;
     }
 
     const { data, error } = await supabase
         .from('Product')
-        .insert({
-            ...input,
-            id,
-            isActive: true,
-            syncStatus: 'SYNCED',
-            updatedAt: now
-        })
+        .insert({ ...productInput, id, isActive: true, syncStatus: 'SYNCED', updatedAt: now })
         .select()
         .single()
 
     if (error) throw error
-    return data as unknown as Product
+
+    if (subcategoryIds?.length) {
+        await supabase.from('ProductSubcategory').insert(
+            subcategoryIds.map((subId: string) => ({ productId: id, subcategoryId: subId }))
+        )
+    }
+
+    return { ...data, subcategoryIds: subcategoryIds ?? [] } as unknown as Product
 }
 
-/**
- * Update an existing product
- */
 export async function updateProduct(id: string, input: Partial<Product>): Promise<Product> {
     const now = new Date().toISOString()
+    const { subcategoryIds, ...productInput } = input as any
 
     if (window.electronAPI) {
-        const fields = Object.keys(input) as (keyof typeof input)[];
-        const sets = fields.map(f => `${f} = ?`).join(', ');
-        const values = fields.map(f => (typeof input[f] === 'boolean' ? (input[f] ? 1 : 0) : input[f]));
+        const fields = Object.keys(productInput) as string[];
+        if (fields.length > 0) {
+            const sets = fields.map(f => `${f} = ?`).join(', ');
+            const values = fields.map(f => (typeof productInput[f] === 'boolean' ? (productInput[f] ? 1 : 0) : productInput[f]));
+            await window.electronAPI.dbExecute(`
+                UPDATE Product SET ${sets}, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?
+            `, [...values, now, id]);
+        }
 
-        await window.electronAPI.dbExecute(`
-            UPDATE Product SET ${sets}, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?
-        `, [...values, now, id]);
+        if ('subcategoryIds' in input) {
+            await window.electronAPI.dbExecute(`DELETE FROM ProductSubcategory WHERE productId = ?`, [id]);
+            for (const subId of (subcategoryIds ?? [])) {
+                await window.electronAPI.dbExecute(
+                    `INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId) VALUES (?, ?)`,
+                    [id, subId]
+                );
+            }
+        }
 
-        const rows = await window.electronAPI.dbQuery('SELECT * FROM Product WHERE id = ?', [id]);
+        const rows = await window.electronAPI.dbQuery(
+            `SELECT p.*, GROUP_CONCAT(ps.subcategoryId) as subcatIds
+             FROM Product p
+             LEFT JOIN ProductSubcategory ps ON p.id = ps.productId
+             WHERE p.id = ?
+             GROUP BY p.id`,
+            [id]
+        );
         return {
             ...rows[0],
             isActive: !!rows[0].isActive,
-            isInfinite: !!rows[0].isInfinite
+            isInfinite: !!rows[0].isInfinite,
+            subcategoryIds: rows[0].subcatIds ? rows[0].subcatIds.split(',') : [],
         } as unknown as Product;
     }
 
     const { data, error } = await supabase
         .from('Product')
-        .update({ ...input, updatedAt: now })
+        .update({ ...productInput, updatedAt: now })
         .eq('id', id)
         .select()
         .single()
 
     if (error) throw error
-    return data as unknown as Product
+
+    if ('subcategoryIds' in input) {
+        await supabase.from('ProductSubcategory').delete().eq('productId', id)
+        if (subcategoryIds?.length) {
+            await supabase.from('ProductSubcategory').insert(
+                subcategoryIds.map((subId: string) => ({ productId: id, subcategoryId: subId }))
+            )
+        }
+    }
+
+    return { ...data, subcategoryIds: subcategoryIds ?? [] } as unknown as Product
 }
-/**
- * Update product stock (delta can be negative)
- */
+
 export async function updateProductStock(productId: string, delta: number): Promise<void> {
     if (window.electronAPI) {
-        // Check if product is infinite — skip stock update
         const rows = await window.electronAPI.dbQuery('SELECT isInfinite FROM Product WHERE id = ?', [productId]);
         if (rows.length > 0 && rows[0].isInfinite) return;
 
@@ -180,7 +223,6 @@ export async function updateProductStock(productId: string, delta: number): Prom
         return;
     }
 
-    // fallback to Supabase (web-only mode)
     const { data: product, error: fetchError } = await supabase
         .from('Product')
         .select('stockQty, isInfinite')
@@ -188,8 +230,6 @@ export async function updateProductStock(productId: string, delta: number): Prom
         .single()
 
     if (fetchError) throw fetchError
-
-    // Skip stock update for infinite products
     if (product?.isInfinite) return;
 
     const newQty = (product?.stockQty ?? 0) + delta
@@ -202,15 +242,10 @@ export async function updateProductStock(productId: string, delta: number): Prom
     if (error) throw error
 }
 
-/**
- * Delete a product. Returns { soft: true } if product has sales and was archived instead.
- */
 export async function deleteProduct(id: string): Promise<{ soft: boolean }> {
     const now = new Date().toISOString()
 
     if (window.electronAPI) {
-        // Always soft-delete in Electron so Supabase receives isDeleted:true on next push.
-        // Hard deleting from SQLite would leave Supabase with isDeleted:false forever.
         const saleItems = await window.electronAPI.dbQuery(
             'SELECT id FROM SaleItem WHERE productId = ? LIMIT 1', [id]
         )

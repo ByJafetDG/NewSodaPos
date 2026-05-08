@@ -21,11 +21,11 @@ const DRAFT_KEY_NEW = 'pos_product_draft_new'
 const draftKeyEdit = (id: string) => `pos_product_draft_edit_${id}`
 
 type WizardData = {
-    name: string; barcode: string; unit: ProductUnit; categoryId: string; subcategoryId: string
+    name: string; barcode: string; unit: ProductUnit; categoryId: string; subcategoryIds: string[]
     price: string; stockQty: string; minStock: string; isInfinite: boolean; isActive: boolean
 }
 const EMPTY: WizardData = {
-    name: '', barcode: '', unit: 'UNIDAD', categoryId: '', subcategoryId: '',
+    name: '', barcode: '', unit: 'UNIDAD', categoryId: '', subcategoryIds: [],
     price: '', stockQty: '0', minStock: '1', isInfinite: false, isActive: true,
 }
 
@@ -73,7 +73,7 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
             const base: WizardData = {
                 name: product.name, barcode: product.barcode ?? '',
                 unit: product.unit, categoryId: product.categoryId,
-                subcategoryId: product.subcategoryId ?? '',
+                subcategoryIds: product.subcategoryIds ?? [],
                 price: String(product.price), stockQty: String(product.stockQty),
                 minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive,
             }
@@ -124,7 +124,7 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
             name: data.name.trim(),
             barcode: data.barcode.trim() || null,
             categoryId: data.categoryId,
-            subcategoryId: data.subcategoryId || null,
+            subcategoryIds: data.subcategoryIds,
             price: parseFloat(data.price) || 0,
             cost: 0,
             unit: data.unit,
@@ -139,7 +139,7 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
     function discardDraft() {
         localStorage.removeItem(draftKey)
         const base = product
-            ? { name: product.name, barcode: product.barcode ?? '', unit: product.unit, categoryId: product.categoryId, subcategoryId: product.subcategoryId ?? '', price: String(product.price), stockQty: String(product.stockQty), minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive }
+            ? { name: product.name, barcode: product.barcode ?? '', unit: product.unit, categoryId: product.categoryId, subcategoryIds: product.subcategoryIds ?? [], price: String(product.price), stockQty: String(product.stockQty), minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive }
             : { ...EMPTY, categoryId: categories[0]?.id ?? '' }
         setData(base)
         go('name', 1)
@@ -151,7 +151,7 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
     const activeCategories = categories.filter(c => c.isActive)
     const catName = activeCategories.find(c => c.id === data.categoryId)?.name ?? '—'
     const catSubcats = allSubcategories.filter(s => s.categoryId === data.categoryId && s.isActive)
-    const subName = catSubcats.find(s => s.id === data.subcategoryId)?.name ?? null
+    const subNames = catSubcats.filter(s => data.subcategoryIds.includes(s.id)).map(s => s.name)
 
     return (
         <AnimatePresence>
@@ -238,10 +238,10 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
                                             advance('unit')
                                         }} onSkip={() => { setData(d => ({ ...d, barcode: '' })); advance('unit') }} />}
                                         {step === 'unit'          && <UnitStep value={data.unit} onSelect={u => { setData(d => ({ ...d, unit: u })); advance('category') }} />}
-                                        {step === 'category'      && <CategoryStep value={data.categoryId} categories={activeCategories} onChange={id => setData(d => ({ ...d, categoryId: id, subcategoryId: '' }))} onNext={() => catSubcats.length > 0 ? advance('subcategory') : advance('numbers')} />}
-                                        {step === 'subcategory'   && <SubcategoryStep value={data.subcategoryId} subcategories={catSubcats} onChange={id => setData(d => ({ ...d, subcategoryId: id }))} onNext={() => advance('numbers')} onSkip={() => { setData(d => ({ ...d, subcategoryId: '' })); advance('numbers') }} />}
+                                        {step === 'category'      && <CategoryStep value={data.categoryId} categories={activeCategories} onChange={id => setData(d => ({ ...d, categoryId: id, subcategoryIds: [] }))} onNext={() => catSubcats.length > 0 ? advance('subcategory') : advance('numbers')} />}
+                                        {step === 'subcategory'   && <SubcategoryStep values={data.subcategoryIds} subcategories={catSubcats} onChange={ids => setData(d => ({ ...d, subcategoryIds: ids }))} onNext={() => advance('numbers')} onSkip={() => { setData(d => ({ ...d, subcategoryIds: [] })); advance('numbers') }} />}
                                         {step === 'numbers'       && <NumbersStep data={data} isEdit={!!product} onChange={patch => setData(d => ({ ...d, ...patch }))} onNext={() => advance('recap')} />}
-                                        {step === 'recap'         && <RecapStep data={data} catName={catName} subName={subName} isEdit={!!product} isPending={isPending} onConfirm={handleConfirm} onEdit={goToStep} hasSubs={catSubcats.length > 0} />}
+                                        {step === 'recap'         && <RecapStep data={data} catName={catName} subNames={subNames} isEdit={!!product} isPending={isPending} onConfirm={handleConfirm} onEdit={goToStep} hasSubs={catSubcats.length > 0} />}
                                     </motion.div>
                                 </AnimatePresence>
                             </div>
@@ -435,46 +435,69 @@ function CategoryStep({ value, categories, onChange, onNext }: { value: string; 
     )
 }
 
-// ── Step: Subcategory ─────────────────────────────────────────────────────────
+// ── Step: Subcategory (multi-select) ──────────────────────────────────────────
 
-function SubcategoryStep({ value, subcategories, onChange, onNext, onSkip }: {
-    value: string; subcategories: Subcategory[]
-    onChange: (id: string) => void; onNext: () => void; onSkip: () => void
+function SubcategoryStep({ values, subcategories, onChange, onNext, onSkip }: {
+    values: string[]; subcategories: Subcategory[]
+    onChange: (ids: string[]) => void; onNext: () => void; onSkip: () => void
 }) {
     const DAY_LABELS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
+
+    function toggle(id: string) {
+        if (values.includes(id)) {
+            onChange(values.filter(v => v !== id))
+        } else {
+            onChange([...values, id])
+        }
+    }
+
     return (
         <div>
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 mb-1">
                 <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0">
                     <Layers size={15} className="text-violet-400" />
                 </div>
-                <StepQuestion>¿A qué subcategoría pertenece?</StepQuestion>
+                <StepQuestion>¿A qué subcategorías pertenece?</StepQuestion>
             </div>
+            <p className="text-[11px] text-[#3D506A] mb-3">Puedes seleccionar varias</p>
             <div className="flex flex-wrap gap-1.5 max-h-[200px] overflow-y-auto -mx-1 px-1 pb-1">
-                {subcategories.map(sub => (
-                    <button
-                        key={sub.id}
-                        onClick={() => onChange(sub.id)}
-                        className={cn(
-                            'flex flex-col items-start px-3 py-2 rounded-xl text-left border transition-all cursor-pointer',
-                            value === sub.id
-                                ? 'bg-violet-500/15 border-violet-500/30 text-violet-400'
-                                : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:bg-[#1C2438]'
-                        )}
-                    >
-                        <span className="text-[12px] font-medium">{sub.name}</span>
-                        {sub.showDays && (
-                            <span className="text-[10px] opacity-60 mt-0.5">
-                                {sub.showDays.map(d => DAY_LABELS[d]).join(' ')}
-                            </span>
-                        )}
-                    </button>
-                ))}
+                {subcategories.map(sub => {
+                    const selected = values.includes(sub.id)
+                    return (
+                        <button
+                            key={sub.id}
+                            onClick={() => toggle(sub.id)}
+                            className={cn(
+                                'flex items-center gap-2 px-3 py-2 rounded-xl text-left border transition-all cursor-pointer',
+                                selected
+                                    ? 'bg-violet-500/15 border-violet-500/30 text-violet-400'
+                                    : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:bg-[#1C2438]'
+                            )}
+                        >
+                            <div className={cn(
+                                'w-4 h-4 rounded flex items-center justify-center shrink-0 border transition-all',
+                                selected ? 'bg-violet-500 border-violet-500' : 'border-[#3D506A]'
+                            )}>
+                                {selected && <Check size={10} className="text-white" />}
+                            </div>
+                            <div>
+                                <span className="text-[12px] font-medium">{sub.name}</span>
+                                {sub.showDays && (
+                                    <span className="text-[10px] opacity-60 ml-1.5">
+                                        {sub.showDays.map(d => DAY_LABELS[d]).join(' ')}
+                                    </span>
+                                )}
+                            </div>
+                        </button>
+                    )
+                })}
             </div>
-            <NextBtn onClick={onNext} disabled={!value} />
-            <button onClick={onSkip} className="mt-2 w-full h-9 rounded-xl text-[12px] text-[#3D506A] hover:text-[#7A8FAA] transition-colors cursor-pointer">
-                Sin subcategoría
-            </button>
+            <NextBtn onClick={onNext} label={values.length > 0 ? `Continuar (${values.length} seleccionada${values.length !== 1 ? 's' : ''})` : 'Continuar sin subcategoría'} />
+            {values.length > 0 && (
+                <button onClick={onSkip} className="mt-2 w-full h-9 rounded-xl text-[12px] text-[#3D506A] hover:text-[#7A8FAA] transition-colors cursor-pointer">
+                    Sin subcategoría
+                </button>
+            )}
         </div>
     )
 }
@@ -516,8 +539,8 @@ function NumbersStep({ data, isEdit, onChange, onNext }: { data: WizardData; isE
 
 // ── Step: Recap ───────────────────────────────────────────────────────────────
 
-function RecapStep({ data, catName, subName, isEdit, isPending, onConfirm, onEdit, hasSubs }: {
-    data: WizardData; catName: string; subName: string | null; isEdit: boolean; hasSubs: boolean
+function RecapStep({ data, catName, subNames, isEdit, isPending, onConfirm, onEdit, hasSubs }: {
+    data: WizardData; catName: string; subNames: string[]; isEdit: boolean; hasSubs: boolean
     isPending?: boolean; onConfirm: () => void; onEdit: (s: WizardStep) => void
 }) {
     const rows: { label: string; value: string; step: WizardStep }[] = [
@@ -525,7 +548,7 @@ function RecapStep({ data, catName, subName, isEdit, isPending, onConfirm, onEdi
         { label: 'Código',     value: data.barcode || 'Sin código de barras',                  step: 'barcode'     },
         { label: 'Unidad',     value: UNITS.find(u => u.value === data.unit)?.label ?? '—',   step: 'unit'        },
         { label: 'Categoría',  value: catName,                                                 step: 'category'    },
-        ...(hasSubs ? [{ label: 'Subcategoría', value: subName ?? 'Sin subcategoría', step: 'subcategory' as WizardStep }] : []),
+        ...(hasSubs ? [{ label: 'Subcategorías', value: subNames.length > 0 ? subNames.join(', ') : 'Sin subcategoría', step: 'subcategory' as WizardStep }] : []),
         { label: 'Precio',     value: formatCurrency(parseFloat(data.price) || 0),             step: 'numbers'     },
         { label: 'Stock',      value: data.isInfinite ? 'Infinito' : `${data.stockQty} uds`,  step: 'numbers'     },
         { label: 'Mín. stock', value: data.isInfinite ? '—' : data.minStock,                  step: 'numbers'     },
