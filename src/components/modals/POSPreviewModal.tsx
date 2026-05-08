@@ -21,10 +21,6 @@ export function POSPreviewModal({ isOpen, onClose, category, products, subcatego
 
     if (!category) return null
 
-    const catProducts = products.filter(p =>
-        p.categoryId === category.id && p.isActive && !p.isDeleted
-    )
-
     const visibleSubcats = subcategories
         .filter(s =>
             s.categoryId === category.id &&
@@ -32,6 +28,15 @@ export function POSPreviewModal({ isOpen, onClose, category, products, subcatego
             (!s.showDays || s.showDays.includes(day))
         )
         .sort((a, b) => a.sortOrder - b.sortOrder)
+
+    const visibleSubcatIdSet = new Set(visibleSubcats.map(s => s.id))
+
+    const catProducts = products.filter(p => {
+        if (p.categoryId !== category.id || !p.isActive || p.isDeleted) return false
+        const ids = p.subcategoryIds ?? []
+        if (ids.length === 0) return true
+        return ids.some(id => visibleSubcatIdSet.has(id))
+    })
 
     const hasSegments = visibleSubcats.length > 0
 
