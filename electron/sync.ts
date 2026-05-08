@@ -20,9 +20,9 @@ function logError(msg: string) {
 /**
  * Sync Engine - Handles background synchronization between SQLite and Supabase
  */
-export async function startSyncEngine(mainWindow?: BrowserWindow) {
+export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = false) {
     if (mainWindow) windowRef = mainWindow;
-    console.log('[SyncEngine] Starting...');
+    console.log(`[SyncEngine] Starting... ${readOnly ? '(READ-ONLY — push disabled in dev mode)' : ''}`);
 
     // HOTFIX: Resolve saleNumber conflicts by shifting pending sales forward once
     // This clears the conflict with existing sales in Supabase (like #60, #61)
@@ -44,7 +44,9 @@ export async function startSyncEngine(mainWindow?: BrowserWindow) {
     });
 
     // Setup intervals for periodic sync
-    setInterval(pushSync, 15000);  // Push every 15s (Faster for sales tracking)
+    if (!readOnly) {
+        setInterval(pushSync, 15000);  // Push every 15s (Faster for sales tracking)
+    }
     setInterval(pullSync, 300000); // Pull every 5m (Safety fallback only)
     setInterval(processEmailQueue, 60000); // Retry emails every 1m
 }

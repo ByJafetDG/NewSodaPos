@@ -80,7 +80,7 @@ app.whenReady().then(async () => {
     initDb()
     const win = createWindow()
     if (win) {
-        startSyncEngine(win)
+        startSyncEngine(win, isDev)
         autoUpdater.checkForUpdates()
         setInterval(() => autoUpdater.checkForUpdates(), 30 * 60 * 1000)
     }
@@ -142,6 +142,9 @@ ipcMain.handle('sync:stats', async () => {
 });
 
 ipcMain.handle('sync:force-push', async () => {
+    if (isDev) {
+        return { totalRemaining: 0, remaining: {}, pushErrors: ['[DEV MODE] Push deshabilitado — ejecuta el build de producción para sincronizar.'] };
+    }
     const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Category', 'Subcategory', 'Product'];
     for (const table of tables) {
         try {
