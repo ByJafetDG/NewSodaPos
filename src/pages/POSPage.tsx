@@ -338,18 +338,6 @@ export function POSPage() {
         setEditPriceValue('')
     }
 
-    // ── Active products in grid (filtered by category + search text) ─────────
-    const activeProducts = products.filter(p => p.isActive)
-    const gridProducts = activeProducts.filter(p => {
-        if (!p.isInfinite && p.stockQty <= 0) return false
-        if (selectedCategory && p.categoryId !== selectedCategory) return false
-        if (!search) return true
-        const q = normalizeStr(search)
-        return normalizeStr(p.name).includes(q) ||
-            (p.barcode ?? '').includes(search) ||
-            normalizeStr(categories.find(c => c.id === p.categoryId)?.name ?? '').includes(q)
-    })
-
     // ── Segmented grid: subcategories of selected category visible today ─────
     const today = new Date().getDay()
     const visibleSubcats = selectedCategory
@@ -361,7 +349,24 @@ export function POSPage() {
             )
             .sort((a, b) => a.sortOrder - b.sortOrder)
         : []
+    const visibleSubcatIdSet = new Set(visibleSubcats.map(s => s.id))
     const useSegmented = viewMode === 'grid' && selectedCategory !== null && visibleSubcats.length > 0
+
+    // ── Active products in grid (filtered by category + search text) ─────────
+    const activeProducts = products.filter(p => p.isActive)
+    const gridProducts = activeProducts.filter(p => {
+        if (!p.isInfinite && p.stockQty <= 0) return false
+        if (selectedCategory && p.categoryId !== selectedCategory) return false
+        if (useSegmented) {
+            const ids = p.subcategoryIds ?? []
+            if (ids.length > 0 && !ids.some(id => visibleSubcatIdSet.has(id))) return false
+        }
+        if (!search) return true
+        const q = normalizeStr(search)
+        return normalizeStr(p.name).includes(q) ||
+            (p.barcode ?? '').includes(search) ||
+            normalizeStr(categories.find(c => c.id === p.categoryId)?.name ?? '').includes(q)
+    })
 
     if (isLoading) {
         return <Spinner size={40} label="Cargando productos..." className="h-full" />
