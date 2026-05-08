@@ -349,6 +349,23 @@ export function initDb() {
   } catch {
     // Already migrated or table missing
   }
+
+  // Migrate Sale.date from UTC ISO (with Z) to local ISO (no Z)
+  try {
+    const tzOffset = new Date().getTimezoneOffset()
+    const rows = db.prepare(
+      "SELECT id, date FROM Sale WHERE date LIKE '%Z' OR date LIKE '%+00:00%'"
+    ).all() as { id: string; date: string }[]
+    const stmt = db.prepare('UPDATE Sale SET date = ? WHERE id = ?')
+    for (const row of rows) {
+      try {
+        const d = new Date(row.date)
+        const localMs = d.getTime() - tzOffset * 60000
+        const localISO = new Date(localMs).toISOString().replace('Z', '')
+        stmt.run(localISO, row.id)
+      } catch {}
+    }
+  } catch {}
 }
 
 /**

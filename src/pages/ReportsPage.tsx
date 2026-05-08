@@ -11,18 +11,23 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { ReportSaleModal } from '@/components/modals/ReportSaleModal'
 import { TimeWheelPicker, HOURS, MINUTES } from '@/components/ui/TimeWheelPicker'
 
+function toLocalISO(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,'0')}`
+}
+
 function getDateRange(filter: string, customFrom: string, customTo: string): [string, string] {
     if (filter === 'Personalizado' && customFrom && customTo) return [customFrom, customTo]
     const now = new Date()
     const from = new Date(now)
     const to = new Date(now)
-    to.setHours(23, 59, 59, 999) // end of today — stable key, no per-render drift
+    to.setHours(23, 59, 59, 999)
     if (filter === 'Hoy') from.setHours(0, 0, 0, 0)
     else if (filter === 'Semana') { from.setDate(from.getDate() - 7); from.setHours(0, 0, 0, 0) }
     else if (filter === 'Mes')   { from.setDate(from.getDate() - 30); from.setHours(0, 0, 0, 0) }
     else if (filter === 'Año')   { from.setFullYear(from.getFullYear() - 1); from.setHours(0, 0, 0, 0) }
     else from.setFullYear(2000)
-    return [from.toISOString(), to.toISOString()]
+    return [toLocalISO(from), toLocalISO(to)]
 }
 
 
