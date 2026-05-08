@@ -143,13 +143,23 @@ ipcMain.handle('sync:stats', async () => {
 
 ipcMain.handle('sync:force-push', async () => {
     const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Category', 'Subcategory', 'Product'];
-    const now = new Date().toISOString();
     for (const table of tables) {
         try {
-            execute(`UPDATE ${table} SET syncStatus = 'PENDING', updatedAt = ? WHERE syncStatus = 'SYNCED' OR syncStatus IS NULL`, [now]);
-        } catch { /* table may not have updatedAt */ }
+            execute(`UPDATE ${table} SET syncStatus = 'PENDING' WHERE syncStatus = 'SYNCED' OR syncStatus IS NULL`, []);
+        } catch { /* table may not have syncStatus */ }
     }
     await pushSync();
+    const remaining: Record<string, number> = {};
+    let totalRemaining = 0;
+    for (const table of tables) {
+        try {
+            const res = get(`SELECT COUNT(*) as count FROM ${table} WHERE syncStatus = 'PENDING'`, []);
+            const count = res?.count ?? 0;
+            if (count > 0) remaining[table] = count;
+            totalRemaining += count;
+        } catch { }
+    }
+    return { totalRemaining, remaining };
 });
 
 // ===== Hardware: COM Port Printer Communication =====

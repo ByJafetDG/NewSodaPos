@@ -674,8 +674,15 @@ export function SettingsPage() {
                                         onClick={async () => {
                                             setForcePushing(true)
                                             try {
-                                                await window.electronAPI!.forcePush()
-                                                toast.success('Re-sincronización completada')
+                                                const result = await window.electronAPI!.forcePush()
+                                                if (result.totalRemaining === 0) {
+                                                    toast.success('Re-sincronización completada — todo subido')
+                                                } else {
+                                                    const details = Object.entries(result.remaining)
+                                                        .map(([t, n]) => `${t}: ${n}`)
+                                                        .join(', ')
+                                                    toast.warning(`Sync incompleto. Aún pendientes: ${details}`)
+                                                }
                                             } catch {
                                                 toast.error('Error al re-sincronizar')
                                             } finally {
