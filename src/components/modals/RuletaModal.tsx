@@ -191,7 +191,7 @@ function WheelSVG({
                         <motion.path
                             key={seg.option.id}
                             d={wedge(seg.startDeg, seg.endDeg)}
-                            fill={seg.option.color}
+                            fill={seg.option.color ?? undefined}
                             stroke="rgba(255,255,255,0.18)"
                             strokeWidth={1.5}
                             strokeLinejoin="round"
@@ -316,10 +316,10 @@ function ResultCard({ winner, onClose, onRetry }: {
                         'w-16 h-16 rounded-2xl mx-auto flex items-center justify-center mb-3',
                         isReal ? 'shadow-[0_0_30px_rgba(245,158,11,0.5)]' : ''
                     )}
-                    style={{ backgroundColor: winner.color + '25', border: `2px solid ${winner.color}40` }}
+                    style={{ backgroundColor: (winner.color ?? '') + '25', border: `2px solid ${winner.color ?? ''}40` }}
                 >
                     {isReal
-                        ? <Trophy size={30} style={{ color: winner.color }} />
+                        ? <Trophy size={30} style={{ color: winner.color ?? undefined }} />
                         : <span className="text-3xl select-none">😔</span>
                     }
                 </motion.div>
@@ -330,7 +330,7 @@ function ResultCard({ winner, onClose, onRetry }: {
 
                 <p
                     className="text-[22px] font-black leading-tight"
-                    style={{ color: isReal ? winner.color : '#7A8FAA' }}
+                    style={{ color: isReal ? (winner.color ?? undefined) : '#7A8FAA' }}
                 >
                     {winner.label}
                 </p>
@@ -370,7 +370,7 @@ function ResultCard({ winner, onClose, onRetry }: {
                             ? 'text-black shadow-[0_0_20px_rgba(245,158,11,0.4)] hover:shadow-[0_0_28px_rgba(245,158,11,0.6)]'
                             : 'bg-[#1C2438] text-[#E4ECF7] hover:bg-[#283A56]'
                     )}
-                    style={isReal ? { backgroundColor: winner.color } : {}}
+                    style={isReal ? { backgroundColor: winner.color ?? undefined } : {}}
                 >
                     {isReal ? 'Entregar premio' : 'Continuar'}
                 </button>
