@@ -4,6 +4,7 @@ import { BaseModal } from '@/components/modals/BaseModal'
 import { Button } from '@/components/atoms/Button'
 import { cn } from '@/lib/utils'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
+import type { KeyboardMode } from '@/store/keyboardStore'
 import { useCategories } from '@/hooks/useCategories'
 import { useProducts } from '@/hooks/useProducts'
 import { useQueryClient } from '@tanstack/react-query'
@@ -47,6 +48,124 @@ function makeOption(sortOrder: number): DraftOption {
         isFiller: false,
         color: COLORS[sortOrder % COLORS.length],
     }
+}
+
+function KbInput({
+    value, onChange, mode = 'alpha', placeholder, className, disabled,
+}: {
+    value: string; onChange: (v: string) => void; mode?: KeyboardMode
+    placeholder?: string; className?: string; disabled?: boolean
+}) {
+    const kb = useKeyboardInput(value, onChange, { mode })
+    return (
+        <input
+            {...kb}
+            placeholder={placeholder}
+            disabled={disabled}
+            className={className}
+        />
+    )
+}
+
+function OptionRow({
+    o, onUpdate, onRemove,
+}: {
+    o: DraftOption
+    onUpdate: (patch: Partial<DraftOption>) => void
+    onRemove: () => void
+}) {
+    return (
+        <div className={cn(
+            'p-3 rounded-xl border space-y-2',
+            o.isFiller ? 'bg-[#0D1117] border-[#192030]' : 'bg-[#101520] border-[#1E2A40]'
+        )}>
+            <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 flex-shrink-0">
+                    {COLORS.map(c => (
+                        <button
+                            key={c}
+                            onClick={() => onUpdate({ color: c })}
+                            className="w-4 h-4 rounded-full border-2 transition-all cursor-pointer flex-shrink-0"
+                            style={{
+                                backgroundColor: c,
+                                borderColor: o.color === c ? 'white' : 'transparent',
+                            }}
+                        />
+                    ))}
+                </div>
+                <div className="flex-1 flex items-center gap-1 justify-end">
+                    <button
+                        onClick={() => onUpdate({ isFiller: !o.isFiller })}
+                        className={cn(
+                            'px-2 h-6 rounded-md text-[10px] font-medium border transition-all cursor-pointer flex items-center gap-1',
+                            o.isFiller
+                                ? 'bg-[#192030] border-[#283A56] text-[#7A8FAA]'
+                                : 'bg-transparent border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        <Infinity size={10} />
+                        Relleno
+                    </button>
+                    <button
+                        onClick={onRemove}
+                        className="w-6 h-6 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                    >
+                        <Trash2 size={12} />
+                    </button>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-[1fr_1fr_80px_72px] gap-2">
+                <KbInput
+                    value={o.label}
+                    onChange={v => onUpdate({ label: v })}
+                    placeholder="Premio Mayor"
+                    className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                />
+                <KbInput
+                    value={o.description}
+                    onChange={v => onUpdate({ description: v })}
+                    placeholder="10,000 colones"
+                    className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                />
+                {o.isFiller ? (
+                    <div className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] flex items-center text-[12px] text-[#3D506A]">
+                        ∞
+                    </div>
+                ) : (
+                    <KbInput
+                        value={o.quantity}
+                        onChange={v => onUpdate({ quantity: v })}
+                        mode="numeric"
+                        placeholder="Cant."
+                        className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                    />
+                )}
+                <div className="relative">
+                    <KbInput
+                        value={o.baseProbability}
+                        onChange={v => onUpdate({ baseProbability: v })}
+                        mode="numeric"
+                        placeholder="0"
+                        disabled={o.isFiller}
+                        className={cn(
+                            'h-8 pl-3 pr-7 rounded-lg border text-[12px] outline-none focus:border-amber-500/30 w-full',
+                            o.isFiller
+                                ? 'bg-[#0D1117] border-[#192030] text-[#3D506A]'
+                                : 'bg-[#0B0E19] border-[#1E2A40] text-[#E4ECF7] placeholder:text-[#3D506A]'
+                        )}
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[#3D506A]">%</span>
+                </div>
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-[10px] text-[#3D506A] px-0.5">
+                <span>Premio</span>
+                <span>Descripción</span>
+                <span>{o.isFiller ? '' : 'Cantidad'}</span>
+                <span>{o.isFiller ? 'Automático' : 'Probabilidad'}</span>
+            </div>
+        </div>
+    )
 }
 
 export function CreateSorteoModal({ isOpen, onClose }: Props) {
@@ -251,103 +370,12 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
 
                             <div className="space-y-2">
                                 {options.map((o) => (
-                                    <div key={o._id} className={cn(
-                                        'p-3 rounded-xl border space-y-2',
-                                        o.isFiller ? 'bg-[#0D1117] border-[#192030]' : 'bg-[#101520] border-[#1E2A40]'
-                                    )}>
-                                        <div className="flex items-center gap-2">
-                                            {/* Color picker */}
-                                            <div className="flex items-center gap-1 flex-shrink-0">
-                                                {COLORS.map(c => (
-                                                    <button
-                                                        key={c}
-                                                        onClick={() => updateOption(o._id, { color: c })}
-                                                        className="w-4 h-4 rounded-full border-2 transition-all cursor-pointer flex-shrink-0"
-                                                        style={{
-                                                            backgroundColor: c,
-                                                            borderColor: o.color === c ? 'white' : 'transparent',
-                                                        }}
-                                                    />
-                                                ))}
-                                            </div>
-                                            <div className="flex-1 flex items-center gap-1 justify-end">
-                                                <button
-                                                    onClick={() => updateOption(o._id, { isFiller: !o.isFiller })}
-                                                    className={cn(
-                                                        'px-2 h-6 rounded-md text-[10px] font-medium border transition-all cursor-pointer flex items-center gap-1',
-                                                        o.isFiller
-                                                            ? 'bg-[#192030] border-[#283A56] text-[#7A8FAA]'
-                                                            : 'bg-transparent border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA]'
-                                                    )}
-                                                >
-                                                    <Infinity size={10} />
-                                                    Relleno
-                                                </button>
-                                                <button
-                                                    onClick={() => removeOption(o._id)}
-                                                    className="w-6 h-6 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
-                                                >
-                                                    <Trash2 size={12} />
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <div className="grid grid-cols-[1fr_1fr_80px_72px] gap-2">
-                                            <input
-                                                type="text"
-                                                value={o.label}
-                                                onChange={e => updateOption(o._id, { label: e.target.value })}
-                                                placeholder="Premio Mayor"
-                                                className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
-                                            />
-                                            <input
-                                                type="text"
-                                                value={o.description}
-                                                onChange={e => updateOption(o._id, { description: e.target.value })}
-                                                placeholder="10,000 colones"
-                                                className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
-                                            />
-                                            {o.isFiller ? (
-                                                <div className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] flex items-center text-[12px] text-[#3D506A]">
-                                                    ∞
-                                                </div>
-                                            ) : (
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    value={o.quantity}
-                                                    onChange={e => updateOption(o._id, { quantity: e.target.value })}
-                                                    placeholder="Cant."
-                                                    className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
-                                                />
-                                            )}
-                                            <div className="relative">
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    max="100"
-                                                    step="0.1"
-                                                    value={o.baseProbability}
-                                                    onChange={e => updateOption(o._id, { baseProbability: e.target.value })}
-                                                    placeholder="0"
-                                                    disabled={o.isFiller}
-                                                    className={cn(
-                                                        'h-8 pl-3 pr-7 rounded-lg border text-[12px] outline-none focus:border-amber-500/30 w-full',
-                                                        o.isFiller
-                                                            ? 'bg-[#0D1117] border-[#192030] text-[#3D506A]'
-                                                            : 'bg-[#0B0E19] border-[#1E2A40] text-[#E4ECF7] placeholder:text-[#3D506A]'
-                                                    )}
-                                                />
-                                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[#3D506A]">%</span>
-                                            </div>
-                                        </div>
-                                        <div className="grid grid-cols-4 gap-2 text-[10px] text-[#3D506A] px-0.5">
-                                            <span>Premio</span>
-                                            <span>Descripción</span>
-                                            <span>{o.isFiller ? '' : 'Cantidad'}</span>
-                                            <span>{o.isFiller ? 'Automático' : 'Probabilidad'}</span>
-                                        </div>
-                                    </div>
+                                    <OptionRow
+                                        key={o._id}
+                                        o={o}
+                                        onUpdate={patch => updateOption(o._id, patch)}
+                                        onRemove={() => removeOption(o._id)}
+                                    />
                                 ))}
                             </div>
 

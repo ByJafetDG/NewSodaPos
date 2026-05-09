@@ -22,28 +22,16 @@ function toDate(v: Date | string | null | undefined): Date {
     return v instanceof Date ? v : new Date(v)
 }
 
-function toLocal(v: Date | string | null | undefined): Date {
-    const d = toDate(v)
-    const offset = new Date().getTimezoneOffset() // Chromium uses correct OS timezone
-    return new Date(d.getTime() - offset * 60000)
-}
+const TZ = 'America/Costa_Rica'
 
 function fmtTime(v: Date | string | null | undefined): string {
     if (!v) return '--'
-    const local = toLocal(v)
-    const h = local.getUTCHours()
-    const min = String(local.getUTCMinutes()).padStart(2, '0')
-    return `${h % 12 || 12}:${min} ${h >= 12 ? 'p. m.' : 'a. m.'}`
+    return toDate(v).toLocaleTimeString('es-CR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
 }
 
 function fmtDate(v: Date | string | null | undefined): string {
     if (!v) return ''
-    const local = toLocal(v)
-    const y = local.getUTCFullYear()
-    const m = local.getUTCMonth()
-    const d = local.getUTCDate()
-    const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
-    return `${String(d).padStart(2, '0')} ${months[m]} ${y}`
+    return toDate(v).toLocaleDateString('es-CR', { timeZone: TZ, day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 function parseAmount(str: string) { return parseInt(str) || 0 }
