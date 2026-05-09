@@ -217,7 +217,10 @@ export function ProductsTable({
                                         <td colSpan={7} className="px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-[#3D506A]">
                                             {category.name}
                                             <span className="ml-2 text-[#1E2A40] font-normal normal-case tracking-normal">
-                                                {catProducts.length} producto{catProducts.length !== 1 ? 's' : ''}
+                                                {catProducts.length} tipo{catProducts.length !== 1 ? 's' : ''}
+                                                {' · '}
+                                                {catProducts.filter(p => !p.isInfinite).reduce((sum, p) => sum + p.stockQty, 0)}
+                                                {catProducts.some(p => p.isInfinite) ? '+' : ''} en stock
                                             </span>
                                         </td>
                                     </tr>
