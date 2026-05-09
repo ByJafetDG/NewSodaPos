@@ -22,6 +22,33 @@ function toDate(v: Date | string | null | undefined): Date {
     return v instanceof Date ? v : new Date(v)
 }
 
+function fmtTime(v: Date | string | null | undefined): string {
+    if (!v) return '--'
+    const s = typeof v === 'string' ? v : ''
+    if (s && !s.endsWith('Z') && !s.match(/[+-]\d{2}:\d{2}$/)) {
+        const m = s.match(/T(\d{2}):(\d{2})/)
+        if (m) {
+            const h = parseInt(m[1])
+            const min = m[2]
+            return `${h % 12 || 12}:${min} ${h >= 12 ? 'p. m.' : 'a. m.'}`
+        }
+    }
+    return toDate(v).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+}
+
+function fmtDate(v: Date | string | null | undefined): string {
+    if (!v) return ''
+    const s = typeof v === 'string' ? v : ''
+    if (s && !s.endsWith('Z') && !s.match(/[+-]\d{2}:\d{2}$/)) {
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+        if (m) {
+            const date = new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00`)
+            return date.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
+        }
+    }
+    return toDate(v).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 function parseAmount(str: string) { return parseInt(str) || 0 }
 
 function AmountDisplay({ value, color = 'emerald' }: { value: string; color?: 'emerald' | 'red' | 'orange' }) {
@@ -136,7 +163,7 @@ export function CashRegisterPage() {
                             </div>
                             <div className="flex items-center gap-1.5 text-[12px] text-[#3D506A]">
                                 <Clock size={11} />
-                                Abierta: {toDate(activeRegister.openedAt).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })}
+                                Abierta: {fmtTime(activeRegister.openedAt)}
                             </div>
                         </div>
 
@@ -252,7 +279,7 @@ export function CashRegisterPage() {
                 onClose={() => setDeletingRegister(null)}
                 onConfirm={handleDeleteConfirm}
                 title="Eliminar registro"
-                description={`¿Eliminar la caja del ${deletingRegister ? toDate(deletingRegister.openedAt).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}? Esta acción no se puede deshacer.`}
+                description={`¿Eliminar la caja del ${deletingRegister ? fmtDate(deletingRegister.openedAt) : ''}? Esta acción no se puede deshacer.`}
             />
         </div>
     )
@@ -285,9 +312,9 @@ function RegisterRow({ register: r, onDetail, onEdit, onDelete }: {
     const expectedFinal = r.initialAmount + cashSales
     const diff = (r.finalAmount ?? 0) - expectedFinal
 
-    const openTime = toDate(r.openedAt).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
-    const closeTime = r.closedAt ? toDate(r.closedAt).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' }) : undefined
-    const dateStr = toDate(r.openedAt).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
+    const openTime = fmtTime(r.openedAt)
+    const closeTime = r.closedAt ? fmtTime(r.closedAt) : undefined
+    const dateStr = fmtDate(r.openedAt)
 
     return (
         <div
@@ -354,7 +381,7 @@ function RegisterDetailModal({ register: r, onClose }: { register: CashRegister 
     const expectedFinal = r.initialAmount + cashSales
     const diff = (r.finalAmount ?? 0) - expectedFinal
 
-    const dateStr = toDate(r.openedAt).toLocaleDateString('es-CR', { day: '2-digit', month: 'long', year: 'numeric' })
+    const dateStr = fmtDate(r.openedAt)
 
     return (
         <AnimatePresence>
@@ -474,7 +501,7 @@ function EditRegisterModal({ register, editInitial, editFinal, onChangeInitial, 
             {register && (
                 <div className="space-y-4">
                     <p className="text-[12px] text-[#3D506A] text-center">
-                        {toDate(register.openedAt).toLocaleDateString('es-CR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                        {fmtDate(register.openedAt)}
                     </p>
                     <div className="flex gap-1 p-1 rounded-xl bg-[#101520] border border-[#192030]">
                         <button
