@@ -10,6 +10,10 @@ import { useClients } from '@/hooks/useClients'
 import { useEmployees } from '@/hooks/useEmployees'
 import { useCreateSale } from '@/hooks/useSales'
 import { useActiveRegister } from '@/hooks/useCashRegister'
+import { useCartSorteo } from '@/hooks/useSorteos'
+import { RuletaModal } from '@/components/modals/RuletaModal'
+import { logSorteoEntry, handleSorteoWin } from '@/services/sorteos'
+import { useQueryClient } from '@tanstack/react-query'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { sendReceiptEmail } from '@/services/emailReceipt'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
@@ -104,6 +108,24 @@ export function POSPage() {
     const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
     const [editingItem, setEditingItem] = useState<CartItem | null>(null)
     const [editPriceValue, setEditPriceValue] = useState('')
+    const [sorteoOpen, setSorteoOpen] = useState(false)
+    const [sorteoDeclined, setSorteoDeclined] = useState(false)
+
+    // ── Sorteos ──────────────────────────────────────────────────────────────
+    const qc = useQueryClient()
+    const cartProductIds  = items.map(i => i.product.id)
+    const cartCategoryIds = [...new Set(items.map(i => i.product.categoryId))]
+    const { data: cartSorteo } = useCartSorteo(cartProductIds, cartCategoryIds)
+    const showSorteoButton = !!cartSorteo && !sorteoDeclined && items.length > 0
+    const qualifyingCount = cartSorteo
+        ? items.reduce((sum, item) => {
+            const hit = cartSorteo.participants.some(p =>
+                (p.type === 'PRODUCT'   && p.refId === item.product.id) ||
+                (p.type === 'CATEGORY'  && p.refId === item.product.categoryId)
+            )
+            return hit ? sum + item.quantity : sum
+          }, 0)
+        : 0
 
     // ── Derived ───────────────────────────────────────────────────────────────
     const received = parseFloat(amountReceived) || 0
@@ -141,6 +163,27 @@ export function POSPage() {
         setActiveOrderId(null)
         setActiveOrderName(null)
         setMergeSnapshot(null)
+        setSorteoDeclined(false)
+    }
+
+    async function handleDeclineSorteo() {
+        if (!cartSorteo) return
+        setSorteoDeclined(true)
+        await logSorteoEntry({ sorteoId: cartSorteo.sorteo.id, didParticipate: false, unitCount: qualifyingCount })
+        qc.invalidateQueries({ queryKey: ['sorteoStats', cartSorteo.sorteo.id] })
+    }
+
+    async function handleSorteoResult(resultOptionId: string) {
+        if (!cartSorteo) return
+        const winOption = cartSorteo.options.find(o => o.id === resultOptionId)
+        await logSorteoEntry({ sorteoId: cartSorteo.sorteo.id, didParticipate: true, unitCount: qualifyingCount, resultOptionId })
+        if (winOption && !winOption.isFiller) {
+            await handleSorteoWin(cartSorteo.sorteo.id, resultOptionId)
+        }
+        qc.invalidateQueries({ queryKey: ['sorteos'] })
+        qc.invalidateQueries({ queryKey: ['sorteoStats', cartSorteo.sorteo.id] })
+        qc.invalidateQueries({ queryKey: ['cartSorteo'] })
+        setSorteoDeclined(true)
     }
 
     const handleSaveHeldOrder = (name: string) => {
@@ -487,6 +530,9 @@ export function POSPage() {
                                 onClear={handleClearCart}
                                 hasItems={items.length > 0}
                                 onOpenDrawer={handleOpenDrawer}
+                                activeSorteoName={showSorteoButton ? cartSorteo?.sorteo.name : undefined}
+                                onSorteo={() => setSorteoOpen(true)}
+                                onDeclineSorteo={handleDeclineSorteo}
                             />
                         </div>
                     </>
@@ -600,6 +646,14 @@ export function POSPage() {
             <SaleSuccessModal
                 data={saleSuccess}
                 onClose={() => setSaleSuccess(null)}
+            />
+
+            <RuletaModal
+                isOpen={sorteoOpen}
+                onClose={() => setSorteoOpen(false)}
+                sorteoName={cartSorteo?.sorteo.name ?? ''}
+                options={cartSorteo?.options ?? []}
+                onResult={handleSorteoResult}
             />
 
             <HeldOrdersModal

@@ -4,7 +4,7 @@ import { PaymentMethodPicker } from '@/components/molecules/PaymentMethodPicker'
 import { NumericPad } from '@/components/molecules/NumericPad'
 import { TotalsPanel } from '@/components/molecules/TotalsPanel'
 import { Button } from '@/components/atoms/Button'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Ticket, X } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
 
 interface PaymentPanelProps {
@@ -22,12 +22,16 @@ interface PaymentPanelProps {
     onClear: () => void
     hasItems: boolean
     onOpenDrawer?: () => void
+    activeSorteoName?: string
+    onSorteo?: () => void
+    onDeclineSorteo?: () => void
 }
 
 export function PaymentPanel({
     paymentMethod, onChangeMethod, amountReceived, onChangeAmount,
     itemCount, subtotal, discount, total,
-    canCharge, isPending, onCharge, onClear, hasItems, onOpenDrawer
+    canCharge, isPending, onCharge, onClear, hasItems, onOpenDrawer,
+    activeSorteoName, onSorteo, onDeclineSorteo,
 }: PaymentPanelProps) {
     const received = parseFloat(amountReceived) || 0
     const change = paymentMethod === 'EFECTIVO' ? Math.max(0, received - total) : 0
@@ -117,6 +121,41 @@ export function PaymentPanel({
                     total={total}
                 />
             </div>
+
+            {/* ── Sorteo button ────────────────────────────── */}
+            <AnimatePresence>
+                {activeSorteoName && onSorteo && (
+                    <motion.div
+                        key="sorteo-btn"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden shrink-0"
+                    >
+                        <div className="px-4 pb-2 flex items-center gap-2">
+                            <button
+                                onClick={onSorteo}
+                                className="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 active:scale-[0.98] transition-all cursor-pointer"
+                            >
+                                <Ticket size={14} className="text-amber-400 shrink-0" />
+                                <span className="text-[12px] font-semibold text-amber-300 truncate">
+                                    {activeSorteoName}
+                                </span>
+                            </button>
+                            {onDeclineSorteo && (
+                                <button
+                                    onClick={onDeclineSorteo}
+                                    title="Cliente no desea participar"
+                                    className="w-9 h-9 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA] flex items-center justify-center transition-all cursor-pointer shrink-0"
+                                >
+                                    <X size={13} />
+                                </button>
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* ── Action buttons ──────────────────────────── */}
             <div className="px-4 pb-4 flex gap-2 shrink-0">

@@ -4,6 +4,7 @@ export type AppPage =
     | 'balances'
     | 'reports'
     | 'cash-register'
+    | 'sorteos'
     | 'settings'
 
 export interface SyncInfo {
@@ -97,4 +98,36 @@ export interface BusinessConfig {
     ticketHeader: string | null; ticketFooter: string | null; printerPort: string | null
     printerModel: string | null; drawerEnabled: boolean; modalsKeyboardEnabled: boolean
     createdAt: Date; updatedAt: Date
+}
+
+export type SorteoType = 'RULETA'
+export type SorteoStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'ENDED'
+export interface Sorteo {
+    id: string; name: string; type: SorteoType; status: SorteoStatus
+    startAt: Date | null; endAt: Date | null
+    syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
+}
+
+export interface SorteoOption {
+    id: string; sorteoId: string; label: string; description: string | null
+    quantity: number | null; quantityRemaining: number | null
+    baseProbability: number; isFiller: boolean; color: string | null
+    sortOrder: number; syncStatus: SyncStatus
+}
+
+export type SorteoParticipantType = 'PRODUCT' | 'CATEGORY'
+export interface SorteoParticipant {
+    id: string; sorteoId: string; type: SorteoParticipantType; refId: string
+    syncStatus: SyncStatus
+}
+
+export interface SorteoEntry {
+    id: string; sorteoId: string; saleId: string | null
+    participatedAt: Date; didParticipate: boolean; unitCount: number
+    resultOptionId: string | null; syncStatus: SyncStatus
+}
+
+export interface SorteoStats {
+    total: number; participated: number; declined: number
+    optionCounts: { optionId: string; label: string; count: number }[]
 }

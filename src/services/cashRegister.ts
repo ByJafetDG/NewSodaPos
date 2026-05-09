@@ -1,9 +1,15 @@
 import { supabase } from '@/lib/supabase'
 
+function localISO(): string {
+    const d = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,'0')}`
+}
+
 // ===== Open Register =====
 export async function openRegister(initialAmount: number) {
     const id = crypto.randomUUID()
-    const now = new Date().toISOString()
+    const now = localISO()
 
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(`
@@ -78,7 +84,7 @@ export async function getActiveRegister() {
 
 // ===== Close Register =====
 export async function closeRegister(registerId: string, finalAmount: number, notes: string | null = null) {
-    const now = new Date().toISOString()
+    const now = localISO()
 
     if (window.electronAPI) {
         // Calculation summary locally
@@ -168,7 +174,7 @@ export async function getRegisterHistory(limit = 20) {
 
 // ===== Update Register (edit amounts/notes on a closed register) =====
 export async function updateRegister(registerId: string, updates: { initialAmount?: number; finalAmount?: number; notes?: string | null }) {
-    const now = new Date().toISOString()
+    const now = localISO()
 
     if (window.electronAPI) {
         const sets: string[] = ['updatedAt = ?', "syncStatus = 'PENDING'"]

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     ShoppingCart, Package, Users, Wallet,
-    BarChart3, Settings2,
+    BarChart3, Settings2, Ticket,
     Wifi, WifiOff, RefreshCw, CloudOff,
 } from 'lucide-react'
 import { useUIStore } from '@/store/uiStore'
@@ -65,6 +65,15 @@ const NAV_ITEMS: NavItem[] = [
         color: 'text-cyan-400',
         activeBg: 'bg-cyan-500/10',
         activeBar: 'bg-cyan-400',
+    },
+    {
+        id: 'sorteos',
+        label: 'Sorteos',
+        description: 'Ruletas y rifas para clientes',
+        icon: Ticket,
+        color: 'text-amber-400',
+        activeBg: 'bg-amber-500/10',
+        activeBar: 'bg-amber-400',
     },
 ]
 

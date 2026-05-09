@@ -261,6 +261,54 @@ export function initDb() {
       lastError TEXT,
       createdAt TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS Sorteo (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'RULETA',
+      status TEXT DEFAULT 'DRAFT',
+      startAt TEXT,
+      endAt TEXT,
+      syncStatus TEXT DEFAULT 'PENDING',
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS SorteoOption (
+      id TEXT PRIMARY KEY,
+      sorteoId TEXT NOT NULL,
+      label TEXT NOT NULL,
+      description TEXT,
+      quantity INTEGER,
+      quantityRemaining INTEGER,
+      baseProbability REAL NOT NULL,
+      isFiller INTEGER DEFAULT 0,
+      color TEXT,
+      sortOrder INTEGER DEFAULT 0,
+      syncStatus TEXT DEFAULT 'PENDING',
+      FOREIGN KEY (sorteoId) REFERENCES Sorteo(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS SorteoParticipant (
+      id TEXT PRIMARY KEY,
+      sorteoId TEXT NOT NULL,
+      type TEXT NOT NULL,
+      refId TEXT NOT NULL,
+      syncStatus TEXT DEFAULT 'PENDING',
+      FOREIGN KEY (sorteoId) REFERENCES Sorteo(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS SorteoEntry (
+      id TEXT PRIMARY KEY,
+      sorteoId TEXT NOT NULL,
+      saleId TEXT,
+      participatedAt TEXT DEFAULT (datetime('now')),
+      didParticipate INTEGER DEFAULT 0,
+      unitCount INTEGER DEFAULT 1,
+      resultOptionId TEXT,
+      syncStatus TEXT DEFAULT 'PENDING',
+      FOREIGN KEY (sorteoId) REFERENCES Sorteo(id)
+    );
   `);
 
   // ===== Migrations for existing databases =====
@@ -364,6 +412,28 @@ export function initDb() {
         const localISO = new Date(localMs).toISOString().replace('Z', '')
         stmt.run(localISO, row.id)
       } catch {}
+    }
+  } catch {}
+
+  // Migrate CashRegister timestamps from UTC ISO (with Z) to local ISO (no Z)
+  try {
+    const tzOffset = new Date().getTimezoneOffset()
+    const cols = ['openedAt', 'closedAt', 'updatedAt'] as const
+    for (const col of cols) {
+      const rows = db.prepare(
+        `SELECT id, ${col} FROM CashRegister WHERE ${col} LIKE '%Z' OR ${col} LIKE '%+00:00%'`
+      ).all() as { id: string; [k: string]: string | null }[]
+      const stmt = db.prepare(`UPDATE CashRegister SET ${col} = ? WHERE id = ?`)
+      for (const row of rows) {
+        try {
+          const val = row[col]
+          if (!val) continue
+          const d = new Date(val)
+          const localMs = d.getTime() - tzOffset * 60000
+          const localISO = new Date(localMs).toISOString().replace('Z', '')
+          stmt.run(localISO, row.id)
+        } catch {}
+      }
     }
   } catch {}
 }
