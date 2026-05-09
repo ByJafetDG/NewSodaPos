@@ -415,25 +415,18 @@ export function initDb() {
     }
   } catch {}
 
-  // Migrate CashRegister timestamps from UTC ISO (with Z) to local ISO (no Z)
+  // Corrective migration: restore Z to CashRegister timestamps damaged by previous bad migration
+  // (previous migration stripped Z without adjusting time — re-add Z to restore UTC format)
   try {
-    const tzOffset = new Date().getTimezoneOffset()
     const cols = ['openedAt', 'closedAt', 'updatedAt'] as const
     for (const col of cols) {
-      const rows = db.prepare(
-        `SELECT id, ${col} FROM CashRegister WHERE ${col} LIKE '%Z' OR ${col} LIKE '%+00:00%'`
-      ).all() as { id: string; [k: string]: string | null }[]
-      const stmt = db.prepare(`UPDATE CashRegister SET ${col} = ? WHERE id = ?`)
-      for (const row of rows) {
-        try {
-          const val = row[col]
-          if (!val) continue
-          const d = new Date(val)
-          const localMs = d.getTime() - tzOffset * 60000
-          const localISO = new Date(localMs).toISOString().replace('Z', '')
-          stmt.run(localISO, row.id)
-        } catch {}
-      }
+      db.prepare(
+        `UPDATE CashRegister SET ${col} = ${col} || 'Z'
+         WHERE ${col} IS NOT NULL
+           AND ${col} NOT LIKE '%Z'
+           AND ${col} NOT LIKE '%+%'
+           AND ${col} LIKE '%T%'`
+      ).run()
     }
   } catch {}
 }

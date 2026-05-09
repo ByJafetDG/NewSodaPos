@@ -22,31 +22,28 @@ function toDate(v: Date | string | null | undefined): Date {
     return v instanceof Date ? v : new Date(v)
 }
 
+function toLocal(v: Date | string | null | undefined): Date {
+    const d = toDate(v)
+    const offset = new Date().getTimezoneOffset() // Chromium uses correct OS timezone
+    return new Date(d.getTime() - offset * 60000)
+}
+
 function fmtTime(v: Date | string | null | undefined): string {
     if (!v) return '--'
-    const s = typeof v === 'string' ? v : ''
-    if (s && !s.endsWith('Z') && !s.match(/[+-]\d{2}:\d{2}$/)) {
-        const m = s.match(/T(\d{2}):(\d{2})/)
-        if (m) {
-            const h = parseInt(m[1])
-            const min = m[2]
-            return `${h % 12 || 12}:${min} ${h >= 12 ? 'p. m.' : 'a. m.'}`
-        }
-    }
-    return toDate(v).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+    const local = toLocal(v)
+    const h = local.getUTCHours()
+    const min = String(local.getUTCMinutes()).padStart(2, '0')
+    return `${h % 12 || 12}:${min} ${h >= 12 ? 'p. m.' : 'a. m.'}`
 }
 
 function fmtDate(v: Date | string | null | undefined): string {
     if (!v) return ''
-    const s = typeof v === 'string' ? v : ''
-    if (s && !s.endsWith('Z') && !s.match(/[+-]\d{2}:\d{2}$/)) {
-        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
-        if (m) {
-            const date = new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00`)
-            return date.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
-        }
-    }
-    return toDate(v).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
+    const local = toLocal(v)
+    const y = local.getUTCFullYear()
+    const m = local.getUTCMonth()
+    const d = local.getUTCDate()
+    const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+    return `${String(d).padStart(2, '0')} ${months[m]} ${y}`
 }
 
 function parseAmount(str: string) { return parseInt(str) || 0 }
