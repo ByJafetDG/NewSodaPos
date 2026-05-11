@@ -6,7 +6,7 @@ import { NumericPad } from '@/components/molecules/NumericPad'
 import { TotalsPanel } from '@/components/molecules/TotalsPanel'
 import { Button } from '@/components/atoms/Button'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
-import { Trash2, Ticket, X, CreditCard, SplitSquareHorizontal, Smartphone } from 'lucide-react'
+import { Trash2, Ticket, X, CreditCard, SplitSquareHorizontal, Smartphone, Inbox } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
 
 interface PaymentPanelProps {
@@ -141,11 +141,22 @@ export function PaymentPanel({
                         className="overflow-hidden shrink-0"
                     >
                         <div className="px-4 pt-3 pb-3 border-b border-[#192030] space-y-3">
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">
-                                {splitMode ? 'Efectivo recibido' : 'Monto recibido'}
-                            </p>
+                            <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">
+                                    {splitMode ? 'Efectivo recibido' : 'Monto recibido'}
+                                </p>
+                                {splitMode && onOpenDrawer && (
+                                    <button
+                                        onClick={onOpenDrawer}
+                                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5 transition-all cursor-pointer"
+                                    >
+                                        <Inbox size={11} />
+                                        Cajón
+                                    </button>
+                                )}
+                            </div>
 
-                            {/* Amount display — tap to open cash drawer / focus cash input */}
+                            {/* Amount display — tap to open cash drawer (normal) or focus cash input (split) */}
                             <div
                                 className={cn(
                                     'flex flex-col items-center justify-center gap-0.5 h-16 rounded-xl bg-[#101520] border select-none cursor-pointer active:scale-[0.98] transition-all',
