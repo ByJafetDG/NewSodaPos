@@ -47,7 +47,9 @@ export async function getActiveRegister() {
                 cr.*,
                 COALESCE((SELECT SUM(total) FROM Sale WHERE cashRegisterId = cr.id AND paymentMethod = 'EFECTIVO' AND status = 'COMPLETADA'), 0) as salesCash,
                 COALESCE((SELECT SUM(total) FROM Sale WHERE cashRegisterId = cr.id AND paymentMethod = 'SINPE'    AND status = 'COMPLETADA'), 0) as salesSinpe,
-                COALESCE((SELECT SUM(total) FROM Sale WHERE cashRegisterId = cr.id AND paymentMethod = 'CREDITO'  AND status = 'COMPLETADA'), 0) as salesCredit
+                COALESCE((SELECT SUM(total) FROM Sale WHERE cashRegisterId = cr.id AND paymentMethod = 'CREDITO'  AND status = 'COMPLETADA'), 0) as salesCredit,
+                COALESCE((SELECT SUM(amount) FROM CashAdjustment WHERE cashRegisterId = cr.id AND direction = 'IN'), 0) as adjustmentsIn,
+                COALESCE((SELECT SUM(amount) FROM CashAdjustment WHERE cashRegisterId = cr.id AND direction = 'OUT'), 0) as adjustmentsOut
             FROM CashRegister cr
             WHERE cr.status = 'OPEN'
             ORDER BY cr.openedAt DESC
@@ -76,11 +78,18 @@ export async function getActiveRegister() {
     const agg = (method: string) =>
         (sales ?? []).filter(s => s.paymentMethod === method).reduce((sum, s) => sum + s.total, 0)
 
+    const { data: adjs } = await supabase
+        .from('CashAdjustment')
+        .select('direction, amount')
+        .eq('cashRegisterId', register.id)
+
     return {
         ...register,
         salesCash: agg('EFECTIVO'),
         salesSinpe: agg('SINPE'),
         salesCredit: agg('CREDITO'),
+        adjustmentsIn: (adjs ?? []).filter(a => a.direction === 'IN').reduce((s, a) => s + a.amount, 0),
+        adjustmentsOut: (adjs ?? []).filter(a => a.direction === 'OUT').reduce((s, a) => s + a.amount, 0),
     }
 }
 
@@ -202,7 +211,7 @@ export async function updateRegister(registerId: string, updates: { initialAmoun
 // ===== Cash Audit Entries =====
 export type CashAuditEntry = {
     id: string
-    type: 'VENTA' | 'GASTO' | 'DEVOLUCION'
+    type: 'VENTA' | 'GASTO' | 'DEVOLUCION' | 'AJUSTE'
     time: string
     label: string
     amountReceived: number
@@ -214,8 +223,8 @@ export type CashAuditEntry = {
 export async function getCashAuditEntries(registerId: string): Promise<CashAuditEntry[]> {
     let sales: any[] = []
     let expenses: any[] = []
-
     let returns: any[] = []
+    let adjustments: any[] = []
 
     if (window.electronAPI) {
         sales = await window.electronAPI.dbQuery(`
@@ -235,6 +244,13 @@ export async function getCashAuditEntries(registerId: string): Promise<CashAudit
         returns = await window.electronAPI.dbQuery(`
             SELECT id, returnNumber, date as time, netCash, employeeName
             FROM "Return"
+            WHERE cashRegisterId = ?
+            ORDER BY date ASC
+        `, [registerId])
+
+        adjustments = await window.electronAPI.dbQuery(`
+            SELECT id, direction, amount, reason, employeeName, date as time
+            FROM CashAdjustment
             WHERE cashRegisterId = ?
             ORDER BY date ASC
         `, [registerId])
@@ -261,6 +277,13 @@ export async function getCashAuditEntries(registerId: string): Promise<CashAudit
             .eq('cashRegisterId', registerId)
             .order('date', { ascending: true })
         returns = r ?? []
+
+        const { data: a } = await supabase
+            .from('CashAdjustment')
+            .select('id, direction, amount, reason, employeeName, date')
+            .eq('cashRegisterId', registerId)
+            .order('date', { ascending: true })
+        adjustments = a ?? []
     }
 
     const entries: CashAuditEntry[] = [
@@ -293,6 +316,18 @@ export async function getCashAuditEntries(registerId: string): Promise<CashAudit
             changeGiven: r.netCash > 0 ? r.netCash : 0,
             net: -r.netCash,
             employeeName: r.employeeName,
+        })),
+        ...adjustments.map((a: any) => ({
+            id: a.id,
+            type: 'AJUSTE' as const,
+            time: a.time ?? a.date,
+            label: a.direction === 'IN'
+                ? `Ingreso: ${a.reason || 'Ajuste de caja'}`
+                : `Retiro: ${a.reason || 'Ajuste de caja'}`,
+            amountReceived: a.direction === 'IN' ? a.amount : 0,
+            changeGiven: a.direction === 'OUT' ? a.amount : 0,
+            net: a.direction === 'IN' ? a.amount : -a.amount,
+            employeeName: a.employeeName,
         })),
     ]
 
@@ -341,6 +376,32 @@ export async function getSaleById(saleId: string): Promise<Sale | null> {
         createdAt: new Date(data.createdAt),
         updatedAt: new Date(data.updatedAt),
     } as Sale
+}
+
+// ===== Cash Adjustment =====
+export async function createAdjustment(
+    cashRegisterId: string,
+    direction: 'IN' | 'OUT',
+    amount: number,
+    reason: string | null,
+    employeeName: string | null,
+) {
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(`
+            INSERT INTO CashAdjustment (id, cashRegisterId, direction, amount, reason, employeeName, date, syncStatus, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+        `, [id, cashRegisterId, direction, amount, reason, employeeName, now, now, now])
+        return
+    }
+
+    const { error } = await supabase.from('CashAdjustment').insert({
+        id, cashRegisterId, direction, amount, reason, employeeName,
+        date: now, syncStatus: 'SYNCED', createdAt: now, updatedAt: now,
+    })
+    if (error) throw error
 }
 
 // ===== Delete Register =====

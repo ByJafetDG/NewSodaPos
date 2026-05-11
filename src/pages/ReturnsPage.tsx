@@ -84,6 +84,8 @@ export function ReturnsPage() {
     }
 
     const searchKb = useKeyboardInput(searchInput, (v) => { setSearchInput(v); setNotFound(false) }, { mode: 'numeric', onEnter: () => loadSaleByNumber(parseInt(searchInputRef.current.trim())) })
+    const productSearchKb = useKeyboardInput(productSearch, setProductSearch, { mode: 'alpha' })
+    const notesKb = useKeyboardInput(notes, setNotes, { mode: 'alpha' })
 
     const filteredProducts = products.filter(p =>
         productSearch
@@ -309,9 +311,8 @@ export function ReturnsPage() {
 
                                     <input
                                         type="text"
-                                        value={productSearch}
-                                        onChange={e => setProductSearch(e.target.value)}
                                         placeholder="Buscar producto..."
+                                        {...productSearchKb}
                                         className="w-full h-9 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/40 transition-colors"
                                     />
                                     <div className="max-h-44 overflow-y-auto space-y-1 pr-1">
@@ -354,12 +355,11 @@ export function ReturnsPage() {
                                             </span>
                                         </div>
                                     </div>
-                                    <textarea
-                                        value={notes}
-                                        onChange={e => setNotes(e.target.value)}
+                                    <input
+                                        type="text"
                                         placeholder="Notas (motivo de devolución...)"
-                                        rows={2}
-                                        className="w-full px-3 py-2 rounded-xl bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-rose-500/30 transition-colors resize-none"
+                                        {...notesKb}
+                                        className="w-full h-9 px-3 rounded-xl bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-rose-500/30 transition-colors"
                                     />
                                     <Button
                                         variant="danger"

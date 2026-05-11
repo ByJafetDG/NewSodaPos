@@ -3,6 +3,7 @@ import {
     Wallet, DoorOpen, DoorClosed, Banknote, Smartphone,
     CheckCircle2, Clock, Edit2, Trash2, TrendingUp,
     Receipt, ShieldCheck, ArrowDownLeft, ArrowUpRight, Minus, RotateCcw,
+    ArrowRightLeft,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { BaseModal } from '@/components/modals/BaseModal'
@@ -14,7 +15,9 @@ import { NumericPad } from '@/components/molecules/NumericPad'
 import {
     useActiveRegister, useRegisterHistory,
     useOpenRegister, useCloseRegister, useUpdateRegister, useDeleteRegister, useCashAudit, useSaleDetails,
+    useCreateAdjustment,
 } from '@/hooks/useCashRegister'
+import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import type { CashAuditEntry } from '@/services/cashRegister'
 import { cn, formatCurrency } from '@/lib/utils'
 import type { CashRegister } from '@/types'
@@ -60,6 +63,7 @@ export function CashRegisterPage() {
 
     const [openModal, setOpenModal] = useState(false)
     const [closeModal, setCloseModal] = useState(false)
+    const [adjustmentModal, setAdjustmentModal] = useState(false)
     const [editingRegister, setEditingRegister] = useState<CashRegister | null>(null)
     const [deletingRegister, setDeletingRegister] = useState<CashRegister | null>(null)
     const [detailRegister, setDetailRegister] = useState<CashRegister | null>(null)
@@ -110,6 +114,9 @@ export function CashRegisterPage() {
     const sinpeSales = activeRegister?.salesSinpe ?? 0
     const creditSales = activeRegister?.salesCredit ?? 0
     const totalSales = cashSales + sinpeSales + creditSales
+    const adjIn = activeRegister?.adjustmentsIn ?? 0
+    const adjOut = activeRegister?.adjustmentsOut ?? 0
+    const adjNet = adjIn - adjOut
 
     return (
         <div className="flex flex-col h-full">
@@ -127,10 +134,19 @@ export function CashRegisterPage() {
                     </div>
                 </div>
                 {isOpen ? (
-                    <Button variant="danger" size="sm" onClick={() => setCloseModal(true)} className="gap-1.5">
-                        <DoorClosed size={14} />
-                        Cerrar Caja
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setAdjustmentModal(true)}
+                            className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#7A8FAA] hover:text-sky-400 hover:border-sky-500/30 text-[12px] font-medium transition-all cursor-pointer"
+                        >
+                            <ArrowRightLeft size={13} />
+                            Ajuste
+                        </button>
+                        <Button variant="danger" size="sm" onClick={() => setCloseModal(true)} className="gap-1.5">
+                            <DoorClosed size={14} />
+                            Cerrar Caja
+                        </Button>
+                    </div>
                 ) : (
                     <Button variant="primary" size="sm" onClick={() => setOpenModal(true)} className="gap-1.5">
                         <DoorOpen size={14} />
@@ -169,9 +185,11 @@ export function CashRegisterPage() {
                                     <Banknote size={11} /> Cuadre físico (efectivo)
                                 </p>
                                 <p className="text-[14px] font-bold font-mono text-[#E4ECF7]">
-                                    {formatCurrency(activeRegister.initialAmount + cashSales)}
+                                    {formatCurrency(activeRegister.initialAmount + cashSales + adjNet)}
                                 </p>
-                                <p className="text-[10px] text-[#3D506A] mt-0.5">Inicial + ventas en efectivo</p>
+                                <p className="text-[10px] text-[#3D506A] mt-0.5">
+                                    Inicial + efectivo{adjNet !== 0 ? ` + ajustes (${adjNet > 0 ? '+' : ''}${formatCurrency(adjNet)})` : ''}
+                                </p>
                             </div>
                             <div>
                                 <p className="text-[11px] text-[#3D506A] mb-1 flex items-center gap-1">
@@ -242,6 +260,15 @@ export function CashRegisterPage() {
                     </Button>
                 </div>
             </BaseModal>
+
+            {/* Adjustment */}
+            {activeRegister && (
+                <CashAdjustmentModal
+                    isOpen={adjustmentModal}
+                    onClose={() => setAdjustmentModal(false)}
+                    cashRegisterId={activeRegister.id}
+                />
+            )}
 
             {/* Edit */}
             <EditRegisterModal
@@ -369,7 +396,8 @@ function RegisterDetailModal({ register: r, onClose }: { register: CashRegister 
     const sinpeSales = r.salesSinpe ?? 0
     const creditSales = r.salesCredit ?? 0
     const totalSales = cashSales + sinpeSales + creditSales
-    const expectedFinal = r.initialAmount + cashSales - (r.expensesTotal ?? 0)
+    const adjustmentsNet = auditEntries.filter(e => e.type === 'AJUSTE').reduce((s, e) => s + e.net, 0)
+    const expectedFinal = r.initialAmount + cashSales - (r.expensesTotal ?? 0) + adjustmentsNet
     const diff = (r.finalAmount ?? 0) - expectedFinal
     const dateStr = fmtDate(r.openedAt)
 
@@ -467,6 +495,14 @@ function RegisterDetailModal({ register: r, onClose }: { register: CashRegister 
                                                 <div className="flex justify-between">
                                                     <span className="text-[#7A8FAA]">− Gastos</span>
                                                     <span className="font-mono text-red-400">−{formatCurrency(r.expensesTotal ?? 0)}</span>
+                                                </div>
+                                            )}
+                                            {adjustmentsNet !== 0 && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-[#7A8FAA]">{adjustmentsNet > 0 ? '+ Ajustes (ingresos)' : '− Ajustes (retiros)'}</span>
+                                                    <span className={cn('font-mono', adjustmentsNet > 0 ? 'text-sky-400' : 'text-orange-400')}>
+                                                        {adjustmentsNet > 0 ? '+' : ''}{formatCurrency(adjustmentsNet)}
+                                                    </span>
                                                 </div>
                                             )}
                                             <div className="flex justify-between border-t border-[#192030] pt-2">
@@ -590,6 +626,8 @@ function RegisterDetailModal({ register: r, onClose }: { register: CashRegister 
 function AuditRow({ entry, onSelect }: { entry: CashAuditEntry & { balance: number }; onSelect?: () => void }) {
     const isGasto = entry.type === 'GASTO'
     const isDevolucion = entry.type === 'DEVOLUCION'
+    const isAjuste = entry.type === 'AJUSTE'
+    const isAjusteIn = isAjuste && entry.net > 0
     const time = fmtTime(entry.time)
     const hasChange = entry.changeGiven > 0
 
@@ -597,9 +635,17 @@ function AuditRow({ entry, onSelect }: { entry: CashAuditEntry & { balance: numb
         ? <ArrowUpRight size={11} className="text-red-400 shrink-0" />
         : isDevolucion
             ? <RotateCcw size={11} className="text-rose-400 shrink-0" />
-            : <ArrowDownLeft size={11} className="text-emerald-400 shrink-0" />
+            : isAjuste
+                ? <ArrowRightLeft size={11} className={isAjusteIn ? 'text-sky-400 shrink-0' : 'text-orange-400 shrink-0'} />
+                : <ArrowDownLeft size={11} className="text-emerald-400 shrink-0" />
 
-    const labelColor = isGasto ? 'text-[#7A8FAA]' : isDevolucion ? 'text-rose-300' : 'text-[#E4ECF7]'
+    const labelColor = isGasto
+        ? 'text-[#7A8FAA]'
+        : isDevolucion
+            ? 'text-rose-300'
+            : isAjuste
+                ? (isAjusteIn ? 'text-sky-300' : 'text-orange-300')
+                : 'text-[#E4ECF7]'
 
     return (
         <tr
@@ -654,6 +700,104 @@ function PayRow({ icon, label, value, color }: { icon: React.ReactNode; label: s
                 {formatCurrency(value)}
             </span>
         </div>
+    )
+}
+
+function CashAdjustmentModal({ isOpen, onClose, cashRegisterId }: {
+    isOpen: boolean
+    onClose: () => void
+    cashRegisterId: string
+}) {
+    const [direction, setDirection] = useState<'IN' | 'OUT'>('IN')
+    const [amount, setAmount] = useState('')
+    const [reason, setReason] = useState('')
+    const createAdjustment = useCreateAdjustment()
+    const reasonKb = useKeyboardInput(reason, setReason, { mode: 'alpha' })
+
+    const [selectedEmployee] = useState<{ name: string } | null>(() => {
+        try { return JSON.parse(localStorage.getItem('pos_cashier_v2') ?? 'null') }
+        catch { return null }
+    })
+
+    async function handleConfirm() {
+        const amt = parseAmount(amount)
+        if (!amt) return
+        await createAdjustment.mutateAsync({
+            cashRegisterId,
+            direction,
+            amount: amt,
+            reason: reason.trim() || null,
+            employeeName: selectedEmployee?.name ?? null,
+        })
+        setAmount('')
+        setReason('')
+        onClose()
+    }
+
+    return (
+        <BaseModal isOpen={isOpen} onClose={onClose} title="Ajuste de caja" width="max-w-sm">
+            <div className="space-y-4">
+                {/* Direction toggle */}
+                <div className="flex gap-1 p-1 rounded-xl bg-[#101520] border border-[#192030]">
+                    <button
+                        onClick={() => setDirection('IN')}
+                        className={cn(
+                            'flex-1 h-9 rounded-lg text-[13px] font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5',
+                            direction === 'IN' ? 'bg-sky-500/15 text-sky-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        <ArrowDownLeft size={14} />
+                        Ingreso
+                    </button>
+                    <button
+                        onClick={() => setDirection('OUT')}
+                        className={cn(
+                            'flex-1 h-9 rounded-lg text-[13px] font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5',
+                            direction === 'OUT' ? 'bg-orange-500/15 text-orange-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        <ArrowUpRight size={14} />
+                        Retiro
+                    </button>
+                </div>
+
+                <div className={cn(
+                    'flex flex-col items-center gap-1 py-2.5 px-3 rounded-xl border text-[11px]',
+                    direction === 'IN'
+                        ? 'bg-sky-500/5 border-sky-500/20 text-sky-400'
+                        : 'bg-orange-500/5 border-orange-500/20 text-orange-400'
+                )}>
+                    {direction === 'IN'
+                        ? 'Efectivo que entra a la caja (relleno, fondo adicional...)'
+                        : 'Efectivo que sale de la caja (retiro para caja fuerte...)'}
+                </div>
+
+                <AmountDisplay value={amount} color={direction === 'IN' ? 'emerald' : 'red'} />
+                <NumericPad value={amount} onChange={setAmount} />
+
+                {/* Reason */}
+                <div>
+                    <p className="text-[11px] text-[#3D506A] mb-1.5">Motivo (opcional)</p>
+                    <input
+                        type="text"
+                        placeholder="Ej: Relleno de monedas..."
+                        {...reasonKb}
+                        className="w-full h-9 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-sky-500/40 transition-colors"
+                    />
+                </div>
+
+                <Button
+                    variant={direction === 'IN' ? 'primary' : 'danger'}
+                    size="lg"
+                    className="w-full gap-2"
+                    onClick={handleConfirm}
+                    disabled={!amount || createAdjustment.isPending}
+                >
+                    <ArrowRightLeft size={14} />
+                    {createAdjustment.isPending ? 'Registrando...' : direction === 'IN' ? 'Registrar ingreso' : 'Registrar retiro'}
+                </Button>
+            </div>
+        </BaseModal>
     )
 }
 

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { openRegister, closeRegister, getActiveRegister, getRegisterHistory, updateRegister, deleteRegister, getCashAuditEntries, getSaleById } from '@/services/cashRegister'
+import { openRegister, closeRegister, getActiveRegister, getRegisterHistory, updateRegister, deleteRegister, getCashAuditEntries, getSaleById, createAdjustment } from '@/services/cashRegister'
 
 export function useActiveRegister() {
     return useQuery({
@@ -74,6 +74,23 @@ export function useDeleteRegister() {
         mutationFn: deleteRegister,
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['register-history'] })
+        },
+    })
+}
+
+export function useCreateAdjustment() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: ({ cashRegisterId, direction, amount, reason, employeeName }: {
+            cashRegisterId: string
+            direction: 'IN' | 'OUT'
+            amount: number
+            reason: string | null
+            employeeName: string | null
+        }) => createAdjustment(cashRegisterId, direction, amount, reason, employeeName),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['active-register'] })
+            qc.invalidateQueries({ queryKey: ['cash-audit'] })
         },
     })
 }

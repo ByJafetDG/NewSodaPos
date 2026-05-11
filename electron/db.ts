@@ -339,6 +339,20 @@ export function initDb() {
       FOREIGN KEY (returnId) REFERENCES "Return"(id) ON DELETE CASCADE,
       FOREIGN KEY (productId) REFERENCES Product(id)
     );
+
+    CREATE TABLE IF NOT EXISTS CashAdjustment (
+      id TEXT PRIMARY KEY,
+      cashRegisterId TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      amount REAL NOT NULL,
+      reason TEXT,
+      employeeName TEXT,
+      date TEXT DEFAULT (datetime('now')),
+      syncStatus TEXT DEFAULT 'PENDING',
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (cashRegisterId) REFERENCES CashRegister(id)
+    );
   `);
 
   // ===== Migrations for existing databases =====
