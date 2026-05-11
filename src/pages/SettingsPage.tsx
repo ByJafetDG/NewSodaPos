@@ -3,7 +3,7 @@ import {
     Settings2, Store, Receipt, Printer, Users, Cloud,
     Monitor, Save, Plus, Trash2, ChevronRight, Wifi, WifiOff,
     RefreshCw, HardDrive, Zap, LogOut, Minimize2, Maximize2,
-    CheckCircle2, Search, Info, Edit2, Download,
+    CheckCircle2, Search, Info, Edit2, Download, AlertTriangle, X,
 } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { toast } from '@/components/ui/Toast'
@@ -111,8 +111,31 @@ export function SettingsPage() {
     const [lastChecked, setLastChecked] = useState<Date | null>(null)
     const [forcePushing, setForcePushing] = useState(false)
 
+    type SyncError = { id: string; tableName: string; recordId: string; errorMsg: string; attempts: number; lastAttemptAt: string }
+    const [syncErrors, setSyncErrors] = useState<SyncError[]>([])
+
+    async function loadSyncErrors() {
+        if (!window.electronAPI) return
+        const errs = await window.electronAPI.getSyncErrors()
+        setSyncErrors(errs)
+    }
+
+    async function dismissSyncError(id: string) {
+        await window.electronAPI?.clearSyncError(id)
+        setSyncErrors(prev => prev.filter(e => e.id !== id))
+    }
+
+    async function dismissAllSyncErrors() {
+        await window.electronAPI?.clearAllSyncErrors()
+        setSyncErrors([])
+    }
+
     useEffect(() => {
         window.electronAPI?.getSystemInfo().then(info => setAppVersion(info.version))
+        const unsubBarcode = window.electronAPI?.onBarcodeConflict(({ productName }) => {
+            toast.warning(`Barcode duplicado en "${productName}" — barcode eliminado. Revisa Ajustes → Sincronización.`, 8000)
+            loadSyncErrors()
+        })
         const unsub = window.electronAPI?.onUpdateMessage((msg: string) => {
             if (msg === 'update-not-available') {
                 setUpdateStatus('up-to-date')
@@ -125,7 +148,7 @@ export function SettingsPage() {
                 setUpdateStatus('idle')
             }
         })
-        return () => unsub?.()
+        return () => { unsub?.(); unsubBarcode?.() }
     }, [])
 
     async function handleCheckUpdate() {
@@ -289,7 +312,7 @@ export function SettingsPage() {
                         return (
                             <button
                                 key={s.id}
-                                onClick={() => setSection(s.id)}
+                                onClick={() => { setSection(s.id); if (s.id === 'sync') loadSyncErrors() }}
                                 className={cn(
                                     'relative w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all cursor-pointer text-left group',
                                     isActive ? 'bg-[#141C2E]' : 'hover:bg-[#0F1623]'
@@ -705,6 +728,54 @@ export function SettingsPage() {
                                         <RefreshCw size={14} className={forcePushing ? 'animate-spin' : ''} />
                                         {forcePushing ? 'Sincronizando...' : 'Forzar re-sincronización'}
                                     </button>
+                                )}
+
+                                {/* Sync errors panel */}
+                                {window.electronAPI && (
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-1.5">
+                                                <AlertTriangle size={12} className={syncErrors.length > 0 ? 'text-amber-400' : 'text-[#3D506A]'} />
+                                                <span className={cn('text-[11px] uppercase tracking-wider font-semibold', syncErrors.length > 0 ? 'text-amber-400' : 'text-[#3D506A]')}>
+                                                    Errores de sincronización{syncErrors.length > 0 ? ` (${syncErrors.length})` : ''}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <button onClick={loadSyncErrors} className="text-[11px] text-[#3D506A] hover:text-[#7A8FAA] transition-colors cursor-pointer px-1">
+                                                    <RefreshCw size={11} />
+                                                </button>
+                                                {syncErrors.length > 0 && (
+                                                    <button onClick={dismissAllSyncErrors} className="text-[11px] text-[#3D506A] hover:text-red-400 transition-colors cursor-pointer px-1">
+                                                        Limpiar todos
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {syncErrors.length === 0 ? (
+                                            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#101520] border border-[#1E2A40]">
+                                                <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
+                                                <span className="text-[12px] text-[#3D506A]">Sin errores de sincronización</span>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+                                                {syncErrors.map(err => (
+                                                    <div key={err.id} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/15">
+                                                        <AlertTriangle size={11} className="text-amber-400 shrink-0 mt-0.5" />
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-[11px] font-semibold text-amber-400">{err.tableName}</p>
+                                                            <p className="text-[11px] text-[#7A8FAA] truncate">{err.errorMsg}</p>
+                                                            <p className="text-[10px] text-[#3D506A] mt-0.5">
+                                                                {err.attempts} intento{err.attempts !== 1 ? 's' : ''} · {new Date(err.lastAttemptAt).toLocaleTimeString('es-CR', { timeZone: 'America/Costa_Rica', hour: '2-digit', minute: '2-digit' })}
+                                                            </p>
+                                                        </div>
+                                                        <button onClick={() => dismissSyncError(err.id)} className="text-[#3D506A] hover:text-red-400 transition-colors cursor-pointer shrink-0">
+                                                            <X size={11} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
 
                                 {/* App info */}

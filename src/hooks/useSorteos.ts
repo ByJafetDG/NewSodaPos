@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
     getSorteos, getActiveSorteos, createSorteo, updateSorteo, deleteSorteo,
     getSorteoOptions, getSorteoParticipants, getSorteoStats, getOccupiedParticipants,
+    getSorteoWinners,
 } from '@/services/sorteos'
 import type { Sorteo, SorteoOption, SorteoParticipant } from '@/types'
 
@@ -96,6 +97,15 @@ export function useOccupiedParticipants(excludeSorteoId?: string) {
     return useQuery({
         queryKey: ['occupiedParticipants', excludeSorteoId ?? null],
         queryFn: () => getOccupiedParticipants(excludeSorteoId),
+        staleTime: 1000 * 30,
+    })
+}
+
+export function useSorteoWinners(sorteoId: string | null) {
+    return useQuery({
+        queryKey: ['sorteoWinners', sorteoId],
+        queryFn: () => getSorteoWinners(sorteoId!),
+        enabled: !!sorteoId,
         staleTime: 1000 * 30,
     })
 }

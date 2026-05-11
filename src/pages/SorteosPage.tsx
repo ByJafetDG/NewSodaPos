@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Ticket, Plus, Play, Pause, StopCircle, Trash2, Clock, Zap, BarChart2, Users, UserX, UserCheck, Pencil } from 'lucide-react'
+import { Ticket, Plus, Play, Pause, StopCircle, Trash2, Clock, Zap, BarChart2, Users, UserX, UserCheck, Pencil, Trophy } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { Badge } from '@/components/atoms/Badge'
 import { EmptyState } from '@/components/atoms/EmptyState'
@@ -9,7 +9,7 @@ import { CreateSorteoModal } from '@/components/modals/CreateSorteoModal'
 import { EditSorteoModal } from '@/components/modals/EditSorteoModal'
 import { RuletaModal } from '@/components/modals/RuletaModal'
 import { cn } from '@/lib/utils'
-import { useSorteos, useUpdateSorteo, useDeleteSorteo, useSorteoStats, useSorteoOptions } from '@/hooks/useSorteos'
+import { useSorteos, useUpdateSorteo, useDeleteSorteo, useSorteoStats, useSorteoOptions, useSorteoWinners } from '@/hooks/useSorteos'
 import type { Sorteo, SorteoStatus } from '@/types'
 
 const STATUS_LABEL: Record<SorteoStatus, string> = {
@@ -29,6 +29,7 @@ const STATUS_VARIANT: Record<SorteoStatus, 'default' | 'success' | 'warning' | '
 function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose: () => void }) {
     const { data: stats } = useSorteoStats(sorteo?.id ?? null)
     const { data: options = [] } = useSorteoOptions(sorteo?.id ?? null)
+    const { data: winners = [] } = useSorteoWinners(sorteo?.id ?? null)
 
     if (!sorteo) return null
 
@@ -126,6 +127,26 @@ function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose:
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Winner history */}
+            {winners.length > 0 && (
+                <div className="mt-5 space-y-2">
+                    <p className="text-[11px] uppercase tracking-wider text-[#3D506A]">Historial de ganadores</p>
+                    <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                        {winners.map(w => (
+                            <div key={w.id} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-[#101828] border border-[#192030]">
+                                <Trophy size={12} style={{ color: w.optionColor ?? '#F59E0B' }} className="shrink-0" />
+                                <span className="text-[12px] font-medium text-[#C5D5E8] flex-1 truncate">{w.optionLabel}</span>
+                                <span className="text-[11px] text-[#3D506A] shrink-0 tabular-nums">
+                                    {w.wonAt.toLocaleTimeString('es-CR', { timeZone: 'America/Costa_Rica', hour: '2-digit', minute: '2-digit' })}
+                                    {' '}
+                                    {w.wonAt.toLocaleDateString('es-CR', { timeZone: 'America/Costa_Rica', day: '2-digit', month: '2-digit' })}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
         </BaseModal>

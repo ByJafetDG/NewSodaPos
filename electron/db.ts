@@ -422,6 +422,35 @@ export function initDb() {
     // Already exists
   }
 
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS SyncError (
+        id TEXT PRIMARY KEY,
+        tableName TEXT NOT NULL,
+        recordId TEXT NOT NULL,
+        errorMsg TEXT NOT NULL,
+        attempts INTEGER DEFAULT 1,
+        createdAt TEXT DEFAULT (datetime('now')),
+        lastAttemptAt TEXT DEFAULT (datetime('now'))
+      )
+    `);
+  } catch {}
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS SorteoWinner (
+        id TEXT PRIMARY KEY,
+        sorteoId TEXT NOT NULL,
+        optionId TEXT NOT NULL,
+        optionLabel TEXT NOT NULL,
+        optionColor TEXT,
+        wonAt TEXT DEFAULT (datetime('now')),
+        syncStatus TEXT DEFAULT 'PENDING',
+        FOREIGN KEY (sorteoId) REFERENCES Sorteo(id)
+      )
+    `);
+  } catch {}
+
   // Corrective migration: restore Z to CashRegister timestamps damaged by previous bad migration
   // (previous migration stripped Z without adjusting time — re-add Z to restore UTC format)
   try {
@@ -464,6 +493,18 @@ export function get(sql: string, params: any[] = []) {
  */
 export function transaction(fn: () => void) {
   return db.transaction(fn)();
+}
+
+/**
+ * Execute multiple SQL operations atomically in a single transaction.
+ * If any operation fails the whole batch is rolled back.
+ */
+export function executeMany(ops: Array<{ sql: string; params: any[] }>) {
+  return db.transaction(() => {
+    for (const op of ops) {
+      db.prepare(op.sql).run(op.params);
+    }
+  })();
 }
 
 export default db;

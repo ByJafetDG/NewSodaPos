@@ -89,11 +89,28 @@ export async function getCreditSales(clientId?: string): Promise<any[]> {
 export async function settleSale(saleId: string): Promise<void> {
     const now = new Date().toISOString()
     if (window.electronAPI) {
+        const sale = await window.electronAPI.dbGet('SELECT total, clientId FROM Sale WHERE id = ?', [saleId])
+        if (!sale) throw new Error('Venta no encontrada')
+        const payRow = await window.electronAPI.dbGet(
+            'SELECT COALESCE(SUM(amount), 0) as paid FROM Payment WHERE clientId = ?',
+            [sale.clientId]
+        )
+        const paid = payRow?.paid ?? 0
+        if (paid < sale.total) {
+            throw new Error(`Pago insuficiente: el cliente tiene ₡${paid} en abonos pero la venta es de ₡${sale.total}`)
+        }
         await window.electronAPI.dbExecute(
             "UPDATE Sale SET isCredit = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?",
             [now, saleId]
         )
         return
+    }
+    const { data: sale, error: saleErr } = await supabase.from('Sale').select('total, clientId').eq('id', saleId).single()
+    if (saleErr) throw saleErr
+    const { data: payments } = await supabase.from('Payment').select('amount').eq('clientId', sale.clientId)
+    const paid = (payments ?? []).reduce((sum: number, p: any) => sum + p.amount, 0)
+    if (paid < sale.total) {
+        throw new Error(`Pago insuficiente: el cliente tiene ₡${paid} en abonos pero la venta es de ₡${sale.total}`)
     }
     const { error } = await supabase.from('Sale').update({ isCredit: false, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', saleId)
     if (error) throw error

@@ -21,7 +21,7 @@ if (isDev) {
     }
 }
 
-import { initDb, query, execute, get } from './db'
+import { initDb, query, execute, get, executeMany } from './db'
 import { startSyncEngine, pushSync } from './sync'
 
 // Disable GPU acceleration for better compatibility on some systems
@@ -125,6 +125,7 @@ ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized())
 ipcMain.handle('db:query', (_, sql: string, params: any[]) => query(sql, params))
 ipcMain.handle('db:execute', (_, sql: string, params: any[]) => execute(sql, params))
 ipcMain.handle('db:get', (_, sql: string, params: any[]) => get(sql, params))
+ipcMain.handle('db:execute-transaction', (_, ops: Array<{ sql: string; params: any[] }>) => executeMany(ops))
 
 // Sync Stats
 ipcMain.handle('sync:stats', async () => {
@@ -528,3 +529,13 @@ autoUpdater.on('update-downloaded', () => {
 ipcMain.handle('update:install', () => autoUpdater.quitAndInstall())
 ipcMain.handle('update:check', () => autoUpdater.checkForUpdates())
 ipcMain.handle('devtools:open', () => mainWindow?.webContents.openDevTools())
+
+ipcMain.handle('sync:get-errors', () =>
+    query('SELECT * FROM SyncError ORDER BY lastAttemptAt DESC LIMIT 50', [])
+)
+ipcMain.handle('sync:clear-error', (_: any, id: string) =>
+    execute('DELETE FROM SyncError WHERE id = ?', [id])
+)
+ipcMain.handle('sync:clear-all-errors', () =>
+    execute('DELETE FROM SyncError', [])
+)

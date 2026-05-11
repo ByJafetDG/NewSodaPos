@@ -25,3 +25,6 @@ npm-debug.log*
 # Editor
 .vscode/
 .idea/
+
+# Graphify
+graphify-out/

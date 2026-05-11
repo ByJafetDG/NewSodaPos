@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase'
-import type { Sorteo, SorteoOption, SorteoParticipant, SorteoEntry, SorteoStats } from '@/types'
+import type { Sorteo, SorteoOption, SorteoParticipant, SorteoEntry, SorteoStats, SorteoWinner } from '@/types'
 
 // ─── Sorteo ──────────────────────────────────────────────────────────────────
 
@@ -176,6 +176,11 @@ export async function handleSorteoWin(sorteoId: string, resultOptionId: string):
     await decrementOptionQuantity(resultOptionId)
 
     const options = await getSorteoOptions(sorteoId)
+    const winner = options.find(o => o.id === resultOptionId)
+    if (winner) {
+        await recordSorteoWinner(sorteoId, winner.id, winner.label, winner.color)
+    }
+
     const nonFillers = options.filter(o => !o.isFiller)
     const allExhausted = nonFillers.length > 0 &&
         nonFillers.every(o => o.quantityRemaining !== null && (o.quantityRemaining ?? 1) <= 0)
@@ -183,6 +188,40 @@ export async function handleSorteoWin(sorteoId: string, resultOptionId: string):
     if (allExhausted) {
         await updateSorteo(sorteoId, { status: 'ENDED' })
     }
+}
+
+export async function recordSorteoWinner(
+    sorteoId: string,
+    optionId: string,
+    optionLabel: string,
+    optionColor?: string | null,
+): Promise<void> {
+    const id = crypto.randomUUID()
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            `INSERT INTO SorteoWinner (id, sorteoId, optionId, optionLabel, optionColor, syncStatus)
+             VALUES (?, ?, ?, ?, ?, 'PENDING')`,
+            [id, sorteoId, optionId, optionLabel, optionColor ?? null]
+        )
+        return
+    }
+    await supabase.from('SorteoWinner').insert({
+        id, sorteoId, optionId, optionLabel, optionColor: optionColor ?? null, syncStatus: 'SYNCED',
+    })
+}
+
+export async function getSorteoWinners(sorteoId: string): Promise<SorteoWinner[]> {
+    if (window.electronAPI) {
+        const rows = await window.electronAPI.dbQuery(
+            'SELECT * FROM SorteoWinner WHERE sorteoId = ? ORDER BY wonAt DESC',
+            [sorteoId]
+        )
+        return rows.map((r: any) => ({ ...r, wonAt: new Date(r.wonAt) })) as SorteoWinner[]
+    }
+    const { data, error } = await supabase
+        .from('SorteoWinner').select('*').eq('sorteoId', sorteoId).order('wonAt', { ascending: false })
+    if (error) throw error
+    return (data ?? []).map((r: any) => ({ ...r, wonAt: new Date(r.wonAt) })) as SorteoWinner[]
 }
 
 export async function decrementOptionQuantity(optionId: string): Promise<void> {

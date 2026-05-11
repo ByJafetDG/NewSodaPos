@@ -61,35 +61,40 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
     const now = localISO()
 
     if (window.electronAPI) {
-        // Offline-first operation: All in local SQLite
-        await window.electronAPI.dbExecute(`
-            INSERT INTO Sale (
-                id, saleNumber, date, subtotal, discount, total, paymentMethod, 
-                amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-            id, saleNumber, now, input.subtotal, input.discount, input.total,
-            input.paymentMethod, input.amountReceived, input.change,
-            input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING'
-        ]);
-
+        // Validate stock before committing — second line of defense after cartStore
+        const ids = input.items.map(i => i.id)
+        const placeholders = ids.map(() => '?').join(',')
+        const stocks: any[] = await window.electronAPI.dbQuery(
+            `SELECT id, name, stockQty, isInfinite FROM Product WHERE id IN (${placeholders})`,
+            ids
+        )
         for (const item of input.items) {
-            const itemId = crypto.randomUUID();
-            await window.electronAPI.dbExecute(`
-                INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            `, [itemId, id, item.id, item.quantity, item.unitPrice, item.subtotal, item.notes]);
-
-            // Update local stock via local version of updateProductStock
-            await updateProductStock(item.id, -item.quantity);
+            const prod = stocks.find((s: any) => s.id === item.id)
+            if (prod && !prod.isInfinite && prod.stockQty < item.quantity) {
+                throw new Error(`Stock insuficiente para "${prod.name}": disponible ${prod.stockQty}, solicitado ${item.quantity}`)
+            }
         }
 
-        return {
-            id,
-            saleNumber,
-            date: now,
-            ...input
-        };
+        const ops: Array<{ sql: string; params: any[] }> = [
+            {
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING']
+            }
+        ]
+
+        for (const item of input.items) {
+            ops.push({
+                sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                params: [crypto.randomUUID(), id, item.id, item.quantity, item.unitPrice, item.subtotal, item.notes]
+            })
+            ops.push({
+                sql: `UPDATE Product SET stockQty = stockQty - ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
+                params: [item.quantity, now, item.id]
+            })
+        }
+
+        await window.electronAPI.dbTransaction(ops)
+        return { id, saleNumber, date: now, ...input }
     }
 
     // 1. Insert the sale (Cloud fallback)
@@ -224,23 +229,28 @@ export async function updateCreditSaleItems(
     const newTotal = updatedItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
 
     if (window.electronAPI) {
+        const ops: Array<{ sql: string; params: any[] }> = []
+
         for (const item of updatedItems) {
-            await window.electronAPI.dbExecute(
-                "UPDATE SaleItem SET quantity = ?, unitPrice = ? WHERE id = ?",
-                [item.quantity, item.unitPrice, item.id]
-            )
+            ops.push({
+                sql: `UPDATE SaleItem SET quantity = ?, unitPrice = ? WHERE id = ?`,
+                params: [item.quantity, item.unitPrice, item.id]
+            })
             const delta = item.oldQuantity - item.quantity
             if (delta !== 0) {
-                await window.electronAPI.dbExecute(
-                    "UPDATE Product SET stockQty = stockQty + ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?",
-                    [delta, now, item.productId]
-                )
+                ops.push({
+                    sql: `UPDATE Product SET stockQty = stockQty + ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
+                    params: [delta, now, item.productId]
+                })
             }
         }
-        await window.electronAPI.dbExecute(
-            "UPDATE Sale SET total = ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?",
-            [newTotal, now, saleId]
-        )
+
+        ops.push({
+            sql: `UPDATE Sale SET total = ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+            params: [newTotal, now, saleId]
+        })
+
+        await window.electronAPI.dbTransaction(ops)
         return
     }
 

@@ -18,6 +18,7 @@ export interface ElectronAPI {
     dbQuery: (sql: string, params?: any[]) => Promise<any[]>
     dbExecute: (sql: string, params?: any[]) => Promise<{ changes: number, lastInsertRowid: number | bigint }>
     dbGet: (sql: string, params?: any[]) => Promise<any>
+    dbTransaction: (ops: Array<{ sql: string; params: any[] }>) => Promise<void>
     // Printer
     getPrinters: () => Promise<any[]>
     printReceipt: (printerName: string, data: any) => Promise<{ success: boolean, error?: string }>
@@ -28,8 +29,12 @@ export interface ElectronAPI {
     // Sync
     getSyncStats: () => Promise<{ totalPending: number }>
     forcePush: () => Promise<{ totalRemaining: number; remaining: Record<string, number>; pushErrors: string[] }>
+    getSyncErrors: () => Promise<{ id: string; tableName: string; recordId: string; errorMsg: string; attempts: number; createdAt: string; lastAttemptAt: string }[]>
+    clearSyncError: (id: string) => Promise<void>
+    clearAllSyncErrors: () => Promise<void>
     onDbChanged: (callback: (data: { table: string }) => void) => () => void
     onSyncLog: (callback: (data: { level: string; msg: string }) => void) => () => void
+    onBarcodeConflict: (callback: (data: { productId: string; productName: string }) => void) => () => void
     // Updates
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void
     installUpdate: () => Promise<void>

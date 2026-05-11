@@ -141,3 +141,9 @@ export interface SorteoStats {
     total: number; participated: number; declined: number
     optionCounts: { optionId: string; label: string; count: number }[]
 }
+
+export interface SorteoWinner {
+    id: string; sorteoId: string; optionId: string
+    optionLabel: string; optionColor: string | null
+    wonAt: Date; syncStatus: SyncStatus
+}

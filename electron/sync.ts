@@ -17,6 +17,29 @@ function logError(msg: string) {
     }
 }
 
+function persistSyncError(tableName: string, recordId: string, errorMsg: string) {
+    try {
+        const id = `${tableName}:${recordId}`
+        execute(`
+            INSERT INTO SyncError (id, tableName, recordId, errorMsg, attempts, createdAt, lastAttemptAt)
+            VALUES (?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+                errorMsg = excluded.errorMsg,
+                attempts = SyncError.attempts + 1,
+                lastAttemptAt = datetime('now')
+        `, [id, tableName, recordId, errorMsg])
+    } catch {}
+}
+
+function clearResolvedSyncErrors() {
+    const syncedTables = ['CashRegister','Employee','Client','Category','Subcategory','Product','Sale','Expense','InventoryMovement','Payment']
+    for (const t of syncedTables) {
+        try {
+            execute(`DELETE FROM SyncError WHERE tableName = ? AND recordId IN (SELECT id FROM ${t} WHERE syncStatus = 'SYNCED')`, [t])
+        } catch {}
+    }
+}
+
 /**
  * Sync Engine - Handles background synchronization between SQLite and Supabase
  */
@@ -34,15 +57,37 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
         console.log('[SyncEngine] Dev mode: reset local syncStatus to SYNCED — Supabase will overwrite on pull.');
     }
 
-    // HOTFIX: Resolve saleNumber conflicts by shifting pending sales forward once
-    // This clears the conflict with existing sales in Supabase (like #60, #61)
+    // Resolve saleNumber conflicts: reassign pending local sales that collide with Supabase
     try {
-        const result = execute("UPDATE Sale SET saleNumber = saleNumber + 1000, updatedAt = ? WHERE syncStatus = 'PENDING' AND saleNumber < 1000", [new Date().toISOString()]);
-        if (result.changes > 0) {
-            console.log(`[SyncEngine] Hotfix: Shifted ${result.changes} pending sales to avoid conflicts.`);
+        const { data: remoteTop } = await supabase
+            .from('Sale')
+            .select('saleNumber')
+            .order('saleNumber', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+        const maxRemote: number = remoteTop?.saleNumber ?? 0;
+        const pendingSales = query(
+            "SELECT id, saleNumber FROM Sale WHERE syncStatus = 'PENDING' ORDER BY saleNumber ASC"
+        ) as { id: string; saleNumber: number }[];
+
+        let nextNum = maxRemote;
+        let reassigned = 0;
+        for (const sale of pendingSales) {
+            if (sale.saleNumber <= maxRemote) {
+                nextNum += 1;
+                execute(
+                    "UPDATE Sale SET saleNumber = ?, updatedAt = ? WHERE id = ?",
+                    [nextNum, new Date().toISOString(), sale.id]
+                );
+                reassigned++;
+            }
+        }
+        if (reassigned > 0) {
+            console.log(`[SyncEngine] Reassigned ${reassigned} pending sales (saleNumber ≤ ${maxRemote}) starting from ${maxRemote + 1}.`);
         }
     } catch (err) {
-        console.error('[SyncEngine] Hotfix failed:', err);
+        console.error('[SyncEngine] saleNumber conflict resolution failed:', err);
     }
 
     // Run pull sync (Supabase -> SQLite) in the background so it doesn't block startup
@@ -435,6 +480,7 @@ export async function pushSync(): Promise<string[]> {
             const msg = `CashRegister ${reg.id}: ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('CashRegister', reg.id, msg);
         }
     }
 
@@ -457,6 +503,7 @@ export async function pushSync(): Promise<string[]> {
             const msg = `Employee ${emp.id}: ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('Employee', emp.id, msg);
         }
     }
 
@@ -481,6 +528,7 @@ export async function pushSync(): Promise<string[]> {
             const msg = `Client ${client.id}: ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('Client', client.id, msg);
         }
     }
 
@@ -502,6 +550,7 @@ export async function pushSync(): Promise<string[]> {
             const msg = `Category ${cat.id}: ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('Category', cat.id, msg);
         }
     }
 
@@ -524,6 +573,7 @@ export async function pushSync(): Promise<string[]> {
             const msg = `Subcategory ${sub.id}: ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('Subcategory', sub.id, msg);
         }
     }
 
@@ -567,16 +617,23 @@ export async function pushSync(): Promise<string[]> {
                     });
                     if (retryErr) throw retryErr;
                     execute(`UPDATE Product SET syncStatus = 'SYNCED' WHERE id = ?`, [prod.id]);
+                    const barcodeMsg = `"${prod.name}": barcode duplicado — eliminado automáticamente`;
                     console.log(`[SyncEngine] Product ${prod.id} (${prod.name}): barcode conflict resolved, barcode cleared.`);
+                    persistSyncError('Product', prod.id, barcodeMsg);
+                    if (windowRef && !windowRef.isDestroyed()) {
+                        windowRef.webContents.send('sync-barcode-conflict', { productId: prod.id, productName: prod.name });
+                    }
                 } catch (retryErr: any) {
                     const msg = `Product ${prod.id} (${prod.name}) retry: ${retryErr?.message ?? retryErr}`;
                     logError(msg);
                     errors.push(msg);
+                    persistSyncError('Product', prod.id, msg);
                 }
             } else {
                 const msg = `Product ${prod.id} (${prod.name}): ${errMsg}`;
                 logError(msg);
                 errors.push(msg);
+                persistSyncError('Product', prod.id, msg);
             }
             continue;
         }
@@ -634,6 +691,7 @@ export async function pushSync(): Promise<string[]> {
             const msg = `Sale ${sale.id} (#${sale.saleNumber}): ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('Sale', sale.id, msg);
         }
     }
 
@@ -657,6 +715,7 @@ export async function pushSync(): Promise<string[]> {
             const msg = `Expense ${exp.id}: ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('Expense', exp.id, msg);
         }
     }
 
@@ -680,6 +739,7 @@ export async function pushSync(): Promise<string[]> {
             const msg = `InventoryMovement ${mov.id}: ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('InventoryMovement', mov.id, msg);
         }
     }
 
@@ -702,9 +762,11 @@ export async function pushSync(): Promise<string[]> {
             const msg = `Payment ${pay.id}: ${err?.message ?? err}`;
             logError(msg);
             errors.push(msg);
+            persistSyncError('Payment', pay.id, msg);
         }
     }
 
+    clearResolvedSyncErrors();
     console.log('[SyncEngine] Push cycle complete.');
     return errors;
 }

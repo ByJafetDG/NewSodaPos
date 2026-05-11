@@ -18,6 +18,7 @@ const electronAPI = {
     dbQuery: (sql: string, params: any[] = []) => ipcRenderer.invoke('db:query', sql, params),
     dbExecute: (sql: string, params: any[] = []) => ipcRenderer.invoke('db:execute', sql, params),
     dbGet: (sql: string, params: any[] = []) => ipcRenderer.invoke('db:get', sql, params),
+    dbTransaction: (ops: Array<{ sql: string; params: any[] }>) => ipcRenderer.invoke('db:execute-transaction', ops),
     // Printer
     getPrinters: () => ipcRenderer.invoke('printer:get-printers'),
     printReceipt: (printerName: string, data: any) => ipcRenderer.invoke('printer:print', printerName, data),
@@ -30,6 +31,14 @@ const electronAPI = {
     // Sync
     getSyncStats: () => ipcRenderer.invoke('sync:stats'),
     forcePush: () => ipcRenderer.invoke('sync:force-push'),
+    getSyncErrors: () => ipcRenderer.invoke('sync:get-errors'),
+    clearSyncError: (id: string) => ipcRenderer.invoke('sync:clear-error', id),
+    clearAllSyncErrors: () => ipcRenderer.invoke('sync:clear-all-errors'),
+    onBarcodeConflict: (callback: (data: { productId: string; productName: string }) => void) => {
+        const sub = (_event: any, data: any) => callback(data);
+        ipcRenderer.on('sync-barcode-conflict', sub);
+        return () => { ipcRenderer.removeListener('sync-barcode-conflict', sub); };
+    },
     onDbChanged: (callback: (data: { table: string }) => void) => {
         const subscription = (_event: any, data: any) => callback(data);
         ipcRenderer.on('db-changed', subscription);
@@ -76,6 +85,7 @@ export interface ElectronAPI {
     dbQuery: (sql: string, params?: any[]) => Promise<any[]>;
     dbExecute: (sql: string, params?: any[]) => Promise<any>;
     dbGet: (sql: string, params?: any[]) => Promise<any>;
+    dbTransaction: (ops: Array<{ sql: string; params: any[] }>) => Promise<void>;
     getPrinters: () => Promise<any[]>;
     printReceipt: (printerName: string, data: any) => Promise<any>;
     openDrawer: (printerName: string) => Promise<any>;

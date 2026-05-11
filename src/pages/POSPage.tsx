@@ -192,6 +192,7 @@ export function POSPage() {
         }
         qc.invalidateQueries({ queryKey: ['sorteos'] })
         qc.invalidateQueries({ queryKey: ['sorteoStats', cartSorteo.sorteo.id] })
+        qc.invalidateQueries({ queryKey: ['sorteoWinners', cartSorteo.sorteo.id] })
         qc.invalidateQueries({ queryKey: ['cartSorteo'] })
         setSorteoDeclined(true)
     }
