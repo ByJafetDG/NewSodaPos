@@ -19,25 +19,11 @@ import {
 } from '@/hooks/useCashRegister'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import type { CashAuditEntry } from '@/services/cashRegister'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, crTime, crDateStr } from '@/lib/utils'
 import type { CashRegister } from '@/types'
 
-function toDate(v: Date | string | null | undefined): Date {
-    if (!v) return new Date()
-    return v instanceof Date ? v : new Date(v)
-}
-
-const TZ = 'America/Costa_Rica'
-
-function fmtTime(v: Date | string | null | undefined): string {
-    if (!v) return '--'
-    return toDate(v).toLocaleTimeString('es-CR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
-}
-
-function fmtDate(v: Date | string | null | undefined): string {
-    if (!v) return ''
-    return toDate(v).toLocaleDateString('es-CR', { timeZone: TZ, day: '2-digit', month: 'short', year: 'numeric' })
-}
+const fmtTime = crTime
+const fmtDate = crDateStr
 
 function parseAmount(str: string) { return parseInt(str) || 0 }
 

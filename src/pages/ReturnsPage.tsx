@@ -12,7 +12,7 @@ import { toast } from '@/components/ui/Toast'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { Button } from '@/components/atoms/Button'
 import { BaseModal } from '@/components/modals/BaseModal'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, crDateTime, crDateStr, crTime } from '@/lib/utils'
 import type { Sale, Product, Employee, ReturnRecord } from '@/types'
 
 interface ExchangeItem {
@@ -23,12 +23,7 @@ interface ExchangeItem {
     unitPrice: number
 }
 
-const TZ = 'America/Costa_Rica'
-
-function fmtDateTime(d: Date): string {
-    return d.toLocaleDateString('es-CR', { timeZone: TZ, day: '2-digit', month: 'short', year: 'numeric' }) +
-        ' · ' + d.toLocaleTimeString('es-CR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
-}
+const fmtDateTime = crDateTime
 
 export function ReturnsPage() {
     const [selectedEmployee] = useState<Employee | null>(() => {
@@ -465,9 +460,7 @@ function SalePickerModal({ isOpen, onClose, onSelect }: {
                             <div className="min-w-0">
                                 <p className="text-[13px] font-semibold text-[#E4ECF7]">Venta #{s.saleNumber}</p>
                                 <p className="text-[11px] text-[#3D506A]">
-                                    {new Date(s.date).toLocaleDateString('es-CR', { timeZone: TZ, day: '2-digit', month: 'short' })}
-                                    {' · '}{new Date(s.date).toLocaleTimeString('es-CR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })}
-                                    {' · '}{PM_LABEL[s.paymentMethod] ?? s.paymentMethod}
+                                    {crDateStr(s.date)}{' · '}{crTime(s.date)}{' · '}{PM_LABEL[s.paymentMethod] ?? s.paymentMethod}
                                 </p>
                             </div>
                             <span className="text-[13px] font-mono font-semibold text-emerald-400 shrink-0 ml-4">{formatCurrency(s.total)}</span>

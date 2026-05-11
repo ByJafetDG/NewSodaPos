@@ -41,6 +41,38 @@ export function generateId(): string {
     return crypto.randomUUID()
 }
 
+// ─── Costa Rica time helpers ─────────────────────────────────────────────────
+// CR is UTC-6 year-round (no DST). We apply the offset manually instead of
+// relying on Intl timezone support, which is absent in small-icu Electron builds
+// and would silently fall back to UTC (showing times 6 h ahead).
+const CR_OFFSET_MS = -6 * 60 * 60 * 1000
+
+function toCR(v: Date | string): Date {
+    const d = typeof v === 'string' ? new Date(v) : v
+    return new Date(d.getTime() + CR_OFFSET_MS)
+}
+
+const MONTHS_SHORT = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+
+export function crTime(v: Date | string | null | undefined): string {
+    if (!v) return '--'
+    const d = toCR(v as Date | string)
+    const h = d.getUTCHours()
+    const m = String(d.getUTCMinutes()).padStart(2, '0')
+    return `${h % 12 || 12}:${m} ${h >= 12 ? 'p.m.' : 'a.m.'}`
+}
+
+export function crDateStr(v: Date | string | null | undefined): string {
+    if (!v) return ''
+    const d = toCR(v as Date | string)
+    return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+}
+
+export function crDateTime(v: Date | string | null | undefined): string {
+    if (!v) return ''
+    return `${crDateStr(v)} · ${crTime(v)}`
+}
+
 export function cn(...classes: (string | boolean | undefined | null)[]): string {
     return classes.filter(Boolean).join(' ')
 }
