@@ -2,18 +2,20 @@ import { useState } from 'react'
 import {
     Wallet, DoorOpen, DoorClosed, Banknote, Smartphone,
     CheckCircle2, Clock, Edit2, Trash2, TrendingUp,
-    Receipt,
+    Receipt, ShieldCheck, ArrowDownLeft, ArrowUpRight, Minus, RotateCcw,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { BaseModal } from '@/components/modals/BaseModal'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
+import { SaleDetailModal } from '@/components/modals/SaleDetailModal'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { NumericPad } from '@/components/molecules/NumericPad'
 import {
     useActiveRegister, useRegisterHistory,
-    useOpenRegister, useCloseRegister, useUpdateRegister, useDeleteRegister,
+    useOpenRegister, useCloseRegister, useUpdateRegister, useDeleteRegister, useCashAudit, useSaleDetails,
 } from '@/hooks/useCashRegister'
+import type { CashAuditEntry } from '@/services/cashRegister'
 import { cn, formatCurrency } from '@/lib/utils'
 import type { CashRegister } from '@/types'
 
@@ -356,19 +358,29 @@ function RegisterRow({ register: r, onDetail, onEdit, onDelete }: {
 }
 
 function RegisterDetailModal({ register: r, onClose }: { register: CashRegister | null; onClose: () => void }) {
+    const [tab, setTab] = useState<'cuadre' | 'auditoria'>('cuadre')
+    const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null)
+    const { data: auditEntries = [], isLoading: auditLoading } = useCashAudit(r?.id ?? null)
+    const { data: selectedSale = null } = useSaleDetails(selectedSaleId)
+
     if (!r) return null
 
     const cashSales = r.salesCash ?? 0
     const sinpeSales = r.salesSinpe ?? 0
     const creditSales = r.salesCredit ?? 0
     const totalSales = cashSales + sinpeSales + creditSales
-
-    const expectedFinal = r.initialAmount + cashSales
+    const expectedFinal = r.initialAmount + cashSales - (r.expensesTotal ?? 0)
     const diff = (r.finalAmount ?? 0) - expectedFinal
-
     const dateStr = fmtDate(r.openedAt)
 
+    let balance = r.initialAmount
+    const auditRows = auditEntries.map(e => {
+        balance += e.net
+        return { ...e, balance }
+    })
+
     return (
+        <>
         <AnimatePresence>
             {r && (
                 <>
@@ -385,76 +397,249 @@ function RegisterDetailModal({ register: r, onClose }: { register: CashRegister 
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.96, y: 8 }}
                         transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
-                        className="fixed z-50 inset-x-0 mx-auto top-1/2 -translate-y-1/2 w-full max-w-sm px-4"
+                        className={cn(
+                            'fixed z-50 inset-x-0 mx-auto top-1/2 -translate-y-1/2 w-full px-4',
+                            tab === 'auditoria' ? 'max-w-3xl' : 'max-w-sm'
+                        )}
                     >
                         <div className="bg-[#0F1523] border border-[#1E2A40] rounded-2xl shadow-2xl overflow-hidden">
-                            <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-[#192030]">
-                                <div>
-                                    <h2 className="text-[16px] font-semibold text-[#E4ECF7]">Cuadre de caja</h2>
+                            {/* Header */}
+                            <div className="flex items-start justify-between px-6 pt-5 pb-0 border-b border-[#192030]">
+                                <div className="pb-4">
+                                    <h2 className="text-[16px] font-semibold text-[#E4ECF7]">Detalle de caja</h2>
                                     <p className="text-[12px] text-[#3D506A] mt-0.5">{dateStr}</p>
                                 </div>
-                                <button onClick={onClose} className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-[#E4ECF7] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer">
-                                    <DoorClosed size={16} />
-                                </button>
-                            </div>
-                            <div className="px-6 py-5 space-y-5">
-
-                                {/* Ventas por método */}
-                                <div>
-                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-3">Ventas por método de pago</p>
-                                    <div className="space-y-1.5">
-                                        <PayRow icon={<Banknote size={13} className="text-emerald-400" />} label="Efectivo" value={cashSales} color="text-emerald-400" />
-                                        <PayRow icon={<Smartphone size={13} className="text-blue-400" />} label="SINPE" value={sinpeSales} color="text-blue-400" />
-                                        <PayRow icon={<Receipt size={13} className="text-amber-400" />} label="Crédito" value={creditSales} color="text-amber-400" />
+                                <div className="flex items-center gap-2 pb-4">
+                                    <div className="flex gap-0.5 p-0.5 rounded-lg bg-[#101520] border border-[#192030]">
+                                        <button
+                                            onClick={() => setTab('cuadre')}
+                                            className={cn(
+                                                'px-3 h-7 rounded-md text-[11px] font-semibold transition-all cursor-pointer',
+                                                tab === 'cuadre' ? 'bg-[#1C2A40] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                            )}
+                                        >
+                                            Cuadre
+                                        </button>
+                                        <button
+                                            onClick={() => setTab('auditoria')}
+                                            className={cn(
+                                                'flex items-center gap-1 px-3 h-7 rounded-md text-[11px] font-semibold transition-all cursor-pointer',
+                                                tab === 'auditoria' ? 'bg-orange-500/15 text-orange-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                            )}
+                                        >
+                                            <ShieldCheck size={11} />
+                                            Auditoría
+                                        </button>
                                     </div>
-                                    <div className="mt-3 pt-3 border-t border-[#192030] flex items-center justify-between">
-                                        <span className="text-[12px] font-semibold text-[#CBD5E1]">Total vendido</span>
-                                        <span className="text-[15px] font-bold font-mono text-emerald-400">{formatCurrency(totalSales)}</span>
+                                    <button onClick={onClose} className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-[#E4ECF7] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer">
+                                        <DoorClosed size={16} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* ── TAB: CUADRE ── */}
+                            {tab === 'cuadre' && (
+                                <div className="px-6 py-5 space-y-5">
+                                    <div>
+                                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-3">Ventas por método de pago</p>
+                                        <div className="space-y-1.5">
+                                            <PayRow icon={<Banknote size={13} className="text-emerald-400" />} label="Efectivo" value={cashSales} color="text-emerald-400" />
+                                            <PayRow icon={<Smartphone size={13} className="text-blue-400" />} label="SINPE" value={sinpeSales} color="text-blue-400" />
+                                            <PayRow icon={<Receipt size={13} className="text-amber-400" />} label="Crédito" value={creditSales} color="text-amber-400" />
+                                        </div>
+                                        <div className="mt-3 pt-3 border-t border-[#192030] flex items-center justify-between">
+                                            <span className="text-[12px] font-semibold text-[#CBD5E1]">Total vendido</span>
+                                            <span className="text-[15px] font-bold font-mono text-emerald-400">{formatCurrency(totalSales)}</span>
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl bg-[#101520] border border-[#1E2A40] p-4 space-y-2">
+                                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-3">Cuadre de efectivo (físico)</p>
+                                        <div className="space-y-2 text-[13px]">
+                                            <div className="flex justify-between">
+                                                <span className="text-[#7A8FAA]">Fondo inicial</span>
+                                                <span className="font-mono text-[#E4ECF7]">{formatCurrency(r.initialAmount)}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-[#7A8FAA]">+ Ventas efectivo</span>
+                                                <span className="font-mono text-emerald-400">+{formatCurrency(cashSales)}</span>
+                                            </div>
+                                            {(r.expensesTotal ?? 0) > 0 && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-[#7A8FAA]">− Gastos</span>
+                                                    <span className="font-mono text-red-400">−{formatCurrency(r.expensesTotal ?? 0)}</span>
+                                                </div>
+                                            )}
+                                            <div className="flex justify-between border-t border-[#192030] pt-2">
+                                                <span className="text-[#7A8FAA]">= Esperado en caja</span>
+                                                <span className="font-mono font-semibold text-[#E4ECF7]">{formatCurrency(expectedFinal)}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-[#7A8FAA]">Contado físicamente</span>
+                                                <span className="font-mono text-[#E4ECF7]">{formatCurrency(r.finalAmount ?? 0)}</span>
+                                            </div>
+                                            <div className="flex justify-between border-t border-[#192030] pt-2">
+                                                <span className="font-semibold text-[#CBD5E1]">Diferencia</span>
+                                                <span className={cn('font-mono font-bold text-[15px]',
+                                                    diff === 0 ? 'text-emerald-400' : diff > 0 ? 'text-blue-400' : 'text-red-400'
+                                                )}>
+                                                    {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
+                                                    {diff === 0 && ' ✓'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        {diff !== 0 && (
+                                            <p className="text-[10px] text-[#3D506A] pt-1">
+                                                {diff > 0 ? 'Hay más efectivo del esperado (sobrante)' : 'Hay menos efectivo del esperado (faltante)'}
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
+                            )}
 
-                                {/* Cuadre físico */}
-                                <div className="rounded-xl bg-[#101520] border border-[#1E2A40] p-4 space-y-2">
-                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-3">Cuadre de efectivo (físico)</p>
-                                    <div className="space-y-2 text-[13px]">
-                                        <div className="flex justify-between">
-                                            <span className="text-[#7A8FAA]">Fondo inicial</span>
-                                            <span className="font-mono text-[#E4ECF7]">{formatCurrency(r.initialAmount)}</span>
+                            {/* ── TAB: AUDITORÍA ── */}
+                            {tab === 'auditoria' && (
+                                <div className="px-6 py-5">
+                                    <p className="text-[11px] text-[#3D506A] mb-4">
+                                        Saldo acumulado por transacción. Toca una venta para ver su detalle.
+                                    </p>
+
+                                    {auditLoading ? (
+                                        <div className="py-10 text-center text-[13px] text-[#3D506A]">Cargando...</div>
+                                    ) : auditEntries.length === 0 ? (
+                                        <div className="py-10 text-center text-[13px] text-[#3D506A]">Sin transacciones en efectivo registradas</div>
+                                    ) : (
+                                        <div className="overflow-auto max-h-[60vh]">
+                                            <table className="w-full text-[12px]">
+                                                <thead>
+                                                    <tr className="border-b border-[#192030]">
+                                                        <th className="text-left pb-2 pr-3 text-[#3D506A] font-semibold uppercase tracking-wider text-[10px]">Hora</th>
+                                                        <th className="text-left pb-2 pr-3 text-[#3D506A] font-semibold uppercase tracking-wider text-[10px]">Concepto</th>
+                                                        <th className="text-left pb-2 pr-3 text-[#3D506A] font-semibold uppercase tracking-wider text-[10px]">Cajero</th>
+                                                        <th className="text-right pb-2 pr-3 text-[#3D506A] font-semibold uppercase tracking-wider text-[10px]">Recibido</th>
+                                                        <th className="text-right pb-2 pr-3 text-[#3D506A] font-semibold uppercase tracking-wider text-[10px]">Vuelto/Gasto</th>
+                                                        <th className="text-right pb-2 pr-3 text-[#3D506A] font-semibold uppercase tracking-wider text-[10px]">Neto</th>
+                                                        <th className="text-right pb-2 text-[#3D506A] font-semibold uppercase tracking-wider text-[10px]">Saldo</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr className="border-b border-[#192030]/50">
+                                                        <td className="py-2 pr-3 text-[#3D506A]">—</td>
+                                                        <td className="py-2 pr-3 text-[#7A8FAA]">Fondo inicial</td>
+                                                        <td className="py-2 pr-3 text-[#3D506A]">—</td>
+                                                        <td className="py-2 pr-3 text-right text-[#3D506A]">—</td>
+                                                        <td className="py-2 pr-3 text-right text-[#3D506A]">—</td>
+                                                        <td className="py-2 pr-3 text-right text-[#3D506A]">—</td>
+                                                        <td className="py-2 text-right font-mono font-semibold text-[#E4ECF7]">{formatCurrency(r.initialAmount)}</td>
+                                                    </tr>
+
+                                                    {auditRows.map(row => (
+                                                        <AuditRow
+                                                            key={row.id}
+                                                            entry={row}
+                                                            onSelect={row.type === 'VENTA' ? () => setSelectedSaleId(row.id) : undefined}
+                                                        />
+                                                    ))}
+
+                                                    <tr className="border-t-2 border-[#1E2A40]">
+                                                        <td className="pt-3 pr-3 text-[#3D506A]">—</td>
+                                                        <td className="pt-3 pr-3 text-[#7A8FAA] font-semibold">Esperado en caja</td>
+                                                        <td className="pt-3 pr-3" /><td className="pt-3 pr-3" /><td className="pt-3 pr-3" /><td className="pt-3 pr-3" />
+                                                        <td className="pt-3 text-right font-mono font-semibold text-[#E4ECF7]">{formatCurrency(expectedFinal)}</td>
+                                                    </tr>
+                                                    {r.finalAmount !== null && (
+                                                        <tr>
+                                                            <td className="py-1 pr-3 text-[#3D506A]">—</td>
+                                                            <td className="py-1 pr-3 text-[#7A8FAA] font-semibold">Contado físicamente</td>
+                                                            <td className="py-1 pr-3" /><td className="py-1 pr-3" /><td className="py-1 pr-3" /><td className="py-1 pr-3" />
+                                                            <td className="py-1 text-right font-mono font-semibold text-[#E4ECF7]">{formatCurrency(r.finalAmount)}</td>
+                                                        </tr>
+                                                    )}
+                                                    {r.finalAmount !== null && (
+                                                        <tr className="border-t border-[#192030]">
+                                                            <td className="pt-2 pr-3 text-[#3D506A]">—</td>
+                                                            <td className="pt-2 pr-3 font-bold text-[#CBD5E1]">Diferencia</td>
+                                                            <td className="pt-2 pr-3" /><td className="pt-2 pr-3" /><td className="pt-2 pr-3" /><td className="pt-2 pr-3" />
+                                                            <td className={cn('pt-2 text-right font-mono font-bold text-[14px]',
+                                                                diff === 0 ? 'text-emerald-400' : diff > 0 ? 'text-blue-400' : 'text-red-400'
+                                                            )}>
+                                                                {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
                                         </div>
-                                        <div className="flex justify-between">
-                                            <span className="text-[#7A8FAA]">+ Ventas efectivo</span>
-                                            <span className="font-mono text-emerald-400">+{formatCurrency(cashSales)}</span>
-                                        </div>
-                                        <div className="flex justify-between border-t border-[#192030] pt-2">
-                                            <span className="text-[#7A8FAA]">= Esperado en caja</span>
-                                            <span className="font-mono font-semibold text-[#E4ECF7]">{formatCurrency(expectedFinal)}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="text-[#7A8FAA]">Contado físicamente</span>
-                                            <span className="font-mono text-[#E4ECF7]">{formatCurrency(r.finalAmount ?? 0)}</span>
-                                        </div>
-                                        <div className="flex justify-between border-t border-[#192030] pt-2">
-                                            <span className="font-semibold text-[#CBD5E1]">Diferencia</span>
-                                            <span className={cn('font-mono font-bold text-[15px]',
-                                                diff === 0 ? 'text-emerald-400' : diff > 0 ? 'text-blue-400' : 'text-red-400'
-                                            )}>
-                                                {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
-                                                {diff === 0 && ' ✓'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    {diff !== 0 && (
-                                        <p className="text-[10px] text-[#3D506A] pt-1">
-                                            {diff > 0 ? 'Hay más efectivo del esperado (sobrante)' : 'Hay menos efectivo del esperado (faltante)'}
-                                        </p>
                                     )}
                                 </div>
-                            </div>
+                            )}
                         </div>
                     </motion.div>
                 </>
             )}
         </AnimatePresence>
+
+        <SaleDetailModal
+            isOpen={selectedSaleId !== null}
+            onClose={() => setSelectedSaleId(null)}
+            sale={selectedSale}
+        />
+        </>
+    )
+}
+
+function AuditRow({ entry, onSelect }: { entry: CashAuditEntry & { balance: number }; onSelect?: () => void }) {
+    const isGasto = entry.type === 'GASTO'
+    const isDevolucion = entry.type === 'DEVOLUCION'
+    const time = fmtTime(entry.time)
+    const hasChange = entry.changeGiven > 0
+
+    const rowIcon = isGasto
+        ? <ArrowUpRight size={11} className="text-red-400 shrink-0" />
+        : isDevolucion
+            ? <RotateCcw size={11} className="text-rose-400 shrink-0" />
+            : <ArrowDownLeft size={11} className="text-emerald-400 shrink-0" />
+
+    const labelColor = isGasto ? 'text-[#7A8FAA]' : isDevolucion ? 'text-rose-300' : 'text-[#E4ECF7]'
+
+    return (
+        <tr
+            onClick={onSelect}
+            className={cn(
+                'border-b border-[#192030]/50 transition-colors',
+                onSelect ? 'hover:bg-[#0F1829]/80 cursor-pointer' : 'hover:bg-[#0F1829]/50'
+            )}
+        >
+            <td className="py-2 pr-3 text-[#3D506A] font-mono">{time}</td>
+            <td className="py-2 pr-3 max-w-[140px]">
+                <div className="flex items-center gap-1.5">
+                    {rowIcon}
+                    <span className={cn('truncate', labelColor)}>{entry.label}</span>
+                </div>
+            </td>
+            <td className="py-2 pr-3 text-[11px] text-[#7A8FAA] max-w-[100px] truncate">
+                {entry.employeeName ?? <span className="text-[#283A56]">—</span>}
+            </td>
+            <td className="py-2 pr-3 text-right font-mono">
+                {isGasto
+                    ? <span className="text-[#3D506A]"><Minus size={10} className="inline" /></span>
+                    : <span className="text-[#E4ECF7]">{formatCurrency(entry.amountReceived)}</span>
+                }
+            </td>
+            <td className="py-2 pr-3 text-right font-mono">
+                {hasChange || isGasto
+                    ? <span className={isGasto ? 'text-red-400' : 'text-orange-400'}>{formatCurrency(entry.changeGiven)}</span>
+                    : <span className="text-[#3D506A]">—</span>
+                }
+            </td>
+            <td className="py-2 pr-3 text-right font-mono">
+                <span className={entry.net >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                    {entry.net >= 0 ? '+' : ''}{formatCurrency(entry.net)}
+                </span>
+            </td>
+            <td className="py-2 text-right font-mono font-semibold text-[#E4ECF7]">
+                {formatCurrency(entry.balance)}
+            </td>
+        </tr>
     )
 }
 

@@ -8,6 +8,7 @@ import { ReportsPage } from '@/pages/ReportsPage'
 import { CashRegisterPage } from '@/pages/CashRegisterPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { SorteosPage } from '@/pages/SorteosPage'
+import { ReturnsPage } from '@/pages/ReturnsPage'
 import { StartupCajaModal } from '@/components/modals/StartupCajaModal'
 import { SplashScreen } from '@/components/layout/SplashScreen'
 import { UpdateModal } from '@/components/modals/UpdateModal'
@@ -21,6 +22,7 @@ function PageRenderer() {
         case 'reports':       return <ReportsPage />
         case 'cash-register': return <CashRegisterPage />
         case 'sorteos':       return <SorteosPage />
+        case 'returns':       return <ReturnsPage />
         case 'settings':      return <SettingsPage />
         default:              return <POSPage />
     }

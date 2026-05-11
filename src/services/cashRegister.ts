@@ -1,4 +1,12 @@
 import { supabase } from '@/lib/supabase'
+import type { Sale } from '@/types'
+
+function parseEmployeeName(notes: string | null): string | null {
+    if (!notes) return null
+    const match = notes.match(/^Cajero: (.+)$/)
+    if (!match) return null
+    return match[1] === 'Sin cajero' ? null : match[1]
+}
 
 // ===== Open Register =====
 export async function openRegister(initialAmount: number) {
@@ -189,6 +197,150 @@ export async function updateRegister(registerId: string, updates: { initialAmoun
         .eq('id', registerId)
 
     if (error) throw error
+}
+
+// ===== Cash Audit Entries =====
+export type CashAuditEntry = {
+    id: string
+    type: 'VENTA' | 'GASTO' | 'DEVOLUCION'
+    time: string
+    label: string
+    amountReceived: number
+    changeGiven: number
+    net: number
+    employeeName: string | null
+}
+
+export async function getCashAuditEntries(registerId: string): Promise<CashAuditEntry[]> {
+    let sales: any[] = []
+    let expenses: any[] = []
+
+    let returns: any[] = []
+
+    if (window.electronAPI) {
+        sales = await window.electronAPI.dbQuery(`
+            SELECT id, saleNumber, date as time, total, amountReceived, "change" as changeGiven, notes
+            FROM Sale
+            WHERE cashRegisterId = ? AND paymentMethod = 'EFECTIVO' AND status = 'COMPLETADA'
+            ORDER BY date ASC
+        `, [registerId])
+
+        expenses = await window.electronAPI.dbQuery(`
+            SELECT id, description, amount, date as time
+            FROM Expense
+            WHERE cashRegisterId = ?
+            ORDER BY date ASC
+        `, [registerId])
+
+        returns = await window.electronAPI.dbQuery(`
+            SELECT id, returnNumber, date as time, netCash, employeeName
+            FROM "Return"
+            WHERE cashRegisterId = ?
+            ORDER BY date ASC
+        `, [registerId])
+    } else {
+        const { data: s } = await supabase
+            .from('Sale')
+            .select('id, saleNumber, date, total, amountReceived, change, notes')
+            .eq('cashRegisterId', registerId)
+            .eq('paymentMethod', 'EFECTIVO')
+            .eq('status', 'COMPLETADA')
+            .order('date', { ascending: true })
+        sales = s ?? []
+
+        const { data: e } = await supabase
+            .from('Expense')
+            .select('id, description, amount, date')
+            .eq('cashRegisterId', registerId)
+            .order('date', { ascending: true })
+        expenses = e ?? []
+
+        const { data: r } = await supabase
+            .from('Return')
+            .select('id, returnNumber, date, netCash, employeeName')
+            .eq('cashRegisterId', registerId)
+            .order('date', { ascending: true })
+        returns = r ?? []
+    }
+
+    const entries: CashAuditEntry[] = [
+        ...sales.map((s: any) => ({
+            id: s.id,
+            type: 'VENTA' as const,
+            time: s.time,
+            label: `Venta #${s.saleNumber}`,
+            amountReceived: s.amountReceived ?? s.total,
+            changeGiven: s.changeGiven ?? 0,
+            net: s.total,
+            employeeName: parseEmployeeName(s.notes),
+        })),
+        ...expenses.map((e: any) => ({
+            id: e.id,
+            type: 'GASTO' as const,
+            time: e.time,
+            label: e.description || 'Gasto',
+            amountReceived: 0,
+            changeGiven: e.amount,
+            net: -e.amount,
+            employeeName: null,
+        })),
+        ...returns.map((r: any) => ({
+            id: r.id,
+            type: 'DEVOLUCION' as const,
+            time: r.time,
+            label: `Dev. #${r.returnNumber}`,
+            amountReceived: r.netCash < 0 ? Math.abs(r.netCash) : 0,
+            changeGiven: r.netCash > 0 ? r.netCash : 0,
+            net: -r.netCash,
+            employeeName: r.employeeName,
+        })),
+    ]
+
+    return entries.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+}
+
+// ===== Get Sale By ID (for audit detail modal) =====
+export async function getSaleById(saleId: string): Promise<Sale | null> {
+    if (window.electronAPI) {
+        const sale = await window.electronAPI.dbGet(
+            `SELECT * FROM Sale WHERE id = ?`, [saleId]
+        )
+        if (!sale) return null
+
+        const items = await window.electronAPI.dbQuery(`
+            SELECT si.*, p.name as productName
+            FROM SaleItem si
+            LEFT JOIN Product p ON si.productId = p.id
+            WHERE si.saleId = ?
+        `, [saleId])
+
+        return {
+            ...sale,
+            date: new Date(sale.date),
+            createdAt: new Date(sale.createdAt),
+            updatedAt: new Date(sale.updatedAt),
+            isCredit: !!sale.isCredit,
+            items: items.map((i: any) => ({
+                ...i,
+                createdAt: new Date(i.createdAt),
+                product: { name: i.productName },
+            })),
+        } as Sale
+    }
+
+    const { data, error } = await supabase
+        .from('Sale')
+        .select('*, items:SaleItem(*, product:Product(name))')
+        .eq('id', saleId)
+        .single()
+
+    if (error || !data) return null
+    return {
+        ...data,
+        date: new Date(data.date),
+        createdAt: new Date(data.createdAt),
+        updatedAt: new Date(data.updatedAt),
+    } as Sale
 }
 
 // ===== Delete Register =====

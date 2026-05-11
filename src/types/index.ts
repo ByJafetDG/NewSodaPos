@@ -5,6 +5,7 @@ export type AppPage =
     | 'reports'
     | 'cash-register'
     | 'sorteos'
+    | 'returns'
     | 'settings'
 
 export interface SyncInfo {
@@ -107,6 +108,21 @@ export interface BusinessConfig {
     ticketHeader: string | null; ticketFooter: string | null; printerPort: string | null
     printerModel: string | null; drawerEnabled: boolean; modalsKeyboardEnabled: boolean
     createdAt: Date; updatedAt: Date
+}
+
+export type ReturnType = 'DEVOLUCION' | 'CAMBIO'
+export type ReturnDirection = 'IN' | 'OUT'
+export interface ReturnItem {
+    id: string; returnId: string; direction: ReturnDirection
+    productId: string; productName: string
+    quantity: number; unitPrice: number; subtotal: number
+}
+export interface ReturnRecord {
+    id: string; returnNumber: number
+    originalSaleId: string | null; originalSaleNumber: number | null
+    type: ReturnType; cashRegisterId: string | null
+    netCash: number; employeeName: string | null; notes: string | null
+    items: ReturnItem[]; date: Date; syncStatus: string
 }
 
 export type SorteoType = 'RULETA'

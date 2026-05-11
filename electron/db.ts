@@ -310,6 +310,35 @@ export function initDb() {
       syncStatus TEXT DEFAULT 'PENDING',
       FOREIGN KEY (sorteoId) REFERENCES Sorteo(id)
     );
+
+    CREATE TABLE IF NOT EXISTS "Return" (
+      id TEXT PRIMARY KEY,
+      returnNumber INTEGER,
+      originalSaleId TEXT,
+      type TEXT DEFAULT 'DEVOLUCION',
+      cashRegisterId TEXT,
+      netCash REAL NOT NULL DEFAULT 0,
+      employeeName TEXT,
+      notes TEXT,
+      date TEXT DEFAULT (datetime('now')),
+      syncStatus TEXT DEFAULT 'PENDING',
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (originalSaleId) REFERENCES Sale(id),
+      FOREIGN KEY (cashRegisterId) REFERENCES CashRegister(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS ReturnItem (
+      id TEXT PRIMARY KEY,
+      returnId TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      productId TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unitPrice REAL NOT NULL,
+      subtotal REAL NOT NULL,
+      FOREIGN KEY (returnId) REFERENCES "Return"(id) ON DELETE CASCADE,
+      FOREIGN KEY (productId) REFERENCES Product(id)
+    );
   `);
 
   // ===== Migrations for existing databases =====

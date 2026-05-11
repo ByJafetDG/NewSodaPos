@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     ShoppingCart, Package, Users, Wallet,
-    BarChart3, Settings2, Ticket,
+    BarChart3, Settings2, Ticket, RotateCcw,
     Wifi, WifiOff, RefreshCw, CloudOff,
 } from 'lucide-react'
 import { useUIStore } from '@/store/uiStore'
@@ -74,6 +74,15 @@ const NAV_ITEMS: NavItem[] = [
         color: 'text-amber-400',
         activeBg: 'bg-amber-500/10',
         activeBar: 'bg-amber-400',
+    },
+    {
+        id: 'returns',
+        label: 'Devoluciones',
+        description: 'Devolver o cambiar productos',
+        icon: RotateCcw,
+        color: 'text-rose-400',
+        activeBg: 'bg-rose-500/10',
+        activeBar: 'bg-rose-400',
     },
 ]
 
