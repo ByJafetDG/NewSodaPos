@@ -104,7 +104,7 @@ export async function getSorteoOptions(sorteoId: string): Promise<SorteoOption[]
 }
 
 export async function createSorteoOption(input: {
-    sorteoId: string; label: string; description?: string
+    sorteoId: string; label: string; description?: string | null
     quantity?: number | null; baseProbability: number
     isFiller?: boolean; color?: string; sortOrder?: number
 }): Promise<SorteoOption> {
