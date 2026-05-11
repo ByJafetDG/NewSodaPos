@@ -43,6 +43,8 @@ export function StartupCajaModal() {
         const parsed = parseInt(amount) || 0
         await openRegister.mutateAsync(parsed)
         setAmount('')
+        skipToday()
+        setSkipped(true)
     }
 
     function handleSkip() {
