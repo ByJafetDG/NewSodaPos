@@ -7,6 +7,7 @@ import { MovementsPanel } from '@/components/organisms/inventory/MovementsPanel'
 import type { MovementBatch } from '@/components/organisms/inventory/MovementsPanel'
 import { BaseModal } from '@/components/modals/BaseModal'
 import { ProductFormModal } from '@/components/modals/ProductFormModal'
+import { ScanBufferModal } from '@/components/modals/ScanBufferModal'
 import { ManageCategoriesModal } from '@/components/modals/ManageCategoriesModal'
 import { MovementDetailModal } from '@/components/modals/MovementDetailModal'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
@@ -47,10 +48,26 @@ export function InventoryPage() {
     const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
     const [selectedBatch, setSelectedBatch] = useState<MovementBatch | null>(null)
     const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null)
+    const [inventoryScanBuffer, setInventoryScanBuffer] = useState<string | null>(null)
+    const [createBarcode, setCreateBarcode] = useState('')
 
     function handleNewProduct() {
         setEditingProduct(null)
+        setCreateBarcode('')
         setProductFormOpen(true)
+    }
+
+    function handleSearchEnter(barcode: string, found: boolean) {
+        if (inventoryScanBuffer !== null) {
+            setInventoryScanBuffer(null)
+            if (!found) {
+                setEditingProduct(null)
+                setCreateBarcode(barcode)
+                setProductFormOpen(true)
+            }
+        } else if (!found) {
+            setInventoryScanBuffer(barcode)
+        }
     }
 
     function handleEditProduct(p: Product) {
@@ -139,6 +156,7 @@ export function InventoryPage() {
                         onDelete={p => setDeletingProduct(p)}
                         onToggle={handleToggleProduct}
                         onManageCategories={() => setManageCatOpen(true)}
+                        onSearchEnter={handleSearchEnter}
                     />
                 </div>
             )}
@@ -181,11 +199,12 @@ export function InventoryPage() {
             {/* ── Modals ──────────────────────────────────────────────────── */}
             <ProductFormModal
                 isOpen={productFormOpen}
-                onClose={() => { setProductFormOpen(false); setEditingProduct(null) }}
+                onClose={() => { setProductFormOpen(false); setEditingProduct(null); setCreateBarcode('') }}
                 onConfirm={handleProductFormConfirm}
                 product={editingProduct}
                 categories={categories}
                 isPending={createProduct.isPending || updateProduct.isPending}
+                initialBarcode={editingProduct ? undefined : createBarcode}
             />
 
             <ManageCategoriesModal
@@ -222,6 +241,21 @@ export function InventoryPage() {
                 title="Eliminar categoría"
                 description={`¿Eliminar la categoría "${deletingCategory?.name}"? Los productos quedarán sin categoría.`}
                 isPending={deleteCategory.isPending}
+            />
+
+            <ScanBufferModal
+                isOpen={inventoryScanBuffer !== null}
+                barcode={inventoryScanBuffer ?? ''}
+                onClose={() => setInventoryScanBuffer(null)}
+                onExpire={() => {
+                    const barcode = inventoryScanBuffer
+                    setInventoryScanBuffer(null)
+                    if (barcode) {
+                        setEditingProduct(null)
+                        setCreateBarcode(barcode)
+                        setProductFormOpen(true)
+                    }
+                }}
             />
 
             <BaseModal isOpen={notFoundBarcode !== null} onClose={() => setNotFoundBarcode(null)} title="" width="max-w-sm">

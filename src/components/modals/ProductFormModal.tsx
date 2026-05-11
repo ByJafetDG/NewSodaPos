@@ -51,11 +51,12 @@ interface ProductFormModalProps {
     product?: Product | null
     categories: Category[]
     isPending?: boolean
+    initialBarcode?: string
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function ProductFormModal({ isOpen, onClose, onConfirm, product, categories, isPending }: ProductFormModalProps) {
+export function ProductFormModal({ isOpen, onClose, onConfirm, product, categories, isPending, initialBarcode }: ProductFormModalProps) {
     const [step, setStep] = useState<WizardStep>('name')
     const [dir, setDir]   = useState(1)
     const [data, setData] = useState<WizardData>(EMPTY)
@@ -80,8 +81,14 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
             if (draft?.name) { setData(draft); setStep('draft-prompt') }
             else             { setData(base);  setStep('name') }
         } else {
-            if (draft?.name) { setData(draft); setStep('draft-prompt') }
-            else             { setData({ ...EMPTY, categoryId: categories[0]?.id ?? '' }); setStep('name') }
+            if (initialBarcode) {
+                setData({ ...EMPTY, categoryId: categories[0]?.id ?? '', barcode: initialBarcode })
+                setStep('name')
+            } else if (draft?.name) {
+                setData(draft); setStep('draft-prompt')
+            } else {
+                setData({ ...EMPTY, categoryId: categories[0]?.id ?? '' }); setStep('name')
+            }
         }
         setDir(1)
     }, [isOpen])

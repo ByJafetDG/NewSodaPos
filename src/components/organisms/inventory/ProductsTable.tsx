@@ -17,6 +17,7 @@ interface ProductsTableProps {
     onDelete: (product: Product) => void
     onToggle: (product: Product) => void
     onManageCategories: () => void
+    onSearchEnter?: (barcode: string, found: boolean) => void
 }
 
 function stockVariant(p: Product): 'danger' | 'warning' | 'success' | 'info' {
@@ -49,6 +50,7 @@ export function ProductsTable({
     onDelete,
     onToggle,
     onManageCategories,
+    onSearchEnter,
 }: ProductsTableProps) {
     const [search, setSearch] = useState('')
     const [selectedCat, setSelectedCat] = useState<string | null>(null)
@@ -91,6 +93,13 @@ export function ProductsTable({
                     <input
                         type="text"
                         {...searchKb}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault()
+                                const trimmed = search.trim()
+                                if (trimmed) onSearchEnter?.(trimmed, filtered.length > 0)
+                            }
+                        }}
                         placeholder="Buscar producto o código..."
                         className="w-full h-9 pl-9 pr-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
                     />

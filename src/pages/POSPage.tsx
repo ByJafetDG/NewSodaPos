@@ -6,7 +6,7 @@ import { useKeyboardStore } from '@/store/keyboardStore'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
 import { settleSale as settleSaleService } from '@/services/clients'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
-import { useProducts } from '@/hooks/useProducts'
+import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useClients } from '@/hooks/useClients'
 import { useEmployees } from '@/hooks/useEmployees'
@@ -31,8 +31,12 @@ import { CreditModal } from '@/components/modals/CreditModal'
 import { PriceEditModal } from '@/components/modals/PriceEditModal'
 import { SaleSuccessModal, type SaleSuccessData } from '@/components/modals/SaleSuccessModal'
 import { HeldOrdersModal } from '@/components/modals/HeldOrdersModal'
+import { ScanNotFoundModal } from '@/components/modals/ScanNotFoundModal'
+import { ScanBufferModal } from '@/components/modals/ScanBufferModal'
+import { QuickStockModal } from '@/components/modals/QuickStockModal'
+import { ProductFormModal } from '@/components/modals/ProductFormModal'
 import { Spinner } from '@/components/atoms/Spinner'
-import { cn, formatCurrency, normalizeStr } from '@/lib/utils'
+import { cn, formatCurrency, normalizeStr, fuzzyMatch } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import type { PaymentMethod, Product, Employee, CartItem, HeldOrder } from '@/types'
 
@@ -44,6 +48,8 @@ export function POSPage() {
     const { data: clients = [] } = useClients()
     const { data: employees = [] } = useEmployees()
     const createSale = useCreateSale()
+    const createProduct = useCreateProduct()
+    const updateProduct = useUpdateProduct()
     const { data: activeRegister } = useActiveRegister()
     const { data: config } = useBusinessConfig()
 
@@ -116,6 +122,13 @@ export function POSPage() {
     const [sorteoOpen, setSorteoOpen] = useState(false)
     const [sorteoDeclined, setSorteoDeclined] = useState(false)
 
+    // ── Scan modals ──────────────────────────────────────────────────────────
+    const [scanBuffer, setScanBuffer] = useState<string | null>(null)
+    const [scanNotFound, setScanNotFound] = useState<string | null>(null)
+    const [scanOutOfStock, setScanOutOfStock] = useState<Product | null>(null)
+    const [showCreateProduct, setShowCreateProduct] = useState(false)
+    const [createProductBarcode, setCreateProductBarcode] = useState('')
+
     // ── Pending debt (from Balances page) ────────────────────────────────────
     const pendingDebt = usePendingSettleStore()
 
@@ -156,12 +169,49 @@ export function POSPage() {
     // handleSearchSubmit is also called from the virtual keyboard's onEnter
     const handleSearchSubmit = (e?: React.FormEvent) => {
         e?.preventDefault()
-        if (!search.trim()) return
+        const trimmed = search.trim()
+        if (!trimmed) return
+
         const product = products.find(p =>
-            p.barcode === search.trim() ||
-            p.name.toLowerCase().includes(search.toLowerCase())
+            p.barcode === trimmed ||
+            p.name.toLowerCase().includes(trimmed.toLowerCase())
         )
-        if (product) tryAddProduct(product)
+
+        // Second scan while buffer modal is open
+        if (scanBuffer !== null) {
+            const stored = scanBuffer
+            setScanBuffer(null)
+            setSearch('')
+            useKeyboardStore.getState().close()
+            if (product) {
+                tryAddProduct(product)
+            } else {
+                setScanNotFound(trimmed || stored)
+            }
+            return
+        }
+
+        if (!product) {
+            if (viewMode === 'scan') {
+                setScanBuffer(trimmed)
+                setTimeout(() => searchKb.ref.current?.focus(), 80)
+            }
+            setSearch('')
+            useKeyboardStore.getState().close()
+            return
+        }
+
+        if (viewMode === 'scan' && !product.isInfinite) {
+            const currentQty = items.find(i => i.id === product.id)?.quantity ?? 0
+            if (currentQty >= product.stockQty) {
+                setScanOutOfStock(product)
+                setSearch('')
+                useKeyboardStore.getState().close()
+                return
+            }
+        }
+
+        tryAddProduct(product)
         setSearch('')
         useKeyboardStore.getState().close()
     }
@@ -427,6 +477,22 @@ export function POSPage() {
         setEditPriceValue('')
     }
 
+    const handleQuickStock = async (qty: number, makeInfinite: boolean) => {
+        if (!scanOutOfStock) return
+        const newStock = makeInfinite ? scanOutOfStock.stockQty : scanOutOfStock.stockQty + qty
+        await updateProduct.mutateAsync({ id: scanOutOfStock.id, input: { stockQty: newStock, isInfinite: makeInfinite } })
+        addItem({ ...scanOutOfStock, stockQty: newStock, isInfinite: makeInfinite })
+        toast.success(makeInfinite ? `${scanOutOfStock.name} ahora tiene stock infinito` : `+${qty} unidades agregadas`)
+        setScanOutOfStock(null)
+    }
+
+    const handleCreateProductConfirm = async (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>) => {
+        await createProduct.mutateAsync(data)
+        setShowCreateProduct(false)
+        setCreateProductBarcode('')
+        toast.success(`Producto "${data.name}" creado`)
+    }
+
     // ── Segmented grid: subcategories of selected category visible today ─────
     const today = new Date().getDay()
     const visibleSubcats = selectedCategory
@@ -445,16 +511,19 @@ export function POSPage() {
     const activeProducts = products.filter(p => p.isActive)
     const gridProducts = activeProducts.filter(p => {
         if (!p.isInfinite && p.stockQty <= 0) return false
+        if (search) {
+            const q = normalizeStr(search)
+            return (p.barcode ?? '').includes(search) ||
+                normalizeStr(p.name).includes(q) ||
+                fuzzyMatch(search, p.name) ||
+                normalizeStr(categories.find(c => c.id === p.categoryId)?.name ?? '').includes(q)
+        }
         if (selectedCategory && p.categoryId !== selectedCategory) return false
         if (useSegmented) {
             const ids = p.subcategoryIds ?? []
             if (ids.length > 0 && !ids.some(id => visibleSubcatIdSet.has(id))) return false
         }
-        if (!search) return true
-        const q = normalizeStr(search)
-        return normalizeStr(p.name).includes(q) ||
-            (p.barcode ?? '').includes(search) ||
-            normalizeStr(categories.find(c => c.id === p.categoryId)?.name ?? '').includes(q)
+        return true
     })
 
     if (isLoading) {
@@ -735,6 +804,45 @@ export function POSPage() {
                 onMerge={handleMergeOrders}
                 hasMergeSnapshot={mergeSnapshot !== null}
                 onUndoMerge={handleUndoMerge}
+            />
+
+            <ScanBufferModal
+                isOpen={scanBuffer !== null}
+                barcode={scanBuffer ?? ''}
+                onClose={() => setScanBuffer(null)}
+                onExpire={() => {
+                    const barcode = scanBuffer
+                    setScanBuffer(null)
+                    if (barcode) setScanNotFound(barcode)
+                }}
+            />
+
+            <ScanNotFoundModal
+                isOpen={scanNotFound !== null}
+                onClose={() => setScanNotFound(null)}
+                barcode={scanNotFound ?? ''}
+                onCreateProduct={() => {
+                    setCreateProductBarcode(scanNotFound ?? '')
+                    setScanNotFound(null)
+                    setShowCreateProduct(true)
+                }}
+            />
+
+            <QuickStockModal
+                isOpen={scanOutOfStock !== null}
+                onClose={() => setScanOutOfStock(null)}
+                product={scanOutOfStock}
+                onConfirm={handleQuickStock}
+                isPending={updateProduct.isPending}
+            />
+
+            <ProductFormModal
+                isOpen={showCreateProduct}
+                onClose={() => { setShowCreateProduct(false); setCreateProductBarcode('') }}
+                onConfirm={handleCreateProductConfirm}
+                categories={categories}
+                isPending={createProduct.isPending}
+                initialBarcode={createProductBarcode}
             />
         </div>
     )

@@ -5,7 +5,7 @@ import { useKeyboardStore } from '@/store/keyboardStore'
 import { BaseModal } from './BaseModal'
 import { Button } from '@/components/atoms/Button'
 import { TotalsPanel } from '@/components/molecules/TotalsPanel'
-import { cn, formatCurrency, normalizeStr } from '@/lib/utils'
+import { cn, formatCurrency, normalizeStr, fuzzyMatch } from '@/lib/utils'
 import type { Client } from '@/types'
 
 interface CreditModalProps {
@@ -32,7 +32,9 @@ export function CreditModal({ isOpen, onClose, total, subtotal, discount, itemCo
 
     const filtered = clients.filter(c =>
         c.isActive && (
-            !search || normalizeStr(c.name).includes(normalizeStr(search))
+            !search ||
+            normalizeStr(c.name).includes(normalizeStr(search)) ||
+            fuzzyMatch(search, c.name)
         )
     )
 
