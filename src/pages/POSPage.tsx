@@ -83,6 +83,8 @@ export function POSPage() {
     // ── Payment ──────────────────────────────────────────────────────────────
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('EFECTIVO')
     const [amountReceived, setAmountReceived] = useState(() => localStorage.getItem('pos_amount_received') ?? '')
+    const [splitMode, setSplitMode] = useState(false)
+    const [splitAmount, setSplitAmount] = useState('')
 
     useEffect(() => {
         localStorage.setItem('pos_amount_received', amountReceived)
@@ -151,10 +153,15 @@ export function POSPage() {
     // ── Derived ───────────────────────────────────────────────────────────────
     const received = parseFloat(amountReceived) || 0
     const effectiveTotal = total + (pendingDebt.hasDebt ? pendingDebt.debtTotal : 0)
+    const splitAmountNum = parseFloat(splitAmount) || 0
+    const cashPortion = splitMode && splitAmountNum > 0 ? effectiveTotal - splitAmountNum : effectiveTotal
     const canCharge =
         items.length > 0 &&
         !createSale.isPending &&
-        (paymentMethod !== 'EFECTIVO' || received >= effectiveTotal)
+        (splitMode
+            ? splitAmountNum > 0 && splitAmountNum < effectiveTotal && received >= cashPortion
+            : (paymentMethod !== 'EFECTIVO' || received >= effectiveTotal)
+        )
 
     // ── Handlers ──────────────────────────────────────────────────────────────
     const tryAddProduct = useCallback((product: Product) => {
@@ -298,8 +305,13 @@ export function POSPage() {
 
     const handlePaymentMethodChange = (method: PaymentMethod) => {
         setPaymentMethod(method)
-        if (method !== 'EFECTIVO') setAmountReceived('')
+        if (method !== 'EFECTIVO') { setAmountReceived(''); setSplitMode(false); setSplitAmount('') }
         if (method === 'CREDITO' && items.length > 0) setShowCreditModal(true)
+    }
+
+    const handleToggleSplit = () => {
+        if (!splitMode) { setPaymentMethod('EFECTIVO'); setSplitMode(true); setSplitAmount('') }
+        else { setSplitMode(false); setSplitAmount('') }
     }
 
     const handleCharge = async () => {
@@ -321,14 +333,19 @@ export function POSPage() {
             const saleCashier = selectedEmployee?.name ?? null
             const capturedDebt = pendingDebt.hasDebt ? { ...pendingDebt } : null
 
+            const isSplit = splitMode && !isCredit
+            const splitAmt = isSplit ? splitAmountNum : 0
+            const cashNeeded = isSplit ? saleTotal - splitAmt : saleTotal
             const sale = await createSale.mutateAsync({
                 items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: saleTotal,
                 paymentMethod: isCredit ? 'CREDITO' : method,
-                amountReceived: method === 'EFECTIVO' && !isCredit ? saleReceived : (isCredit ? null : saleTotal),
-                change: method === 'EFECTIVO' && !isCredit ? Math.max(0, saleReceived - saleTotal) : 0,
+                amountReceived: (method === 'EFECTIVO' || isSplit) && !isCredit ? saleReceived : (isCredit ? null : saleTotal),
+                change: (method === 'EFECTIVO' || isSplit) && !isCredit ? Math.max(0, saleReceived - cashNeeded) : 0,
                 isCredit, clientId,
                 cashRegisterId: activeRegister?.id ?? null,
                 notes: `Cajero: ${saleCashier ?? 'Sin cajero'}`,
+                paymentMethod2: isSplit ? 'SINPE' : null,
+                amount2: isSplit ? splitAmt : null,
             })
             setSaleSuccess({
                 total: saleTotal,
@@ -341,6 +358,8 @@ export function POSPage() {
             clearCart()
             setAmountReceived('')
             setPaymentMethod('EFECTIVO')
+            setSplitMode(false)
+            setSplitAmount('')
             setSelectedClientId(null)
             setShowCreditModal(false)
             setActiveOrderId(null)
@@ -651,6 +670,10 @@ export function POSPage() {
                                 onSorteo={() => setSorteoOpen(true)}
                                 pendingDebt={pendingDebt.hasDebt ? { clientName: pendingDebt.clientName, total: pendingDebt.debtTotal } : undefined}
                                 onClearDebt={pendingDebt.hasDebt ? handleClearDebt : undefined}
+                                splitMode={splitMode}
+                                onToggleSplit={handleToggleSplit}
+                                splitAmount={splitAmount}
+                                onChangeSplitAmount={setSplitAmount}
                             />
                         </div>
                     </>
@@ -721,6 +744,10 @@ export function POSPage() {
                                     onOpenDrawer={handleOpenDrawer}
                                     pendingDebt={pendingDebt.hasDebt ? { clientName: pendingDebt.clientName, total: pendingDebt.debtTotal } : undefined}
                                     onClearDebt={pendingDebt.hasDebt ? handleClearDebt : undefined}
+                                    splitMode={splitMode}
+                                    onToggleSplit={handleToggleSplit}
+                                    splitAmount={splitAmount}
+                                    onChangeSplitAmount={setSplitAmount}
                                 />
                             </div>
                         </div>

@@ -45,9 +45,9 @@ export async function getActiveRegister() {
         const result = await window.electronAPI.dbGet(`
             SELECT
                 cr.*,
-                COALESCE((SELECT SUM(total) FROM Sale WHERE cashRegisterId = cr.id AND paymentMethod = 'EFECTIVO' AND status = 'COMPLETADA'), 0) as salesCash,
-                COALESCE((SELECT SUM(total) FROM Sale WHERE cashRegisterId = cr.id AND paymentMethod = 'SINPE'    AND status = 'COMPLETADA'), 0) as salesSinpe,
-                COALESCE((SELECT SUM(total) FROM Sale WHERE cashRegisterId = cr.id AND paymentMethod = 'CREDITO'  AND status = 'COMPLETADA'), 0) as salesCredit,
+                COALESCE((SELECT SUM(CASE WHEN paymentMethod2 IS NULL THEN total ELSE total - COALESCE(amount2,0) END) FROM Sale WHERE cashRegisterId = cr.id AND paymentMethod = 'EFECTIVO' AND status = 'COMPLETADA'), 0) as salesCash,
+                COALESCE((SELECT SUM(CASE WHEN paymentMethod = 'SINPE' AND paymentMethod2 IS NULL THEN total WHEN paymentMethod2 = 'SINPE' THEN COALESCE(amount2,0) ELSE 0 END) FROM Sale WHERE cashRegisterId = cr.id AND status = 'COMPLETADA'), 0) as salesSinpe,
+                COALESCE((SELECT SUM(CASE WHEN paymentMethod = 'CREDITO' AND paymentMethod2 IS NULL THEN total WHEN paymentMethod2 = 'CREDITO' THEN COALESCE(amount2,0) ELSE 0 END) FROM Sale WHERE cashRegisterId = cr.id AND status = 'COMPLETADA'), 0) as salesCredit,
                 COALESCE((SELECT SUM(amount) FROM CashAdjustment WHERE cashRegisterId = cr.id AND direction = 'IN'), 0) as adjustmentsIn,
                 COALESCE((SELECT SUM(amount) FROM CashAdjustment WHERE cashRegisterId = cr.id AND direction = 'OUT'), 0) as adjustmentsOut
             FROM CashRegister cr
@@ -71,12 +71,16 @@ export async function getActiveRegister() {
 
     const { data: sales } = await supabase
         .from('Sale')
-        .select('total, paymentMethod')
+        .select('total, paymentMethod, paymentMethod2, amount2, isCredit')
         .eq('cashRegisterId', register.id)
         .eq('status', 'COMPLETADA')
 
-    const agg = (method: string) =>
-        (sales ?? []).filter(s => s.paymentMethod === method).reduce((sum, s) => sum + s.total, 0)
+    const s = sales ?? []
+    const salesCashVal = s.filter(x => x.paymentMethod === 'EFECTIVO').reduce((sum, x) => sum + x.total - (x.paymentMethod2 ? (x.amount2 ?? 0) : 0), 0)
+    const salesSinpeVal = s.filter(x => x.paymentMethod === 'SINPE' && !x.paymentMethod2).reduce((sum, x) => sum + x.total, 0)
+        + s.filter(x => x.paymentMethod2 === 'SINPE').reduce((sum, x) => sum + (x.amount2 ?? 0), 0)
+    const salesCreditVal = s.filter(x => x.paymentMethod === 'CREDITO' && !x.paymentMethod2).reduce((sum, x) => sum + x.total, 0)
+        + s.filter(x => x.paymentMethod2 === 'CREDITO').reduce((sum, x) => sum + (x.amount2 ?? 0), 0)
 
     const { data: adjs } = await supabase
         .from('CashAdjustment')
@@ -85,9 +89,9 @@ export async function getActiveRegister() {
 
     return {
         ...register,
-        salesCash: agg('EFECTIVO'),
-        salesSinpe: agg('SINPE'),
-        salesCredit: agg('CREDITO'),
+        salesCash: salesCashVal,
+        salesSinpe: salesSinpeVal,
+        salesCredit: salesCreditVal,
         adjustmentsIn: (adjs ?? []).filter(a => a.direction === 'IN').reduce((s, a) => s + a.amount, 0),
         adjustmentsOut: (adjs ?? []).filter(a => a.direction === 'OUT').reduce((s, a) => s + a.amount, 0),
     }
@@ -100,13 +104,25 @@ export async function closeRegister(registerId: string, finalAmount: number, not
     if (window.electronAPI) {
         // Calculation summary locally
         const sales = await window.electronAPI.dbQuery(`
-            SELECT total, paymentMethod, isCredit FROM Sale 
+            SELECT total, paymentMethod, paymentMethod2, amount2, isCredit FROM Sale
             WHERE cashRegisterId = ? AND status = 'COMPLETADA'
         `, [registerId]);
 
-        const salesCash = sales.filter((s: any) => s.paymentMethod === 'EFECTIVO').reduce((sum: number, s: any) => sum + s.total, 0);
-        const salesSinpe = sales.filter((s: any) => s.paymentMethod === 'SINPE').reduce((sum: number, s: any) => sum + s.total, 0);
-        const salesCredit = sales.filter((s: any) => s.isCredit === 1).reduce((sum: number, s: any) => sum + s.total, 0);
+        const salesCash = sales
+            .filter((s: any) => s.paymentMethod === 'EFECTIVO')
+            .reduce((sum: number, s: any) => sum + s.total - (s.paymentMethod2 ? (s.amount2 ?? 0) : 0), 0);
+        const salesSinpe = sales
+            .filter((s: any) => s.paymentMethod === 'SINPE' && !s.paymentMethod2)
+            .reduce((sum: number, s: any) => sum + s.total, 0)
+            + sales
+            .filter((s: any) => s.paymentMethod2 === 'SINPE')
+            .reduce((sum: number, s: any) => sum + (s.amount2 ?? 0), 0);
+        const salesCredit = sales
+            .filter((s: any) => s.isCredit === 1 && !s.paymentMethod2)
+            .reduce((sum: number, s: any) => sum + s.total, 0)
+            + sales
+            .filter((s: any) => s.paymentMethod2 === 'CREDITO')
+            .reduce((sum: number, s: any) => sum + (s.amount2 ?? 0), 0);
 
         const expenses = await window.electronAPI.dbQuery(`
             SELECT amount FROM Expense WHERE cashRegisterId = ?
@@ -125,19 +141,16 @@ export async function closeRegister(registerId: string, finalAmount: number, not
     // Get sales summary for this register (Cloud version)
     const { data: sales } = await supabase
         .from('Sale')
-        .select('total, paymentMethod, isCredit')
+        .select('total, paymentMethod, paymentMethod2, amount2, isCredit')
         .eq('cashRegisterId', registerId)
         .eq('status', 'COMPLETADA')
 
-    const salesCash = (sales ?? [])
-        .filter((s) => s.paymentMethod === 'EFECTIVO')
-        .reduce((sum, s) => sum + s.total, 0)
-    const salesSinpe = (sales ?? [])
-        .filter((s) => s.paymentMethod === 'SINPE')
-        .reduce((sum, s) => sum + s.total, 0)
-    const salesCredit = (sales ?? [])
-        .filter((s) => s.isCredit)
-        .reduce((sum, s) => sum + s.total, 0)
+    const sv = sales ?? []
+    const salesCash = sv.filter(s => s.paymentMethod === 'EFECTIVO').reduce((sum, s) => sum + s.total - (s.paymentMethod2 ? (s.amount2 ?? 0) : 0), 0)
+    const salesSinpe = sv.filter(s => s.paymentMethod === 'SINPE' && !s.paymentMethod2).reduce((sum, s) => sum + s.total, 0)
+        + sv.filter(s => s.paymentMethod2 === 'SINPE').reduce((sum, s) => sum + (s.amount2 ?? 0), 0)
+    const salesCredit = sv.filter(s => s.isCredit && !s.paymentMethod2).reduce((sum, s) => sum + s.total, 0)
+        + sv.filter(s => s.paymentMethod2 === 'CREDITO').reduce((sum, s) => sum + (s.amount2 ?? 0), 0)
 
     // Get expenses total
     const { data: expenses } = await supabase
@@ -228,7 +241,7 @@ export async function getCashAuditEntries(registerId: string): Promise<CashAudit
 
     if (window.electronAPI) {
         sales = await window.electronAPI.dbQuery(`
-            SELECT id, saleNumber, date as time, total, amountReceived, "change" as changeGiven, notes
+            SELECT id, saleNumber, date as time, total, amountReceived, "change" as changeGiven, notes, paymentMethod2, amount2
             FROM Sale
             WHERE cashRegisterId = ? AND paymentMethod = 'EFECTIVO' AND status = 'COMPLETADA'
             ORDER BY date ASC
@@ -257,7 +270,7 @@ export async function getCashAuditEntries(registerId: string): Promise<CashAudit
     } else {
         const { data: s } = await supabase
             .from('Sale')
-            .select('id, saleNumber, date, total, amountReceived, change, notes')
+            .select('id, saleNumber, date, total, amountReceived, change, notes, paymentMethod2, amount2')
             .eq('cashRegisterId', registerId)
             .eq('paymentMethod', 'EFECTIVO')
             .eq('status', 'COMPLETADA')
@@ -291,10 +304,12 @@ export async function getCashAuditEntries(registerId: string): Promise<CashAudit
             id: s.id,
             type: 'VENTA' as const,
             time: s.time,
-            label: `Venta #${s.saleNumber}`,
+            label: s.paymentMethod2
+                ? `Venta #${s.saleNumber} (+${s.paymentMethod2} ₡${s.amount2 ?? 0})`
+                : `Venta #${s.saleNumber}`,
             amountReceived: s.amountReceived ?? s.total,
             changeGiven: s.changeGiven ?? 0,
-            net: s.total,
+            net: s.total - (s.paymentMethod2 ? (s.amount2 ?? 0) : 0),
             employeeName: parseEmployeeName(s.notes),
         })),
         ...expenses.map((e: any) => ({

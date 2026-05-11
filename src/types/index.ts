@@ -55,6 +55,7 @@ export interface Sale {
     change: number | null; cashRegisterId: string | null; isCredit: boolean
     clientId: string | null; client?: Client; items: SaleItem[]; status: SaleStatus
     notes: string | null; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
+    paymentMethod2?: PaymentMethod | null; amount2?: number | null
 }
 
 export interface CartItem {

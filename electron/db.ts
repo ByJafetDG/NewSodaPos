@@ -426,6 +426,14 @@ export function initDb() {
   }
 
   try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN paymentMethod2 TEXT`);
+  } catch {}
+
+  try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN amount2 REAL`);
+  } catch {}
+
+  try {
     db.exec(`ALTER TABLE Product ADD COLUMN subcategoryId TEXT`);
   } catch {
     // Already exists
@@ -494,17 +502,27 @@ export function initDb() {
     `);
   } catch {}
 
-  // Corrective migration: restore Z to CashRegister timestamps damaged by previous bad migration
-  // (previous migration stripped Z without adjusting time — re-add Z to restore UTC format)
+  // Corrective migration: normalize CashRegister timestamps to UTC ISO with Z
+  // Handles: no-Z ISO strings ("...T...") and SQLite format ("YYYY-MM-DD HH:MM:SS" with space)
   try {
     const cols = ['openedAt', 'closedAt', 'updatedAt'] as const
     for (const col of cols) {
+      // ISO format with T but no Z → append Z
       db.prepare(
         `UPDATE CashRegister SET ${col} = ${col} || 'Z'
          WHERE ${col} IS NOT NULL
            AND ${col} NOT LIKE '%Z'
            AND ${col} NOT LIKE '%+%'
            AND ${col} LIKE '%T%'`
+      ).run()
+      // SQLite space format "YYYY-MM-DD HH:MM:SS" → convert to ISO UTC with Z
+      db.prepare(
+        `UPDATE CashRegister SET ${col} = SUBSTR(${col}, 1, 10) || 'T' || SUBSTR(${col}, 12) || 'Z'
+         WHERE ${col} IS NOT NULL
+           AND ${col} NOT LIKE '%T%'
+           AND ${col} NOT LIKE '%Z'
+           AND ${col} NOT LIKE '%+%'
+           AND LENGTH(${col}) >= 19`
       ).run()
     }
   } catch {}

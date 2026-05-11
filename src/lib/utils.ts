@@ -48,8 +48,12 @@ export function generateId(): string {
 const CR_OFFSET_MS = -6 * 60 * 60 * 1000
 
 function toCR(v: Date | string): Date {
-    const d = typeof v === 'string' ? new Date(v) : v
-    return new Date(d.getTime() + CR_OFFSET_MS)
+    if (typeof v !== 'string') return new Date(v.getTime() + CR_OFFSET_MS)
+    // Normalize SQLite datetime format ("YYYY-MM-DD HH:MM:SS", space, no Z) to ISO UTC
+    let s = v
+    if (s.length >= 10 && s[10] === ' ') s = s.slice(0, 10) + 'T' + s.slice(11)
+    if (!s.endsWith('Z') && !s.includes('+') && !/-\d{2}:\d{2}$/.test(s)) s += 'Z'
+    return new Date(new Date(s).getTime() + CR_OFFSET_MS)
 }
 
 const MONTHS_SHORT = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']

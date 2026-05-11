@@ -20,6 +20,8 @@ interface CreateSaleInput {
     clientId: string | null
     cashRegisterId: string | null
     notes: string | null
+    paymentMethod2?: PaymentMethod | null
+    amount2?: number | null
 }
 
 /**
@@ -77,8 +79,8 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
 
         const ops: Array<{ sql: string; params: any[] }> = [
             {
-                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING']
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING', input.paymentMethod2 ?? null, input.amount2 ?? null]
             }
         ]
 
@@ -118,6 +120,8 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
             syncStatus: 'SYNCED',
             createdAt: now,
             updatedAt: now,
+            paymentMethod2: input.paymentMethod2 ?? null,
+            amount2: input.amount2 ?? null,
         })
         .select('*')
         .single()
