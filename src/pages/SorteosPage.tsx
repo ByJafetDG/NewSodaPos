@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Ticket, Plus, Play, Pause, StopCircle, Trash2, Clock, Zap, BarChart2, Users, UserX, UserCheck } from 'lucide-react'
+import { Ticket, Plus, Play, Pause, StopCircle, Trash2, Clock, Zap, BarChart2, Users, UserX, UserCheck, Pencil } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { Badge } from '@/components/atoms/Badge'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { BaseModal } from '@/components/modals/BaseModal'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { CreateSorteoModal } from '@/components/modals/CreateSorteoModal'
+import { EditSorteoModal } from '@/components/modals/EditSorteoModal'
 import { RuletaModal } from '@/components/modals/RuletaModal'
 import { cn } from '@/lib/utils'
 import { useSorteos, useUpdateSorteo, useDeleteSorteo, useSorteoStats, useSorteoOptions } from '@/hooks/useSorteos'
@@ -147,11 +148,13 @@ function SorteoRow({
     onDelete,
     onPreview,
     onStats,
+    onEdit,
 }: {
     sorteo: Sorteo
     onDelete: (s: Sorteo) => void
     onPreview: (s: Sorteo) => void
     onStats: (s: Sorteo) => void
+    onEdit: (s: Sorteo) => void
 }) {
     const updateSorteo = useUpdateSorteo()
 
@@ -196,38 +199,39 @@ function SorteoRow({
             </td>
 
             <td className="px-3 py-3">
-                <div className="flex items-center gap-1 justify-end">
+                <div className="flex items-center gap-1.5 justify-end flex-wrap">
+                    {/* Status-changing action chips */}
                     {sorteo.status === 'DRAFT' && (
                         <button
                             onClick={() => changeStatus('ACTIVE')}
-                            title="Activar"
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-emerald-400 hover:bg-emerald-500/10 transition-all cursor-pointer"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all cursor-pointer"
                         >
-                            <Play size={13} />
+                            <Play size={10} />
+                            Activar
                         </button>
                     )}
                     {sorteo.status === 'ACTIVE' && (
                         <>
                             <button
                                 onClick={() => onPreview(sorteo)}
-                                title="Probar ruleta"
-                                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-amber-400 hover:bg-amber-500/10 transition-all cursor-pointer"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/20 active:scale-95 transition-all cursor-pointer"
                             >
-                                <Zap size={13} />
+                                <Zap size={10} />
+                                Probar
                             </button>
                             <button
                                 onClick={() => changeStatus('PAUSED')}
-                                title="Pausar"
-                                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-amber-400 hover:bg-amber-500/10 transition-all cursor-pointer"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-[#101828] border-[#1E2A40] text-[#7A8FAA] hover:text-amber-400 hover:border-amber-500/25 hover:bg-amber-500/10 active:scale-95 transition-all cursor-pointer"
                             >
-                                <Pause size={13} />
+                                <Pause size={10} />
+                                Pausar
                             </button>
                             <button
                                 onClick={() => changeStatus('ENDED')}
-                                title="Terminar"
-                                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-[#101828] border-[#1E2A40] text-[#7A8FAA] hover:text-red-400 hover:border-red-500/25 hover:bg-red-500/10 active:scale-95 transition-all cursor-pointer"
                             >
-                                <StopCircle size={13} />
+                                <StopCircle size={10} />
+                                Terminar
                             </button>
                         </>
                     )}
@@ -235,32 +239,45 @@ function SorteoRow({
                         <>
                             <button
                                 onClick={() => changeStatus('ACTIVE')}
-                                title="Reactivar"
-                                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-emerald-400 hover:bg-emerald-500/10 transition-all cursor-pointer"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all cursor-pointer"
                             >
-                                <Play size={13} />
+                                <Play size={10} />
+                                Reactivar
                             </button>
                             <button
                                 onClick={() => changeStatus('ENDED')}
-                                title="Terminar"
-                                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-[#101828] border-[#1E2A40] text-[#7A8FAA] hover:text-red-400 hover:border-red-500/25 hover:bg-red-500/10 active:scale-95 transition-all cursor-pointer"
                             >
-                                <StopCircle size={13} />
+                                <StopCircle size={10} />
+                                Terminar
                             </button>
                         </>
                     )}
+
+                    {/* Divider */}
+                    <div className="w-px h-4 bg-[#1A2535] mx-0.5 shrink-0" />
+
+                    {/* Utility icon buttons */}
                     <button
                         onClick={() => onStats(sorteo)}
-                        title="Ver estadísticas"
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-amber-400 hover:bg-amber-500/10 transition-all cursor-pointer"
+                        title="Estadísticas"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center bg-[#0D1828] border border-[#1E2A40] text-[#4A6A8A] hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/8 active:scale-95 transition-all cursor-pointer"
                     >
-                        <BarChart2 size={13} />
+                        <BarChart2 size={12} />
+                    </button>
+                    <button
+                        onClick={() => onEdit(sorteo)}
+                        title="Editar"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center bg-[#0D1828] border border-[#1E2A40] text-[#4A6A8A] hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/8 active:scale-95 transition-all cursor-pointer"
+                    >
+                        <Pencil size={12} />
                     </button>
                     <button
                         onClick={() => onDelete(sorteo)}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                        title="Eliminar"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center bg-[#0D1828] border border-[#1E2A40] text-[#4A6A8A] hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/8 active:scale-95 transition-all cursor-pointer"
                     >
-                        <Trash2 size={13} />
+                        <Trash2 size={12} />
                     </button>
                 </div>
             </td>
@@ -273,6 +290,7 @@ export function SorteosPage() {
     const deleteSorteo = useDeleteSorteo()
 
     const [createOpen, setCreateOpen] = useState(false)
+    const [editSorteo, setEditSorteo] = useState<Sorteo | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<Sorteo | null>(null)
     const [previewSorteo, setPreviewSorteo] = useState<Sorteo | null>(null)
     const [statsSorteo, setStatsSorteo] = useState<Sorteo | null>(null)
@@ -333,12 +351,12 @@ export function SorteosPage() {
                                 <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] w-[45%]">Sorteo</th>
                                 <th className="text-center px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Estado</th>
                                 <th className="text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Vigencia</th>
-                                <th className="w-28 py-2.5" />
+                                <th className="w-56 py-2.5" />
                             </tr>
                         </thead>
                         <tbody>
                             {sorteos.map(s => (
-                                <SorteoRow key={s.id} sorteo={s} onDelete={setDeleteTarget} onPreview={setPreviewSorteo} onStats={setStatsSorteo} />
+                                <SorteoRow key={s.id} sorteo={s} onDelete={setDeleteTarget} onPreview={setPreviewSorteo} onStats={setStatsSorteo} onEdit={setEditSorteo} />
                             ))}
                         </tbody>
                     </table>
@@ -349,11 +367,15 @@ export function SorteosPage() {
 
             <CreateSorteoModal isOpen={createOpen} onClose={() => setCreateOpen(false)} />
 
+            <EditSorteoModal sorteo={editSorteo} onClose={() => setEditSorteo(null)} />
+
             <RuletaModal
                 isOpen={!!previewSorteo}
                 onClose={() => setPreviewSorteo(null)}
                 sorteoName={previewSorteo?.name ?? ''}
                 options={previewOptions}
+                sorteoId={previewSorteo?.id}
+                minSpinsBetweenPrizes={previewSorteo?.minSpinsBetweenPrizes}
             />
 
             <DeleteConfirmModal

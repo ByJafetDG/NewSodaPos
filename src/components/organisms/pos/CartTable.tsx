@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Trash2, Pencil, Minus, Plus, Receipt } from 'lucide-react'
+import { Trash2, Pencil, Minus, Plus, Receipt, ChevronDown, X } from 'lucide-react'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { cn, formatCurrency } from '@/lib/utils'
-import type { CartItem, Product } from '@/types'
+import type { CartItem, Product, Sale } from '@/types'
 
 interface CartTableProps {
     items: CartItem[]
@@ -12,12 +12,17 @@ interface CartTableProps {
     onDecrease: (id: string) => void
     onRemove: (id: string) => void
     onEditPrice: (item: CartItem) => void
+    pendingDebtSales?: Sale[]
+    onClearDebt?: () => void
 }
 
-export function CartTable({ items, onIncrease, onDecrease, onRemove, onEditPrice }: CartTableProps) {
+export function CartTable({ items, onIncrease, onDecrease, onRemove, onEditPrice, pendingDebtSales, onClearDebt }: CartTableProps) {
     const [removingItem, setRemovingItem] = useState<CartItem | null>(null)
+    const [expandedDebt, setExpandedDebt] = useState<string | null>(null)
+    const [confirmClearDebt, setConfirmClearDebt] = useState(false)
+    const hasDebt = (pendingDebtSales?.length ?? 0) > 0
 
-    if (items.length === 0) {
+    if (items.length === 0 && !hasDebt) {
         return (
             <EmptyState
                 icon={<Receipt size={48} />}
@@ -119,6 +124,70 @@ export function CartTable({ items, onIncrease, onDecrease, onRemove, onEditPrice
                         </motion.div>
                     ))}
                 </AnimatePresence>
+
+                {/* ── Debt sections ──────────────────────────────────────────── */}
+                {hasDebt && (
+                    <>
+                        <div className="grid items-center gap-2 px-5 py-2 border-t-2 border-violet-500/20 bg-violet-500/5 shrink-0"
+                            style={{ gridTemplateColumns: '28px 1fr 90px 96px 88px 36px' }}>
+                            <Receipt size={11} className="text-violet-400" />
+                            <span className="text-[10px] uppercase tracking-widest text-violet-400/80 font-bold col-span-4">Cuentas a saldar</span>
+                            {onClearDebt && (
+                                <button
+                                    onClick={() => setConfirmClearDebt(true)}
+                                    title="Quitar cuentas del carrito"
+                                    className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 flex items-center justify-center transition-all cursor-pointer"
+                                >
+                                    <X size={13} />
+                                </button>
+                            )}
+                        </div>
+                        {pendingDebtSales!.map(sale => {
+                            const sDate = sale.date instanceof Date ? sale.date : new Date(sale.date)
+                            const dateStr = sDate.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
+                            const isExpanded = expandedDebt === sale.id
+                            return (
+                                <div key={sale.id} className="border-b border-violet-500/10">
+                                    {/* Section header */}
+                                    <div
+                                        onClick={() => setExpandedDebt(isExpanded ? null : sale.id)}
+                                        className="grid items-center gap-2 px-5 py-2.5 bg-violet-500/5 hover:bg-violet-500/10 transition-colors cursor-pointer"
+                                        style={{ gridTemplateColumns: '28px 1fr 90px 96px 88px 36px' }}
+                                    >
+                                        <div className="w-5 h-5 rounded-md bg-violet-500/15 flex items-center justify-center shrink-0">
+                                            <Receipt size={10} className="text-violet-400" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-[12px] font-semibold text-violet-300">Cuenta #{sale.saleNumber}</p>
+                                            <p className="text-[10px] text-[#3D506A]">{dateStr}</p>
+                                        </div>
+                                        <span className="text-[11px] text-[#3D506A] text-right">Crédito</span>
+                                        <span className="text-[11px] text-[#3D506A] text-right">{sale.items?.length ?? 0} prod.</span>
+                                        <span className="text-[13px] font-bold text-violet-400 font-mono text-right">{formatCurrency(sale.total)}</span>
+                                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-violet-400">
+                                            <ChevronDown size={13} className={cn('transition-transform duration-200', isExpanded ? 'rotate-180' : '')} />
+                                        </div>
+                                    </div>
+                                    {/* Expanded items */}
+                                    {isExpanded && sale.items && sale.items.map((item: any) => (
+                                        <div
+                                            key={item.id}
+                                            className="grid items-center gap-2 px-5 py-2 bg-violet-500/3 border-t border-violet-500/8"
+                                            style={{ gridTemplateColumns: '28px 1fr 90px 96px 88px 36px' }}
+                                        >
+                                            <span />
+                                            <span className="text-[12px] text-[#5A7A9A] truncate">{item.product?.name ?? 'Producto'}</span>
+                                            <span className="text-[11px] text-[#3D506A] text-right font-mono">{formatCurrency(item.unitPrice)}</span>
+                                            <span className="text-[12px] text-[#5A7A9A] text-center tabular-nums">{item.quantity}</span>
+                                            <span className="text-[12px] text-violet-400/60 font-mono text-right">{formatCurrency(item.subtotal)}</span>
+                                            <span />
+                                        </div>
+                                    ))}
+                                </div>
+                            )
+                        })}
+                    </>
+                )}
             </div>
 
             <DeleteConfirmModal
@@ -127,6 +196,14 @@ export function CartTable({ items, onIncrease, onDecrease, onRemove, onEditPrice
                 onConfirm={() => { onRemove(removingItem!.id); setRemovingItem(null) }}
                 title="Quitar producto"
                 description={`¿Quitar "${removingItem?.product.name}" del carrito?`}
+            />
+
+            <DeleteConfirmModal
+                isOpen={confirmClearDebt}
+                onClose={() => setConfirmClearDebt(false)}
+                onConfirm={() => { onClearDebt?.(); setConfirmClearDebt(false) }}
+                title="Quitar cuentas"
+                description="¿Quitar las cuentas a saldar del carrito? La deuda no se eliminará, solo se quitará de esta venta."
             />
         </div>
     )

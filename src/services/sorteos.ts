@@ -36,21 +36,21 @@ export async function getActiveSorteos(): Promise<Sorteo[]> {
     return (data ?? []).map(mapSorteo) as Sorteo[]
 }
 
-export async function createSorteo(input: { name: string; type?: string }): Promise<Sorteo> {
+export async function createSorteo(input: { name: string; type?: string; minSpinsBetweenPrizes?: number }): Promise<Sorteo> {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
-            `INSERT INTO Sorteo (id, name, type, status, syncStatus, updatedAt)
-             VALUES (?, ?, ?, 'DRAFT', 'PENDING', ?)`,
-            [id, input.name, input.type ?? 'RULETA', now]
+            `INSERT INTO Sorteo (id, name, type, status, minSpinsBetweenPrizes, syncStatus, updatedAt)
+             VALUES (?, ?, ?, 'DRAFT', ?, 'PENDING', ?)`,
+            [id, input.name, input.type ?? 'RULETA', input.minSpinsBetweenPrizes ?? 8, now]
         )
         const rows = await window.electronAPI.dbQuery('SELECT * FROM Sorteo WHERE id = ?', [id])
         return mapSorteo(rows[0]) as Sorteo
     }
     const { data, error } = await supabase
         .from('Sorteo')
-        .insert({ id, name: input.name, type: input.type ?? 'RULETA', status: 'DRAFT', syncStatus: 'SYNCED' })
+        .insert({ id, name: input.name, type: input.type ?? 'RULETA', status: 'DRAFT', minSpinsBetweenPrizes: input.minSpinsBetweenPrizes ?? 8, syncStatus: 'SYNCED' })
         .select().single()
     if (error) throw error
     return mapSorteo(data) as Sorteo
@@ -58,7 +58,7 @@ export async function createSorteo(input: { name: string; type?: string }): Prom
 
 export async function updateSorteo(
     id: string,
-    input: Partial<{ name: string; status: string; startAt: string | null; endAt: string | null }>
+    input: Partial<{ name: string; status: string; startAt: string | null; endAt: string | null; minSpinsBetweenPrizes: number }>
 ): Promise<void> {
     const now = new Date().toISOString()
     if (window.electronAPI) {
@@ -239,6 +239,27 @@ export async function setSorteoParticipants(
     }
 }
 
+export interface OccupiedParticipant {
+    type: 'PRODUCT' | 'CATEGORY'; refId: string; sorteoId: string; sorteoName: string
+}
+
+export async function getOccupiedParticipants(excludeSorteoId?: string): Promise<OccupiedParticipant[]> {
+    if (window.electronAPI) {
+        const sql = excludeSorteoId
+            ? `SELECT sp.type, sp.refId, sp.sorteoId, s.name AS sorteoName
+               FROM SorteoParticipant sp JOIN Sorteo s ON s.id = sp.sorteoId
+               WHERE s.status = 'ACTIVE' AND sp.sorteoId != ?`
+            : `SELECT sp.type, sp.refId, sp.sorteoId, s.name AS sorteoName
+               FROM SorteoParticipant sp JOIN Sorteo s ON s.id = sp.sorteoId
+               WHERE s.status = 'ACTIVE'`
+        const rows = await window.electronAPI.dbQuery(sql, excludeSorteoId ? [excludeSorteoId] : [])
+        return rows as OccupiedParticipant[]
+    }
+    const q = supabase.from('SorteoParticipant').select('type, refId, sorteoId, Sorteo!inner(name, status)').eq('Sorteo.status', 'ACTIVE')
+    const { data } = excludeSorteoId ? await q.neq('sorteoId', excludeSorteoId) : await q
+    return (data ?? []).map((r: any) => ({ type: r.type, refId: r.refId, sorteoId: r.sorteoId, sorteoName: r.Sorteo.name }))
+}
+
 // ─── SorteoEntry ──────────────────────────────────────────────────────────────
 
 export async function logSorteoEntry(input: {
@@ -311,11 +332,30 @@ export async function getSorteoStats(sorteoId: string): Promise<SorteoStats> {
 function mapSorteo(r: any): Partial<Sorteo> {
     return {
         ...r,
+        minSpinsBetweenPrizes: r.minSpinsBetweenPrizes ?? 8,
         startAt: r.startAt ? new Date(r.startAt) : null,
         endAt: r.endAt ? new Date(r.endAt) : null,
         createdAt: new Date(r.createdAt),
         updatedAt: new Date(r.updatedAt),
     }
+}
+
+export async function getSpinsSinceLastPrize(sorteoId: string): Promise<number> {
+    if (!window.electronAPI) return 999
+    const lastRows = await window.electronAPI.dbQuery(
+        `SELECT MAX(se.rowid) as lastRowid
+         FROM SorteoEntry se
+         JOIN SorteoOption so ON so.id = se.resultOptionId
+         WHERE se.sorteoId = ? AND so.isFiller = 0`,
+        [sorteoId]
+    )
+    const lastRowid = (lastRows[0] as any)?.lastRowid
+    if (lastRowid == null) return 999
+    const countRows = await window.electronAPI.dbQuery(
+        `SELECT COUNT(*) as cnt FROM SorteoEntry WHERE sorteoId = ? AND rowid > ?`,
+        [sorteoId, lastRowid]
+    )
+    return (countRows[0] as any)?.cnt ?? 0
 }
 
 function mapOption(r: any): Partial<SorteoOption> {

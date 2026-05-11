@@ -61,12 +61,21 @@ export interface CartItem {
     subtotal: number; notes: string | null
 }
 
+export interface HeldOrderDebt {
+    clientId: string
+    clientName: string
+    saleIds: string[]
+    debtTotal: number
+    sales: Sale[]
+}
+
 export interface HeldOrder {
     id: string
     name: string
     items: CartItem[]
     discount: number
     savedAt: string
+    pendingDebt?: HeldOrderDebt
 }
 
 export type EmployeeRole = 'CAJERO' | 'DUEÑO' | 'COCINERO' | 'TEMPORAL'
@@ -105,6 +114,7 @@ export type SorteoStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'ENDED'
 export interface Sorteo {
     id: string; name: string; type: SorteoType; status: SorteoStatus
     startAt: Date | null; endAt: Date | null
+    minSpinsBetweenPrizes: number
     syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
 }
 

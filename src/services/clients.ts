@@ -114,6 +114,34 @@ export async function settleClientSales(clientId: string): Promise<void> {
     if (error) throw error
 }
 
+export async function getSalesByClient(clientId: string): Promise<any[]> {
+    if (window.electronAPI) {
+        const sql = `
+            SELECT s.*, si.id as item_id, si.productId, si.quantity, si.unitPrice, si.subtotal as item_subtotal,
+                   p.name as product_name
+            FROM Sale s
+            LEFT JOIN SaleItem si ON si.saleId = s.id
+            LEFT JOIN Product p ON p.id = si.productId
+            WHERE s.clientId = ? AND s.status = 'COMPLETADA'
+            ORDER BY s.date DESC
+        `
+        const rows = await window.electronAPI.dbQuery(sql, [clientId])
+        return groupSaleRows(rows)
+    }
+    const { data, error } = await supabase
+        .from('Sale')
+        .select('*, items:SaleItem(*, product:Product(id, name))')
+        .eq('clientId', clientId)
+        .eq('status', 'COMPLETADA')
+        .order('date', { ascending: false })
+    if (error) throw error
+    return (data ?? []).map((s: any) => ({
+        ...s,
+        items: s.items ?? [],
+        date: new Date(s.date),
+    }))
+}
+
 function groupSaleRows(rows: any[]): any[] {
     const map = new Map<string, any>()
     for (const row of rows) {

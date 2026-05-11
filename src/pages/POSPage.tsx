@@ -3,6 +3,8 @@ import { Search, UserCircle2, ChevronDown } from 'lucide-react'
 import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
 import { useKeyboardStore } from '@/store/keyboardStore'
+import { usePendingSettleStore } from '@/store/pendingSettleStore'
+import { settleSale as settleSaleService } from '@/services/clients'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
@@ -99,7 +101,10 @@ export function POSPage() {
     // Autosave: cart changes → update linked held order in store
     useEffect(() => {
         if (activeOrderId && items.length > 0) {
-            updateHeldOrder(activeOrderId, items, discount)
+            const debtSnapshot = pendingDebt.hasDebt
+                ? { clientId: pendingDebt.clientId, clientName: pendingDebt.clientName, saleIds: pendingDebt.saleIds, debtTotal: pendingDebt.debtTotal, sales: pendingDebt.sales }
+                : undefined
+            updateHeldOrder(activeOrderId, items, discount, debtSnapshot)
         }
     }, [items, discount, activeOrderId])
 
@@ -110,6 +115,9 @@ export function POSPage() {
     const [editPriceValue, setEditPriceValue] = useState('')
     const [sorteoOpen, setSorteoOpen] = useState(false)
     const [sorteoDeclined, setSorteoDeclined] = useState(false)
+
+    // ── Pending debt (from Balances page) ────────────────────────────────────
+    const pendingDebt = usePendingSettleStore()
 
     // ── Sorteos ──────────────────────────────────────────────────────────────
     const qc = useQueryClient()
@@ -129,10 +137,11 @@ export function POSPage() {
 
     // ── Derived ───────────────────────────────────────────────────────────────
     const received = parseFloat(amountReceived) || 0
+    const effectiveTotal = total + (pendingDebt.hasDebt ? pendingDebt.debtTotal : 0)
     const canCharge =
         items.length > 0 &&
         !createSale.isPending &&
-        (paymentMethod !== 'EFECTIVO' || received >= total)
+        (paymentMethod !== 'EFECTIVO' || received >= effectiveTotal)
 
     // ── Handlers ──────────────────────────────────────────────────────────────
     const tryAddProduct = useCallback((product: Product) => {
@@ -164,13 +173,14 @@ export function POSPage() {
         setActiveOrderName(null)
         setMergeSnapshot(null)
         setSorteoDeclined(false)
+        pendingDebt.clear()
     }
 
-    async function handleDeclineSorteo() {
-        if (!cartSorteo) return
-        setSorteoDeclined(true)
-        await logSorteoEntry({ sorteoId: cartSorteo.sorteo.id, didParticipate: false, unitCount: qualifyingCount })
-        qc.invalidateQueries({ queryKey: ['sorteoStats', cartSorteo.sorteo.id] })
+    const handleClearDebt = () => {
+        pendingDebt.clear()
+        if (activeOrderId) {
+            updateHeldOrder(activeOrderId, items, discount, undefined)
+        }
     }
 
     async function handleSorteoResult(resultOptionId: string) {
@@ -196,8 +206,16 @@ export function POSPage() {
                 return
             }
         }
-        const actualName = name.trim() || `Cuenta pendiente ${heldOrders.length + 1}`
-        saveHeldOrder(actualName, items, discount)
+        const debtSnapshot = pendingDebt.hasDebt
+            ? { clientId: pendingDebt.clientId, clientName: pendingDebt.clientName, saleIds: pendingDebt.saleIds, debtTotal: pendingDebt.debtTotal, sales: pendingDebt.sales }
+            : undefined
+        if (activeOrderId) {
+            updateHeldOrder(activeOrderId, items, discount, debtSnapshot)
+        } else {
+            const actualName = name.trim() || `Cuenta pendiente ${heldOrders.length + 1}`
+            saveHeldOrder(actualName, items, discount, debtSnapshot)
+        }
+        pendingDebt.clear()
         clearCart()
         setAmountReceived('')
         setActiveOrderId(null)
@@ -211,6 +229,7 @@ export function POSPage() {
         clearCart()
         setAmountReceived('')
         setHeldOrdersView(null)
+        pendingDebt.clear()
     }
 
     const handleLoadHeldOrder = (order: HeldOrder) => {
@@ -218,6 +237,12 @@ export function POSPage() {
         setActiveOrderId(order.id)
         setActiveOrderName(order.name)
         setHeldOrdersView(null)
+        if (order.pendingDebt) {
+            const d = order.pendingDebt
+            pendingDebt.set(d.clientId, d.clientName, d.saleIds, d.debtTotal, d.sales)
+        } else {
+            pendingDebt.clear()
+        }
     }
 
     const handlePaymentMethodChange = (method: PaymentMethod) => {
@@ -235,11 +260,15 @@ export function POSPage() {
         try {
             // Capture before clearCart — closures over Zustand state can become stale after async points
             const saleItems = items
-            const saleTotal = total
+            const saleTotal = effectiveTotal
+            const capturedSorteo    = cartSorteo
+            const capturedDeclined  = sorteoDeclined
+            const capturedQtyCount  = qualifyingCount
             const saleSubtotal = subtotal
             const saleDiscount = discount
             const saleReceived = received
             const saleCashier = selectedEmployee?.name ?? null
+            const capturedDebt = pendingDebt.hasDebt ? { ...pendingDebt } : null
 
             const sale = await createSale.mutateAsync({
                 items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: saleTotal,
@@ -266,7 +295,23 @@ export function POSPage() {
             setActiveOrderId(null)
             setActiveOrderName(null)
             setMergeSnapshot(null)
+            setSorteoDeclined(false)
             if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
+
+            // Settle pending debt sales if navigated from Balances
+            if (capturedDebt && capturedDebt.saleIds.length > 0) {
+                for (const id of capturedDebt.saleIds) {
+                    try { await settleSaleService(id) } catch { /* ignore individual settle errors */ }
+                }
+                pendingDebt.clear()
+                qc.invalidateQueries({ queryKey: ['credit-sales'] })
+            }
+
+            // Auto-record non-participation if sorteo was eligible but never used
+            if (capturedSorteo && !capturedDeclined) {
+                await logSorteoEntry({ sorteoId: capturedSorteo.sorteo.id, didParticipate: false, unitCount: capturedQtyCount })
+                qc.invalidateQueries({ queryKey: ['sorteoStats', capturedSorteo.sorteo.id] })
+            }
 
             const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
 
@@ -510,6 +555,8 @@ export function POSPage() {
                                     setEditingItem(item)
                                     setEditPriceValue(String(item.unitPrice))
                                 }}
+                                pendingDebtSales={pendingDebt.hasDebt ? pendingDebt.sales : undefined}
+                                onClearDebt={pendingDebt.hasDebt ? handleClearDebt : undefined}
                             />
                         </div>
 
@@ -532,7 +579,8 @@ export function POSPage() {
                                 onOpenDrawer={handleOpenDrawer}
                                 activeSorteoName={showSorteoButton ? cartSorteo?.sorteo.name : undefined}
                                 onSorteo={() => setSorteoOpen(true)}
-                                onDeclineSorteo={handleDeclineSorteo}
+                                pendingDebt={pendingDebt.hasDebt ? { clientName: pendingDebt.clientName, total: pendingDebt.debtTotal } : undefined}
+                                onClearDebt={pendingDebt.hasDebt ? handleClearDebt : undefined}
                             />
                         </div>
                     </>
@@ -580,6 +628,7 @@ export function POSPage() {
                                         setEditingItem(item)
                                         setEditPriceValue(String(item.unitPrice))
                                     }}
+                                    pendingDebtSales={pendingDebt.hasDebt ? pendingDebt.sales : undefined}
                                 />
                             </div>
 
@@ -600,6 +649,8 @@ export function POSPage() {
                                     onClear={handleClearCart}
                                     hasItems={items.length > 0}
                                     onOpenDrawer={handleOpenDrawer}
+                                    pendingDebt={pendingDebt.hasDebt ? { clientName: pendingDebt.clientName, total: pendingDebt.debtTotal } : undefined}
+                                    onClearDebt={pendingDebt.hasDebt ? handleClearDebt : undefined}
                                 />
                             </div>
                         </div>
@@ -653,6 +704,9 @@ export function POSPage() {
                 onClose={() => setSorteoOpen(false)}
                 sorteoName={cartSorteo?.sorteo.name ?? ''}
                 options={cartSorteo?.options ?? []}
+                sorteoId={cartSorteo?.sorteo.id}
+                minSpinsBetweenPrizes={cartSorteo?.sorteo.minSpinsBetweenPrizes}
+                maxSpins={qualifyingCount}
                 onResult={handleSorteoResult}
             />
 

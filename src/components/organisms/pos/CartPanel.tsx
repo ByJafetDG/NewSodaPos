@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { ShoppingCart, Trash2 } from 'lucide-react'
+import { ShoppingCart, Trash2, Receipt } from 'lucide-react'
 import { CartItemRow } from '@/components/molecules/CartItemRow'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
-import type { CartItem, Product } from '@/types'
+import { formatCurrency } from '@/lib/utils'
+import type { CartItem, Product, Sale } from '@/types'
 
 interface CartPanelProps {
     items: CartItem[]
@@ -13,11 +14,14 @@ interface CartPanelProps {
     onRemove: (id: string) => void
     onClear: () => void
     onEditPrice: (item: CartItem) => void
+    pendingDebtSales?: Sale[]
 }
 
-export function CartPanel({ items, onIncrease, onDecrease, onRemove, onClear, onEditPrice }: CartPanelProps) {
+export function CartPanel({ items, onIncrease, onDecrease, onRemove, onClear, onEditPrice, pendingDebtSales }: CartPanelProps) {
     const totalQty = items.reduce((s, i) => s + i.quantity, 0)
     const [confirmingClear, setConfirmingClear] = useState(false)
+    const debtTotal = pendingDebtSales?.reduce((s, sale) => s + sale.total, 0) ?? 0
+    const hasDebt = (pendingDebtSales?.length ?? 0) > 0
 
     return (
         <div className="flex flex-col h-full min-h-0">
@@ -45,7 +49,7 @@ export function CartPanel({ items, onIncrease, onDecrease, onRemove, onClear, on
 
             {/* Items */}
             <div className="flex-1 overflow-y-auto">
-                {items.length === 0 ? (
+                {items.length === 0 && !hasDebt ? (
                     <EmptyState
                         icon={<ShoppingCart size={36} />}
                         title="Carrito vacío"
@@ -65,6 +69,17 @@ export function CartPanel({ items, onIncrease, onDecrease, onRemove, onClear, on
                             />
                         ))}
                     </AnimatePresence>
+                )}
+                {hasDebt && (
+                    <div className="flex items-center gap-2 px-3 py-2 border-t border-violet-500/20 bg-violet-500/5">
+                        <Receipt size={10} className="text-violet-400 shrink-0" />
+                        <span className="text-[10px] text-violet-300 font-semibold flex-1 truncate">
+                            {pendingDebtSales!.length === 1 ? 'Cuenta a saldar' : `${pendingDebtSales!.length} cuentas a saldar`}
+                        </span>
+                        <span className="text-[11px] font-bold text-violet-400 font-mono tabular-nums">
+                            {formatCurrency(debtTotal)}
+                        </span>
+                    </div>
                 )}
             </div>
             <DeleteConfirmModal

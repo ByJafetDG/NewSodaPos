@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getClients, createClient, updateClient, deleteClient, getCreditSales, settleSale, settleClientSales } from '@/services/clients'
+import { getClients, createClient, updateClient, deleteClient, getCreditSales, settleSale, settleClientSales, getSalesByClient } from '@/services/clients'
 import type { Client } from '@/types'
 
 type ClientInput = Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>
@@ -63,5 +63,14 @@ export function useSettleClientSales() {
             qc.invalidateQueries({ queryKey: ['credit-sales'] })
             qc.invalidateQueries({ queryKey: ['clients'] })
         },
+    })
+}
+
+export function useSalesByClient(clientId: string | null) {
+    return useQuery({
+        queryKey: ['sales-by-client', clientId],
+        queryFn: () => getSalesByClient(clientId!),
+        enabled: !!clientId,
+        staleTime: 1000 * 30,
     })
 }

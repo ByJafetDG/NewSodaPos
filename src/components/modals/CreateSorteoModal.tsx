@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Check, AlertTriangle, Infinity } from 'lucide-react'
+import { Plus, Trash2, Check, AlertTriangle, DollarSign, Gift, Search, Lock } from 'lucide-react'
 import { BaseModal } from '@/components/modals/BaseModal'
 import { Button } from '@/components/atoms/Button'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,7 @@ import {
     createSorteo, createSorteoOption,
     setSorteoParticipants, updateSorteo,
 } from '@/services/sorteos'
+import { useOccupiedParticipants } from '@/hooks/useSorteos'
 
 interface Props {
     isOpen: boolean
@@ -21,10 +22,10 @@ interface Props {
 interface DraftOption {
     _id: string
     label: string
-    description: string
+    prizeType: 'efectivo' | 'otro'
+    prizeValue: string
     quantity: string
     baseProbability: string
-    isFiller: boolean
     color: string
 }
 
@@ -36,18 +37,32 @@ const COLORS = [
     '#84CC16', '#6B7280',
 ]
 
+const WHEEL_SIZES = [10, 20, 30, 50, 100]
+const FILLER_COLOR = '#6B7280'
 const STEPS = ['Nombre', 'Premios', 'Participantes', 'Vigencia', 'Resumen']
 
 function makeOption(sortOrder: number): DraftOption {
     return {
         _id: crypto.randomUUID(),
         label: '',
-        description: '',
+        prizeType: 'efectivo',
+        prizeValue: '',
         quantity: '1',
         baseProbability: '',
-        isFiller: false,
         color: COLORS[sortOrder % COLORS.length],
     }
+}
+
+function formatColones(raw: string): string {
+    if (!raw) return ''
+    const num = parseFloat(raw)
+    if (isNaN(num)) return ''
+    return '₡ ' + num.toLocaleString('es-CR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
+function buildDescription(prizeType: 'efectivo' | 'otro', prizeValue: string): string | null {
+    if (prizeType === 'efectivo') return prizeValue ? formatColones(prizeValue) : null
+    return prizeValue.trim() || null
 }
 
 function KbInput({
@@ -57,28 +72,17 @@ function KbInput({
     placeholder?: string; className?: string; disabled?: boolean
 }) {
     const kb = useKeyboardInput(value, onChange, { mode })
-    return (
-        <input
-            {...kb}
-            placeholder={placeholder}
-            disabled={disabled}
-            className={className}
-        />
-    )
+    return <input {...kb} placeholder={placeholder} disabled={disabled} className={className} />
 }
 
-function OptionRow({
-    o, onUpdate, onRemove,
-}: {
+function OptionRow({ o, onUpdate, onRemove }: {
     o: DraftOption
     onUpdate: (patch: Partial<DraftOption>) => void
     onRemove: () => void
 }) {
     return (
-        <div className={cn(
-            'p-3 rounded-xl border space-y-2',
-            o.isFiller ? 'bg-[#0D1117] border-[#192030]' : 'bg-[#101520] border-[#1E2A40]'
-        )}>
+        <div className="p-3 rounded-xl border bg-[#101520] border-[#1E2A40] space-y-2">
+            {/* Color + remove */}
             <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1 flex-shrink-0">
                     {COLORS.map(c => (
@@ -86,84 +90,94 @@ function OptionRow({
                             key={c}
                             onClick={() => onUpdate({ color: c })}
                             className="w-4 h-4 rounded-full border-2 transition-all cursor-pointer flex-shrink-0"
-                            style={{
-                                backgroundColor: c,
-                                borderColor: o.color === c ? 'white' : 'transparent',
-                            }}
+                            style={{ backgroundColor: c, borderColor: o.color === c ? 'white' : 'transparent' }}
                         />
                     ))}
                 </div>
-                <div className="flex-1 flex items-center gap-1 justify-end">
-                    <button
-                        onClick={() => onUpdate({ isFiller: !o.isFiller })}
-                        className={cn(
-                            'px-2 h-6 rounded-md text-[10px] font-medium border transition-all cursor-pointer flex items-center gap-1',
-                            o.isFiller
-                                ? 'bg-[#192030] border-[#283A56] text-[#7A8FAA]'
-                                : 'bg-transparent border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA]'
-                        )}
-                    >
-                        <Infinity size={10} />
-                        Relleno
-                    </button>
-                    <button
-                        onClick={onRemove}
-                        className="w-6 h-6 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
-                    >
-                        <Trash2 size={12} />
-                    </button>
-                </div>
+                <button
+                    onClick={onRemove}
+                    className="ml-auto w-6 h-6 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                >
+                    <Trash2 size={12} />
+                </button>
             </div>
 
-            <div className="grid grid-cols-[1fr_1fr_80px_72px] gap-2">
-                <KbInput
-                    value={o.label}
-                    onChange={v => onUpdate({ label: v })}
-                    placeholder="Premio Mayor"
-                    className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
-                />
-                <KbInput
-                    value={o.description}
-                    onChange={v => onUpdate({ description: v })}
-                    placeholder="10,000 colones"
-                    className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
-                />
-                {o.isFiller ? (
-                    <div className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] flex items-center text-[12px] text-[#3D506A]">
-                        ∞
+            {/* Prize name */}
+            <KbInput
+                value={o.label}
+                onChange={v => onUpdate({ label: v })}
+                placeholder="Nombre del premio (ej: Premio Mayor)"
+                className="w-full h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+            />
+
+            {/* Type + value + quantity */}
+            <div className="flex gap-2">
+                <div className="flex p-0.5 bg-[#0B0E19] rounded-lg border border-[#1E2A40] flex-shrink-0">
+                    <button
+                        onClick={() => onUpdate({ prizeType: 'efectivo', prizeValue: '' })}
+                        className={cn(
+                            'flex items-center gap-1 px-2 h-7 rounded-md text-[11px] font-medium transition-all cursor-pointer',
+                            o.prizeType === 'efectivo' ? 'bg-amber-500/20 text-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        <DollarSign size={10} />
+                        Efectivo
+                    </button>
+                    <button
+                        onClick={() => onUpdate({ prizeType: 'otro', prizeValue: '' })}
+                        className={cn(
+                            'flex items-center gap-1 px-2 h-7 rounded-md text-[11px] font-medium transition-all cursor-pointer',
+                            o.prizeType === 'otro' ? 'bg-amber-500/20 text-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        <Gift size={10} />
+                        Otro
+                    </button>
+                </div>
+
+                {o.prizeType === 'efectivo' ? (
+                    <div className="relative flex-1 min-w-0">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-400 text-[12px] font-bold pointer-events-none select-none">₡</span>
+                        <KbInput
+                            value={o.prizeValue}
+                            onChange={v => onUpdate({ prizeValue: v.replace(/[^\d.]/g, '') })}
+                            mode="numeric"
+                            placeholder="0"
+                            className="w-full h-8 pl-6 pr-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                        />
                     </div>
                 ) : (
                     <KbInput
-                        value={o.quantity}
-                        onChange={v => onUpdate({ quantity: v })}
-                        mode="numeric"
-                        placeholder="Cant."
-                        className="h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                        value={o.prizeValue}
+                        onChange={v => onUpdate({ prizeValue: v })}
+                        placeholder="Ej: Pollo asado..."
+                        className="flex-1 min-w-0 h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
                     />
                 )}
-                <div className="relative">
+
+                <KbInput
+                    value={o.quantity}
+                    onChange={v => onUpdate({ quantity: v })}
+                    mode="numeric"
+                    placeholder="Cant."
+                    className="w-14 flex-shrink-0 h-8 px-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] text-center placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                />
+
+                <div className="relative w-16 flex-shrink-0">
                     <KbInput
                         value={o.baseProbability}
                         onChange={v => onUpdate({ baseProbability: v })}
                         mode="numeric"
                         placeholder="0"
-                        disabled={o.isFiller}
-                        className={cn(
-                            'h-8 pl-3 pr-7 rounded-lg border text-[12px] outline-none focus:border-amber-500/30 w-full',
-                            o.isFiller
-                                ? 'bg-[#0D1117] border-[#192030] text-[#3D506A]'
-                                : 'bg-[#0B0E19] border-[#1E2A40] text-[#E4ECF7] placeholder:text-[#3D506A]'
-                        )}
+                        className="w-full h-8 pl-2 pr-6 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
                     />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[#3D506A]">%</span>
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[#3D506A] pointer-events-none">%</span>
                 </div>
             </div>
-            <div className="grid grid-cols-4 gap-2 text-[10px] text-[#3D506A] px-0.5">
-                <span>Premio</span>
-                <span>Descripción</span>
-                <span>{o.isFiller ? '' : 'Cantidad'}</span>
-                <span>{o.isFiller ? 'Automático' : 'Probabilidad'}</span>
-            </div>
+
+            {o.prizeType === 'efectivo' && o.prizeValue && (
+                <p className="text-[10px] text-amber-400/60 pl-1">{formatColones(o.prizeValue)}</p>
+            )}
         </div>
     )
 }
@@ -178,36 +192,62 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
     const [error, setError] = useState<string | null>(null)
 
     const [name, setName] = useState('')
+    const [wheelSize, setWheelSize] = useState(20)
     const [options, setOptions] = useState<DraftOption[]>([makeOption(0)])
     const [participants, setParticipants] = useState<Participant[]>([])
     const [participantTab, setParticipantTab] = useState<'cat' | 'prod'>('cat')
+    const [participantSearch, setParticipantSearch] = useState('')
     const [hasDates, setHasDates] = useState(false)
     const [startAt, setStartAt] = useState('')
     const [endAt, setEndAt] = useState('')
+    const [minSpins, setMinSpins] = useState('8')
 
     const nameKb = useKeyboardInput(name, setName, { mode: 'alpha' })
+    const searchKb = useKeyboardInput(participantSearch, setParticipantSearch, { mode: 'alpha' })
+
+    const { data: occupiedParticipants = [] } = useOccupiedParticipants()
+
+    function getConflict(type: 'PRODUCT' | 'CATEGORY', refId: string): string | null {
+        if (type === 'CATEGORY') {
+            const direct = occupiedParticipants.find(op => op.type === 'CATEGORY' && op.refId === refId)
+            if (direct) return direct.sorteoName
+            const catProds = products.filter(p => p.categoryId === refId)
+            for (const cp of catProds) {
+                const indirect = occupiedParticipants.find(op => op.type === 'PRODUCT' && op.refId === cp.id)
+                if (indirect) return indirect.sorteoName
+            }
+        } else {
+            const direct = occupiedParticipants.find(op => op.type === 'PRODUCT' && op.refId === refId)
+            if (direct) return direct.sorteoName
+            const prod = products.find(p => p.id === refId)
+            if (prod) {
+                const indirect = occupiedParticipants.find(op => op.type === 'CATEGORY' && op.refId === prod.categoryId)
+                if (indirect) return indirect.sorteoName
+            }
+        }
+        return null
+    }
+
+    const fillerSlots = Math.max(0, wheelSize - options.length)
+    const totalProb = options.reduce((s, o) => s + (parseFloat(o.baseProbability) || 0), 0)
+    const probOver = totalProb > 100
 
     useEffect(() => {
         if (isOpen) {
             setStep(1)
             setName('')
+            setWheelSize(20)
             setOptions([makeOption(0)])
             setParticipants([])
             setParticipantTab('cat')
+            setParticipantSearch('')
             setHasDates(false)
             setStartAt('')
             setEndAt('')
+            setMinSpins('8')
             setError(null)
         }
     }, [isOpen])
-
-    const totalProb = options.reduce((s, o) => {
-        if (o.isFiller) return s
-        return s + (parseFloat(o.baseProbability) || 0)
-    }, 0)
-
-    const probOver = totalProb > 100
-    const hasFillers = options.some(o => o.isFiller)
 
     function updateOption(id: string, patch: Partial<DraftOption>) {
         setOptions(prev => prev.map(o => o._id === id ? { ...o, ...patch } : o))
@@ -218,16 +258,20 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
     }
 
     function addOption() {
+        if (options.length >= wheelSize) return
         setOptions(prev => [...prev, makeOption(prev.length)])
     }
 
     function toggleParticipant(type: 'PRODUCT' | 'CATEGORY', refId: string) {
-        setParticipants(prev => {
-            const exists = prev.some(p => p.type === type && p.refId === refId)
-            return exists
-                ? prev.filter(p => !(p.type === type && p.refId === refId))
-                : [...prev, { type, refId }]
-        })
+        const exists = participants.some(p => p.type === type && p.refId === refId)
+        if (!exists) {
+            const conflict = getConflict(type, refId)
+            if (conflict) { setError(`Ya participa en otro sorteo activo: "${conflict}"`); return }
+        }
+        setError(null)
+        setParticipants(prev =>
+            exists ? prev.filter(p => !(p.type === type && p.refId === refId)) : [...prev, { type, refId }]
+        )
     }
 
     function isSelected(type: 'PRODUCT' | 'CATEGORY', refId: string) {
@@ -236,9 +280,12 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
 
     function canAdvance(): boolean {
         if (step === 1) return name.trim().length > 0
-        if (step === 2) return options.length > 0 &&
-            options.every(o => o.label.trim() && (parseFloat(o.baseProbability) > 0 || o.isFiller)) &&
+        if (step === 2) return (
+            options.length > 0 &&
+            options.length <= wheelSize &&
+            options.every(o => o.label.trim() && parseFloat(o.baseProbability) > 0) &&
             !probOver
+        )
         if (step === 3) return participants.length > 0
         if (step === 4) return !hasDates || (!!startAt && !!endAt)
         return true
@@ -248,20 +295,34 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
         setSubmitting(true)
         setError(null)
         try {
-            const sorteo = await createSorteo({ name: name.trim() })
+            const sorteo = await createSorteo({ name: name.trim(), minSpinsBetweenPrizes: parseInt(minSpins) || 8 })
 
             for (let i = 0; i < options.length; i++) {
                 const o = options[i]
-                const qty = o.isFiller || o.quantity === '' ? null : parseInt(o.quantity) || null
+                const qty = o.quantity === '' ? null : parseInt(o.quantity) || null
+                const description = buildDescription(o.prizeType, o.prizeValue)
                 await createSorteoOption({
                     sorteoId: sorteo.id,
                     label: o.label.trim(),
-                    description: o.description.trim() || undefined,
+                    description: description ?? undefined,
                     quantity: qty,
                     baseProbability: parseFloat(o.baseProbability) || 0,
-                    isFiller: o.isFiller,
+                    isFiller: false,
                     color: o.color,
                     sortOrder: i,
+                })
+            }
+
+            if (fillerSlots > 0) {
+                await createSorteoOption({
+                    sorteoId: sorteo.id,
+                    label: 'Sin premio',
+                    description: null,
+                    quantity: null,
+                    baseProbability: 0,
+                    isFiller: true,
+                    color: FILLER_COLOR,
+                    sortOrder: options.length,
                 })
             }
 
@@ -277,7 +338,7 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                 })
             }
 
-            qc.invalidateQueries({ queryKey: ['sorteos'] })
+            await qc.invalidateQueries({ queryKey: ['sorteos'] })
             onClose()
         } catch (e: any) {
             setError(e?.message ?? 'Error al crear el sorteo')
@@ -288,6 +349,10 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
 
     const catParticipants = participants.filter(p => p.type === 'CATEGORY')
     const prodParticipants = participants.filter(p => p.type === 'PRODUCT')
+
+    const q = participantSearch.toLowerCase()
+    const filteredCats = categories.filter(c => c.isActive && (!q || c.name.toLowerCase().includes(q)))
+    const filteredProds = products.filter(p => p.isActive && (!q || p.name.toLowerCase().includes(q)))
 
     return (
         <BaseModal
@@ -300,7 +365,7 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
             <div className="space-y-5">
                 {/* Step indicator */}
                 <div className="flex items-center gap-1">
-                    {STEPS.map((label, i) => {
+                    {STEPS.map((_, i) => {
                         const n = i + 1
                         const done = n < step
                         const active = n === step
@@ -315,20 +380,16 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                     {done ? <Check size={11} /> : n}
                                 </div>
                                 {i < STEPS.length - 1 && (
-                                    <div className={cn(
-                                        'flex-1 h-px',
-                                        done ? 'bg-amber-500/40' : 'bg-[#1E2A40]'
-                                    )} />
+                                    <div className={cn('flex-1 h-px', done ? 'bg-amber-500/40' : 'bg-[#1E2A40]')} />
                                 )}
                             </div>
                         )
                     })}
                 </div>
 
-                {/* Step content */}
                 <div className="max-h-[52vh] overflow-y-auto pr-1">
 
-                    {/* Step 1: Nombre */}
+                    {/* Step 1 */}
                     {step === 1 && (
                         <div className="space-y-3">
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Nombre del sorteo</p>
@@ -345,19 +406,43 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                         </div>
                     )}
 
-                    {/* Step 2: Opciones de premio */}
+                    {/* Step 2 */}
                     {step === 2 && (
                         <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Opciones de la ruleta</p>
+                            <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-2">Tamaño de la ruleta</p>
+                                <div className="flex gap-1.5">
+                                    {WHEEL_SIZES.map(sz => (
+                                        <button
+                                            key={sz}
+                                            onClick={() => setWheelSize(sz)}
+                                            className={cn(
+                                                'flex-1 h-8 rounded-lg text-[12px] font-semibold border transition-all cursor-pointer',
+                                                wheelSize === sz
+                                                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                                                    : 'bg-[#0B0E19] border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA] hover:border-[#283A56]'
+                                            )}
+                                        >
+                                            {sz}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Slots + probability status */}
+                            <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
+                                <span className="text-[12px]">
+                                    <span className="font-bold text-amber-400">{options.length}</span>
+                                    <span className="text-[#3D506A]"> de {wheelSize} slots · {fillerSlots} relleno auto</span>
+                                </span>
                                 <div className={cn(
-                                    'text-[11px] font-mono font-semibold px-2 py-0.5 rounded-lg',
+                                    'ml-auto text-[11px] font-mono font-semibold px-2 py-0.5 rounded-lg',
                                     probOver ? 'text-red-400 bg-red-500/10' :
                                     totalProb === 100 ? 'text-emerald-400 bg-emerald-500/10' :
                                     'text-amber-400 bg-amber-500/10'
                                 )}>
                                     {totalProb.toFixed(1)}%
-                                    {hasFillers && <span className="text-[#3D506A] font-normal"> + relleno</span>}
+                                    {fillerSlots > 0 && <span className="text-[#3D506A] font-normal"> + relleno</span>}
                                 </div>
                             </div>
 
@@ -368,8 +453,22 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                 </div>
                             )}
 
+                            <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
+                                <span className="text-[12px] text-[#7A8FAA]">Giros sin premio tras ganar</span>
+                                <div className="relative ml-auto w-20">
+                                    <KbInput
+                                        value={minSpins}
+                                        onChange={v => setMinSpins(v)}
+                                        mode="numeric"
+                                        placeholder="8"
+                                        className="w-full h-7 pl-2 pr-8 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] text-right placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                                    />
+                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[#3D506A] pointer-events-none">giros</span>
+                                </div>
+                            </div>
+
                             <div className="space-y-2">
-                                {options.map((o) => (
+                                {options.map(o => (
                                     <OptionRow
                                         key={o._id}
                                         o={o}
@@ -381,15 +480,21 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
 
                             <button
                                 onClick={addOption}
-                                className="w-full h-9 rounded-xl border border-dashed border-[#1E2A40] text-[12px] text-[#3D506A] hover:text-[#7A8FAA] hover:border-[#283A56] transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                                disabled={options.length >= wheelSize}
+                                className={cn(
+                                    'w-full h-9 rounded-xl border border-dashed text-[12px] transition-all flex items-center justify-center gap-1.5',
+                                    options.length >= wheelSize
+                                        ? 'border-[#0F1523] text-[#1E2A40] cursor-not-allowed'
+                                        : 'border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA] hover:border-[#283A56] cursor-pointer'
+                                )}
                             >
                                 <Plus size={13} />
-                                Agregar opción
+                                Agregar premio
                             </button>
                         </div>
                     )}
 
-                    {/* Step 3: Participantes */}
+                    {/* Step 3 */}
                     {step === 3 && (
                         <div className="space-y-3">
                             <div className="flex items-center justify-between">
@@ -401,6 +506,15 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                 </span>
                             </div>
 
+                            <div className="relative">
+                                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none" />
+                                <input
+                                    {...searchKb}
+                                    placeholder="Buscar categoría o producto..."
+                                    className="w-full h-8 pl-8 pr-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30 transition-colors"
+                                />
+                            </div>
+
                             <div className="flex gap-1 p-1 bg-[#0B0E19] rounded-xl">
                                 {(['cat', 'prod'] as const).map(tab => (
                                     <button
@@ -408,9 +522,7 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                         onClick={() => setParticipantTab(tab)}
                                         className={cn(
                                             'flex-1 h-7 rounded-lg text-[12px] font-medium transition-all cursor-pointer',
-                                            participantTab === tab
-                                                ? 'bg-amber-500/15 text-amber-400'
-                                                : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                            participantTab === tab ? 'bg-amber-500/15 text-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
                                         )}
                                     >
                                         {tab === 'cat' ? 'Categorías' : 'Productos'}
@@ -419,57 +531,89 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                             </div>
 
                             <div className="space-y-1.5">
-                                {participantTab === 'cat' && categories.filter(c => c.isActive).map(cat => (
-                                    <button
-                                        key={cat.id}
-                                        onClick={() => toggleParticipant('CATEGORY', cat.id)}
-                                        className={cn(
-                                            'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer text-left',
-                                            isSelected('CATEGORY', cat.id)
-                                                ? 'bg-amber-500/10 border-amber-500/25 text-amber-400'
-                                                : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:border-[#283A56]'
-                                        )}
-                                    >
-                                        <div className={cn(
-                                            'w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border',
-                                            isSelected('CATEGORY', cat.id)
-                                                ? 'bg-amber-500 border-amber-500'
-                                                : 'border-[#283A56] bg-transparent'
-                                        )}>
-                                            {isSelected('CATEGORY', cat.id) && <Check size={10} className="text-black" />}
-                                        </div>
-                                        <span className="text-[13px] font-medium">{cat.name}</span>
-                                        <span className="text-[11px] text-[#3D506A] ml-auto">{cat.type}</span>
-                                    </button>
-                                ))}
+                                {participantTab === 'cat' && (
+                                    filteredCats.length > 0
+                                        ? filteredCats.map(cat => {
+                                            const conflict = getConflict('CATEGORY', cat.id)
+                                            const selected = isSelected('CATEGORY', cat.id)
+                                            return (
+                                                <button
+                                                    key={cat.id}
+                                                    onClick={() => !conflict && toggleParticipant('CATEGORY', cat.id)}
+                                                    disabled={!!conflict}
+                                                    className={cn(
+                                                        'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left',
+                                                        conflict
+                                                            ? 'bg-[#0B0E19] border-[#1E2A40] text-[#3D506A] cursor-not-allowed opacity-60'
+                                                            : selected
+                                                                ? 'bg-amber-500/10 border-amber-500/25 text-amber-400 cursor-pointer'
+                                                                : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:border-[#283A56] cursor-pointer'
+                                                    )}
+                                                >
+                                                    <div className={cn(
+                                                        'w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border',
+                                                        conflict ? 'border-[#1E2A40] bg-transparent' :
+                                                        selected ? 'bg-amber-500 border-amber-500' : 'border-[#283A56] bg-transparent'
+                                                    )}>
+                                                        {conflict
+                                                            ? <Lock size={8} className="text-[#3D506A]" />
+                                                            : selected && <Check size={10} className="text-black" />
+                                                        }
+                                                    </div>
+                                                    <span className="text-[13px] font-medium">{cat.name}</span>
+                                                    {conflict
+                                                        ? <span className="text-[10px] text-red-400/60 ml-auto truncate max-w-[130px]">{conflict}</span>
+                                                        : <span className="text-[11px] text-[#3D506A] ml-auto">{cat.type}</span>
+                                                    }
+                                                </button>
+                                            )
+                                        })
+                                        : <p className="text-center text-[12px] text-[#3D506A] py-4">Sin resultados</p>
+                                )}
 
-                                {participantTab === 'prod' && products.filter(p => p.isActive).map(prod => (
-                                    <button
-                                        key={prod.id}
-                                        onClick={() => toggleParticipant('PRODUCT', prod.id)}
-                                        className={cn(
-                                            'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer text-left',
-                                            isSelected('PRODUCT', prod.id)
-                                                ? 'bg-amber-500/10 border-amber-500/25 text-amber-400'
-                                                : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:border-[#283A56]'
-                                        )}
-                                    >
-                                        <div className={cn(
-                                            'w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border',
-                                            isSelected('PRODUCT', prod.id)
-                                                ? 'bg-amber-500 border-amber-500'
-                                                : 'border-[#283A56] bg-transparent'
-                                        )}>
-                                            {isSelected('PRODUCT', prod.id) && <Check size={10} className="text-black" />}
-                                        </div>
-                                        <span className="text-[13px] font-medium">{prod.name}</span>
-                                    </button>
-                                ))}
+                                {participantTab === 'prod' && (
+                                    filteredProds.length > 0
+                                        ? filteredProds.map(prod => {
+                                            const conflict = getConflict('PRODUCT', prod.id)
+                                            const selected = isSelected('PRODUCT', prod.id)
+                                            return (
+                                                <button
+                                                    key={prod.id}
+                                                    onClick={() => !conflict && toggleParticipant('PRODUCT', prod.id)}
+                                                    disabled={!!conflict}
+                                                    className={cn(
+                                                        'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left',
+                                                        conflict
+                                                            ? 'bg-[#0B0E19] border-[#1E2A40] text-[#3D506A] cursor-not-allowed opacity-60'
+                                                            : selected
+                                                                ? 'bg-amber-500/10 border-amber-500/25 text-amber-400 cursor-pointer'
+                                                                : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:border-[#283A56] cursor-pointer'
+                                                    )}
+                                                >
+                                                    <div className={cn(
+                                                        'w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border',
+                                                        conflict ? 'border-[#1E2A40] bg-transparent' :
+                                                        selected ? 'bg-amber-500 border-amber-500' : 'border-[#283A56] bg-transparent'
+                                                    )}>
+                                                        {conflict
+                                                            ? <Lock size={8} className="text-[#3D506A]" />
+                                                            : selected && <Check size={10} className="text-black" />
+                                                        }
+                                                    </div>
+                                                    <span className="text-[13px] font-medium">{prod.name}</span>
+                                                    {conflict && (
+                                                        <span className="text-[10px] text-red-400/60 ml-auto truncate max-w-[130px]">{conflict}</span>
+                                                    )}
+                                                </button>
+                                            )
+                                        })
+                                        : <p className="text-center text-[12px] text-[#3D506A] py-4">Sin resultados</p>
+                                )}
                             </div>
                         </div>
                     )}
 
-                    {/* Step 4: Vigencia */}
+                    {/* Step 4 */}
                     {step === 4 && (
                         <div className="space-y-4">
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Fechas de vigencia</p>
@@ -478,9 +622,7 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                 onClick={() => setHasDates(v => !v)}
                                 className={cn(
                                     'w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all cursor-pointer text-left',
-                                    hasDates
-                                        ? 'bg-amber-500/10 border-amber-500/25'
-                                        : 'bg-[#101520] border-[#1E2A40] hover:border-[#283A56]'
+                                    hasDates ? 'bg-amber-500/10 border-amber-500/25' : 'bg-[#101520] border-[#1E2A40] hover:border-[#283A56]'
                                 )}
                             >
                                 <div className={cn(
@@ -525,7 +667,7 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                         </div>
                     )}
 
-                    {/* Step 5: Resumen */}
+                    {/* Step 5 */}
                     {step === 5 && (
                         <div className="space-y-3">
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Revisión final</p>
@@ -535,8 +677,8 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                     { label: 'Nombre', value: name },
                                     { label: 'Tipo', value: 'Ruleta' },
                                     {
-                                        label: 'Opciones',
-                                        value: `${options.length} opción${options.length !== 1 ? 'es' : ''} (${options.filter(o => !o.isFiller).length} con stock, ${options.filter(o => o.isFiller).length} relleno)`
+                                        label: 'Ruleta',
+                                        value: `${wheelSize} opciones · ${options.length} premio${options.length !== 1 ? 's' : ''} + ${fillerSlots} relleno`
                                     },
                                     {
                                         label: 'Participantes',
@@ -559,8 +701,7 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                 ))}
                             </div>
 
-                            {/* Options preview */}
-                            <div className="flex flex-wrap gap-1.5 mt-1">
+                            <div className="flex flex-wrap gap-1.5">
                                 {options.map(o => (
                                     <div
                                         key={o._id}
@@ -568,10 +709,20 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                         style={{ backgroundColor: o.color }}
                                     >
                                         <span>{o.label}</span>
-                                        {!o.isFiller && <span className="opacity-70">({o.baseProbability}%)</span>}
-                                        {o.isFiller && <Infinity size={9} />}
+                                        {o.prizeType === 'efectivo' && o.prizeValue && (
+                                            <span className="opacity-70">({formatColones(o.prizeValue)})</span>
+                                        )}
+                                        {o.prizeType === 'otro' && o.prizeValue && (
+                                            <span className="opacity-70">({o.prizeValue})</span>
+                                        )}
                                     </div>
                                 ))}
+                                {fillerSlots > 0 && (
+                                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-white bg-[#6B7280]">
+                                        Sin premio
+                                        <span className="opacity-60 ml-1">×{fillerSlots}</span>
+                                    </div>
+                                )}
                             </div>
 
                             {error && (
@@ -591,37 +742,17 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                             Anterior
                         </Button>
                     )}
-
                     {step < 5 && (
-                        <Button
-                            variant="primary"
-                            size="md"
-                            onClick={() => setStep(s => s + 1)}
-                            disabled={!canAdvance()}
-                            className="flex-1"
-                        >
+                        <Button variant="primary" size="md" onClick={() => setStep(s => s + 1)} disabled={!canAdvance()} className="flex-1">
                             Siguiente
                         </Button>
                     )}
-
                     {step === 5 && (
                         <>
-                            <Button
-                                variant="secondary"
-                                size="md"
-                                onClick={() => handleSubmit(false)}
-                                loading={submitting}
-                                className="flex-1"
-                            >
+                            <Button variant="secondary" size="md" onClick={() => handleSubmit(false)} loading={submitting} className="flex-1">
                                 Guardar borrador
                             </Button>
-                            <Button
-                                variant="primary"
-                                size="md"
-                                onClick={() => handleSubmit(true)}
-                                loading={submitting}
-                                className="flex-1"
-                            >
+                            <Button variant="primary" size="md" onClick={() => handleSubmit(true)} loading={submitting} className="flex-1">
                                 Activar ahora
                             </Button>
                         </>

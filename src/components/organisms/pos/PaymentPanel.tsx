@@ -1,10 +1,12 @@
+import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { formatCurrency } from '@/lib/utils'
 import { PaymentMethodPicker } from '@/components/molecules/PaymentMethodPicker'
 import { NumericPad } from '@/components/molecules/NumericPad'
 import { TotalsPanel } from '@/components/molecules/TotalsPanel'
 import { Button } from '@/components/atoms/Button'
-import { Trash2, Ticket, X } from 'lucide-react'
+import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
+import { Trash2, Ticket, X, CreditCard } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
 
 interface PaymentPanelProps {
@@ -24,19 +26,22 @@ interface PaymentPanelProps {
     onOpenDrawer?: () => void
     activeSorteoName?: string
     onSorteo?: () => void
-    onDeclineSorteo?: () => void
+    pendingDebt?: { clientName: string; total: number }
+    onClearDebt?: () => void
 }
 
 export function PaymentPanel({
     paymentMethod, onChangeMethod, amountReceived, onChangeAmount,
     itemCount, subtotal, discount, total,
     canCharge, isPending, onCharge, onClear, hasItems, onOpenDrawer,
-    activeSorteoName, onSorteo, onDeclineSorteo,
+    activeSorteoName, onSorteo, pendingDebt, onClearDebt,
 }: PaymentPanelProps) {
+    const [confirmClearDebt, setConfirmClearDebt] = useState(false)
     const received = parseFloat(amountReceived) || 0
-    const change = paymentMethod === 'EFECTIVO' ? Math.max(0, received - total) : 0
+    const effectiveTotal = total + (pendingDebt?.total ?? 0)
+    const change = paymentMethod === 'EFECTIVO' ? Math.max(0, received - effectiveTotal) : 0
     const showCash = paymentMethod === 'EFECTIVO'
-    const canConfirmCash = !hasItems || received >= total
+    const canConfirmCash = !hasItems || received >= effectiveTotal
 
     return (
         /*
@@ -85,7 +90,7 @@ export function PaymentPanel({
 
                             {/* Change badge */}
                             <AnimatePresence>
-                                {received > 0 && received >= total && (
+                                {received > 0 && received >= effectiveTotal && (
                                     <motion.div
                                         initial={{ opacity: 0, scale: 0.95 }}
                                         animate={{ opacity: 1, scale: 1 }}
@@ -102,7 +107,7 @@ export function PaymentPanel({
                             <NumericPad
                                 value={amountReceived}
                                 onChange={onChangeAmount}
-                                total={hasItems ? total : undefined}
+                                total={hasItems ? effectiveTotal : undefined}
                             />
                         </div>
                     </motion.div>
@@ -143,19 +148,33 @@ export function PaymentPanel({
                                     {activeSorteoName}
                                 </span>
                             </button>
-                            {onDeclineSorteo && (
-                                <button
-                                    onClick={onDeclineSorteo}
-                                    title="Cliente no desea participar"
-                                    className="w-9 h-9 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA] flex items-center justify-center transition-all cursor-pointer shrink-0"
-                                >
-                                    <X size={13} />
-                                </button>
-                            )}
                         </div>
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* ── Pending debt notice ──────────────────────── */}
+            {pendingDebt && (
+                <div className="px-4 pb-2 shrink-0">
+                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-violet-500/8 border border-violet-500/20">
+                        <CreditCard size={13} className="text-violet-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-[11px] font-semibold text-violet-300 truncate">{pendingDebt.clientName}</p>
+                            <p className="text-[10px] text-violet-400/60">Deuda a saldar al cobrar</p>
+                        </div>
+                        <span className="text-[13px] font-bold text-violet-400 tabular-nums">{formatCurrency(pendingDebt.total)}</span>
+                        {onClearDebt && (
+                            <button
+                                onClick={() => setConfirmClearDebt(true)}
+                                title="Quitar deuda del carrito"
+                                className="w-5 h-5 rounded-md flex items-center justify-center text-violet-400/50 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer shrink-0"
+                            >
+                                <X size={11} />
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* ── Action buttons ──────────────────────────── */}
             <div className="px-4 pb-4 flex gap-2 shrink-0">
@@ -179,11 +198,19 @@ export function PaymentPanel({
                     {isPending
                         ? 'Procesando...'
                         : hasItems
-                            ? `Cobrar ${formatCurrency(total)}`
+                            ? `Cobrar ${formatCurrency(effectiveTotal)}`
                             : 'Sin productos'
                     }
                 </Button>
             </div>
+
+            <DeleteConfirmModal
+                isOpen={confirmClearDebt}
+                onClose={() => setConfirmClearDebt(false)}
+                onConfirm={() => { onClearDebt?.(); setConfirmClearDebt(false) }}
+                title="Quitar cuentas"
+                description="¿Quitar las cuentas a saldar del carrito? La deuda no se eliminará, solo se quitará de esta venta."
+            />
         </div>
     )
 }

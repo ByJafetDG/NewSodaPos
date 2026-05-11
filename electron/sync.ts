@@ -337,7 +337,7 @@ async function pullSync() {
 
         // 11. Sync Expenses (depends on CashRegister, ExpenseCategory)
         const { data: expenses, error: expError } = await supabase.from('Expense').select('*');
-        if (expError) throw expError;
+        if (expError && (expError as any).code !== 'PGRST205') throw expError;
         if (expenses) {
             transaction(() => {
                 for (const exp of expenses) {

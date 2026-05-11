@@ -269,6 +269,7 @@ export function initDb() {
       status TEXT DEFAULT 'DRAFT',
       startAt TEXT,
       endAt TEXT,
+      minSpinsBetweenPrizes INTEGER DEFAULT 8,
       syncStatus TEXT DEFAULT 'PENDING',
       createdAt TEXT DEFAULT (datetime('now')),
       updatedAt TEXT DEFAULT (datetime('now'))
@@ -414,6 +415,12 @@ export function initDb() {
       } catch {}
     }
   } catch {}
+
+  try {
+    db.exec(`ALTER TABLE Sorteo ADD COLUMN minSpinsBetweenPrizes INTEGER DEFAULT 8`);
+  } catch {
+    // Already exists
+  }
 
   // Corrective migration: restore Z to CashRegister timestamps damaged by previous bad migration
   // (previous migration stripped Z without adjusting time — re-add Z to restore UTC format)
