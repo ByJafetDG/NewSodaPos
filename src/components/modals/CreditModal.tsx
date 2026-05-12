@@ -167,6 +167,27 @@ export function CreditModal({
         if (kb.isOpen) kb.syncValue(v)
     }
 
+    const applyEvenSplit = () => {
+        if (splitClients.length < 2 || selectedProducts.length === 0) return
+        const n = splitClients.length
+        if (splitType === 'total' && selectedProducts.length > 1) {
+            const base = Math.floor(totalSelectedPrice / n)
+            const remainder = totalSelectedPrice - base * n
+            const newAmounts: Record<string, string> = {}
+            splitClients.forEach((c, idx) => { newAmounts[c.id] = String(idx === 0 ? base + remainder : base) })
+            setTotalAmounts(newAmounts)
+        } else {
+            const newPPA: Record<string, Record<string, string>> = {}
+            for (const p of selectedProducts) {
+                const base = Math.floor(p.subtotal / n)
+                const remainder = p.subtotal - base * n
+                newPPA[p.id] = {}
+                splitClients.forEach((c, idx) => { newPPA[p.id][c.id] = String(idx === 0 ? base + remainder : base) })
+            }
+            setPerProductAmounts(newPPA)
+        }
+    }
+
     const showSplitTypeToggle = selectedProducts.length > 1
 
     return (
@@ -258,219 +279,240 @@ export function CreditModal({
 
             {/* ── SPLIT MODE ──────────────────────────────────────────── */}
             {mode === 'split' && (
-                <div className="space-y-4">
+                <div className="flex flex-col gap-4">
 
-                    {/* Products */}
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A] mb-2">Productos a dividir</p>
-                        <div className="space-y-1 max-h-36 overflow-y-auto">
-                            {cartItems.map(item => {
-                                const isChecked = selectedProductIds.has(item.id)
-                                return (
-                                    <button
-                                        key={item.id}
-                                        onClick={() => toggleProduct(item.id)}
-                                        className={cn(
-                                            'w-full flex items-center gap-3 px-3 py-2 rounded-xl border transition-all cursor-pointer text-left',
-                                            isChecked
-                                                ? 'bg-orange-500/8 border-orange-500/25'
-                                                : 'bg-[#101520] border-[#192030] hover:bg-[#161D2E]'
-                                        )}
-                                    >
-                                        <div className={cn(
-                                            'w-4 h-4 rounded flex items-center justify-center shrink-0 border',
-                                            isChecked ? 'bg-orange-500 border-orange-500' : 'border-[#3D506A]'
-                                        )}>
-                                            {isChecked && <Check size={10} className="text-white" />}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <span className={cn('text-[13px] font-medium truncate', isChecked ? 'text-[#E4ECF7]' : 'text-[#7A8FAA]')}>
-                                                {item.product.name}
-                                            </span>
-                                            {item.quantity > 1 && (
-                                                <span className="text-[11px] text-[#3D506A] ml-1.5">×{item.quantity}</span>
-                                            )}
-                                        </div>
-                                        <span className={cn('text-[13px] font-mono shrink-0', isChecked ? 'text-orange-400' : 'text-[#3D506A]')}>
-                                            {formatCurrency(item.subtotal)}
-                                        </span>
-                                    </button>
-                                )
-                            })}
-                        </div>
-                    </div>
+                    {/* Scrollable body */}
+                    <div className="space-y-4 overflow-y-auto max-h-[calc(90vh-260px)] pr-1">
 
-                    {/* Split type toggle — only relevant with multiple products */}
-                    {showSplitTypeToggle && selectedProducts.length > 1 && (
-                        <div className="flex gap-1 p-1 rounded-lg bg-[#101520] border border-[#192030]">
-                            <button
-                                onClick={() => setSplitType('per-product')}
-                                className={cn(
-                                    'flex-1 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer',
-                                    splitType === 'per-product' ? 'bg-[#1E2A40] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]'
-                                )}
-                            >
-                                Por producto
-                            </button>
-                            <button
-                                onClick={() => setSplitType('total')}
-                                className={cn(
-                                    'flex-1 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer',
-                                    splitType === 'total' ? 'bg-[#1E2A40] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]'
-                                )}
-                            >
-                                Monto total
-                            </button>
-                        </div>
-                    )}
-
-                    {/* Client search + chips */}
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A] mb-2">
-                            Cuentas ({splitClients.length})
-                            {splitClients.length < 2 && (
-                                <span className="ml-2 text-orange-400/70 normal-case tracking-normal">mínimo 2</span>
-                            )}
-                        </p>
-
-                        {/* Chips */}
-                        {splitClients.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mb-2">
-                                {splitClients.map(c => (
-                                    <div key={c.id} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-violet-500/10 border border-violet-500/25">
-                                        <span className="text-[12px] text-violet-300">{c.name}</span>
-                                        <button onClick={() => removeSplitClient(c.id)} className="text-violet-400/50 hover:text-red-400 transition-colors cursor-pointer">
-                                            <X size={11} />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Search */}
-                        <div className="relative">
-                            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A]" />
-                            <input
-                                type="text"
-                                placeholder="Buscar cliente para agregar..."
-                                {...splitSearchKb}
-                                className="w-full h-9 pl-8 pr-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-violet-500/50"
-                            />
-                        </div>
-
-                        {filteredSplitClients.length > 0 && (
-                            <div className="mt-1 space-y-0.5 max-h-28 overflow-y-auto">
-                                {filteredSplitClients.slice(0, 6).map(c => (
-                                    <button
-                                        key={c.id}
-                                        onClick={() => addSplitClient(c)}
-                                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[#101520] border border-[#192030] hover:bg-[#161D2E] text-left cursor-pointer transition-colors"
-                                    >
-                                        <UserCircle2 size={13} className="text-[#3D506A] shrink-0" />
-                                        <span className="flex-1 text-[12px] text-[#7A8FAA] truncate">{c.name}</span>
-                                        <span className="text-[10px] text-[#3D506A]">{TYPE_LABEL[c.type]}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Amount inputs — only when products + clients selected */}
-                    {selectedProducts.length > 0 && splitClients.length >= 2 && (
+                        {/* Products */}
                         <div>
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A] mb-2">Montos</p>
-
-                            {/* Per-product mode */}
-                            {(splitType === 'per-product' || selectedProducts.length === 1) && (
-                                <div className="overflow-x-auto">
-                                    {/* Header row */}
-                                    <div className="flex gap-2 mb-1 min-w-max">
-                                        <div className="w-40 shrink-0" />
-                                        {splitClients.map(c => (
-                                            <div key={c.id} className="w-24 text-center text-[10px] text-[#7A8FAA] font-semibold truncate">{c.name}</div>
-                                        ))}
-                                        <div className="w-20 text-right text-[10px] text-[#3D506A]">Estado</div>
-                                    </div>
-                                    {/* Product rows */}
-                                    {selectedProducts.map(p => {
-                                        const diff = getPerProductDiff(p.id, p.subtotal)
-                                        return (
-                                            <div key={p.id} className="flex gap-2 items-center mb-2 min-w-max">
-                                                <div className="w-40 shrink-0">
-                                                    <p className="text-[12px] text-[#7A8FAA] truncate">{p.product.name}</p>
-                                                    <p className="text-[10px] text-[#3D506A] font-mono">{formatCurrency(p.subtotal)}</p>
-                                                </div>
-                                                {splitClients.map(c => {
-                                                    const ppVal = perProductAmounts[p.id]?.[c.id] ?? ''
-                                                    const ppHandler = (v: string) => setPerProductAmounts(prev => ({ ...prev, [p.id]: { ...prev[p.id], [c.id]: v } }))
-                                                    return (
-                                                        <input
-                                                            key={c.id}
-                                                            type="text"
-                                                            inputMode="decimal"
-                                                            value={ppVal}
-                                                            onFocus={e => openNumKb(e.target as HTMLInputElement, ppVal, ppHandler)}
-                                                            onChange={e => syncNumKb(e.target.value, ppHandler)}
-                                                            placeholder="0"
-                                                            className="w-24 h-8 text-center text-[13px] font-mono rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] outline-none focus:border-orange-500/50"
-                                                        />
-                                                    )
-                                                })}
-                                                <div className="w-20 text-right text-[11px] font-mono">
-                                                    {diff === 0
-                                                        ? <span className="text-emerald-400">✓</span>
-                                                        : diff > 0
-                                                            ? <span className="text-red-400">+{formatCurrency(diff)}</span>
-                                                            : <span className="text-orange-400">{formatCurrency(diff)}</span>
-                                                    }
-                                                </div>
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">Productos a dividir</p>
+                                <button
+                                    onClick={() => setSelectedProductIds(
+                                        selectedProductIds.size === cartItems.length
+                                            ? new Set()
+                                            : new Set(cartItems.map(i => i.id))
+                                    )}
+                                    className="text-[10px] text-orange-400/70 hover:text-orange-400 transition-colors cursor-pointer"
+                                >
+                                    {selectedProductIds.size === cartItems.length ? 'Quitar todos' : 'Seleccionar todos'}
+                                </button>
+                            </div>
+                            <div className="space-y-1">
+                                {cartItems.map(item => {
+                                    const isChecked = selectedProductIds.has(item.id)
+                                    return (
+                                        <button
+                                            key={item.id}
+                                            onClick={() => toggleProduct(item.id)}
+                                            className={cn(
+                                                'w-full flex items-center gap-3 px-3 py-2 rounded-xl border transition-all cursor-pointer text-left',
+                                                isChecked
+                                                    ? 'bg-orange-500/8 border-orange-500/25'
+                                                    : 'bg-[#101520] border-[#192030] hover:bg-[#161D2E]'
+                                            )}
+                                        >
+                                            <div className={cn(
+                                                'w-4 h-4 rounded flex items-center justify-center shrink-0 border',
+                                                isChecked ? 'bg-orange-500 border-orange-500' : 'border-[#3D506A]'
+                                            )}>
+                                                {isChecked && <Check size={10} className="text-white" />}
                                             </div>
-                                        )
-                                    })}
+                                            <div className="flex-1 min-w-0">
+                                                <span className={cn('text-[13px] font-medium truncate', isChecked ? 'text-[#E4ECF7]' : 'text-[#7A8FAA]')}>
+                                                    {item.product.name}
+                                                </span>
+                                                {item.quantity > 1 && (
+                                                    <span className="text-[11px] text-[#3D506A] ml-1.5">×{item.quantity}</span>
+                                                )}
+                                            </div>
+                                            <span className={cn('text-[13px] font-mono shrink-0', isChecked ? 'text-orange-400' : 'text-[#3D506A]')}>
+                                                {formatCurrency(item.subtotal)}
+                                            </span>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Split type toggle — only relevant with multiple products */}
+                        {showSplitTypeToggle && selectedProducts.length > 1 && (
+                            <div className="flex gap-1 p-1 rounded-lg bg-[#101520] border border-[#192030]">
+                                <button
+                                    onClick={() => setSplitType('per-product')}
+                                    className={cn(
+                                        'flex-1 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer',
+                                        splitType === 'per-product' ? 'bg-[#1E2A40] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                    )}
+                                >
+                                    Por producto
+                                </button>
+                                <button
+                                    onClick={() => setSplitType('total')}
+                                    className={cn(
+                                        'flex-1 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer',
+                                        splitType === 'total' ? 'bg-[#1E2A40] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                    )}
+                                >
+                                    Monto total
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Client search + chips */}
+                        <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A] mb-2">
+                                Cuentas ({splitClients.length})
+                                {splitClients.length < 2 && (
+                                    <span className="ml-2 text-orange-400/70 normal-case tracking-normal">mínimo 2</span>
+                                )}
+                            </p>
+
+                            {splitClients.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                    {splitClients.map(c => (
+                                        <div key={c.id} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-violet-500/10 border border-violet-500/25">
+                                            <span className="text-[12px] text-violet-300">{c.name}</span>
+                                            <button onClick={() => removeSplitClient(c.id)} className="text-violet-400/50 hover:text-red-400 transition-colors cursor-pointer">
+                                                <X size={11} />
+                                            </button>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
 
-                            {/* Total mode */}
-                            {splitType === 'total' && selectedProducts.length > 1 && (
-                                <div className="space-y-2">
-                                    {splitClients.map(c => {
-                                        const tVal = totalAmounts[c.id] ?? ''
-                                        const tHandler = (v: string) => setTotalAmounts(prev => ({ ...prev, [c.id]: v }))
-                                        return (
-                                            <div key={c.id} className="flex items-center gap-3">
-                                                <div className="flex items-center gap-2 w-32 shrink-0">
-                                                    <UserCircle2 size={13} className="text-[#3D506A] shrink-0" />
-                                                    <span className="text-[12px] text-[#7A8FAA] truncate">{c.name}</span>
-                                                </div>
-                                                <input
-                                                    type="text"
-                                                    inputMode="decimal"
-                                                    value={tVal}
-                                                    onFocus={e => openNumKb(e.target as HTMLInputElement, tVal, tHandler)}
-                                                    onChange={e => syncNumKb(e.target.value, tHandler)}
-                                                    placeholder="₡ 0"
-                                                    className="flex-1 h-9 px-3 text-right text-[14px] font-mono rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] outline-none focus:border-orange-500/50"
-                                                />
-                                            </div>
-                                        )
-                                    })}
-                                    <div className="flex justify-between items-center pt-1 border-t border-[#192030]">
-                                        <span className="text-[11px] text-[#3D506A]">
-                                            Total: <span className="font-mono text-[#7A8FAA]">{formatCurrency(totalModeSum)}</span>
-                                            {' / '}
-                                            <span className="font-mono">{formatCurrency(totalSelectedPrice)}</span>
-                                        </span>
-                                        {totalModeDiff === 0
-                                            ? <span className="text-[11px] text-emerald-400">✓ Completo</span>
-                                            : totalModeDiff > 0
-                                                ? <span className="text-[11px] text-red-400">Sobra {formatCurrency(totalModeDiff)}</span>
-                                                : <span className="text-[11px] text-orange-400">Falta {formatCurrency(-totalModeDiff)}</span>
-                                        }
-                                    </div>
+                            <div className="relative">
+                                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A]" />
+                                <input
+                                    type="text"
+                                    placeholder="Buscar cliente para agregar..."
+                                    {...splitSearchKb}
+                                    className="w-full h-9 pl-8 pr-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-violet-500/50"
+                                />
+                            </div>
+
+                            {filteredSplitClients.length > 0 && (
+                                <div className="mt-1 space-y-0.5 max-h-28 overflow-y-auto">
+                                    {filteredSplitClients.slice(0, 6).map(c => (
+                                        <button
+                                            key={c.id}
+                                            onClick={() => addSplitClient(c)}
+                                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[#101520] border border-[#192030] hover:bg-[#161D2E] text-left cursor-pointer transition-colors"
+                                        >
+                                            <UserCircle2 size={13} className="text-[#3D506A] shrink-0" />
+                                            <span className="flex-1 text-[12px] text-[#7A8FAA] truncate">{c.name}</span>
+                                            <span className="text-[10px] text-[#3D506A]">{TYPE_LABEL[c.type]}</span>
+                                        </button>
+                                    ))}
                                 </div>
                             )}
                         </div>
-                    )}
+
+                        {/* Amount inputs */}
+                        {selectedProducts.length > 0 && splitClients.length >= 2 && (
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">Montos</p>
+                                    <button
+                                        onClick={applyEvenSplit}
+                                        className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/15 transition-colors cursor-pointer font-semibold"
+                                    >
+                                        {splitClients.length === 2 ? '½ Mitad y mitad' : `÷ Partes iguales (${splitClients.length})`}
+                                    </button>
+                                </div>
+
+                                {/* Per-product mode */}
+                                {(splitType === 'per-product' || selectedProducts.length === 1) && (
+                                    <div className="overflow-x-auto">
+                                        <div className="flex gap-2 mb-1 min-w-max">
+                                            <div className="w-40 shrink-0" />
+                                            {splitClients.map(c => (
+                                                <div key={c.id} className="w-24 text-center text-[10px] text-[#7A8FAA] font-semibold truncate">{c.name}</div>
+                                            ))}
+                                            <div className="w-20 text-right text-[10px] text-[#3D506A]">Estado</div>
+                                        </div>
+                                        {selectedProducts.map(p => {
+                                            const diff = getPerProductDiff(p.id, p.subtotal)
+                                            return (
+                                                <div key={p.id} className="flex gap-2 items-center mb-2 min-w-max">
+                                                    <div className="w-40 shrink-0">
+                                                        <p className="text-[12px] text-[#7A8FAA] truncate">{p.product.name}</p>
+                                                        <p className="text-[10px] text-[#3D506A] font-mono">{formatCurrency(p.subtotal)}</p>
+                                                    </div>
+                                                    {splitClients.map(c => {
+                                                        const ppVal = perProductAmounts[p.id]?.[c.id] ?? ''
+                                                        const ppHandler = (v: string) => setPerProductAmounts(prev => ({ ...prev, [p.id]: { ...prev[p.id], [c.id]: v } }))
+                                                        return (
+                                                            <input
+                                                                key={c.id}
+                                                                type="text"
+                                                                inputMode="decimal"
+                                                                value={ppVal}
+                                                                onFocus={e => openNumKb(e.target as HTMLInputElement, ppVal, ppHandler)}
+                                                                onChange={e => syncNumKb(e.target.value, ppHandler)}
+                                                                placeholder="0"
+                                                                className="w-24 h-8 text-center text-[13px] font-mono rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] outline-none focus:border-orange-500/50"
+                                                            />
+                                                        )
+                                                    })}
+                                                    <div className="w-20 text-right text-[11px] font-mono">
+                                                        {diff === 0
+                                                            ? <span className="text-emerald-400">✓</span>
+                                                            : diff > 0
+                                                                ? <span className="text-red-400">+{formatCurrency(diff)}</span>
+                                                                : <span className="text-orange-400">{formatCurrency(diff)}</span>
+                                                        }
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+
+                                {/* Total mode */}
+                                {splitType === 'total' && selectedProducts.length > 1 && (
+                                    <div className="space-y-2">
+                                        {splitClients.map(c => {
+                                            const tVal = totalAmounts[c.id] ?? ''
+                                            const tHandler = (v: string) => setTotalAmounts(prev => ({ ...prev, [c.id]: v }))
+                                            return (
+                                                <div key={c.id} className="flex items-center gap-3">
+                                                    <div className="flex items-center gap-2 w-32 shrink-0">
+                                                        <UserCircle2 size={13} className="text-[#3D506A] shrink-0" />
+                                                        <span className="text-[12px] text-[#7A8FAA] truncate">{c.name}</span>
+                                                    </div>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={tVal}
+                                                        onFocus={e => openNumKb(e.target as HTMLInputElement, tVal, tHandler)}
+                                                        onChange={e => syncNumKb(e.target.value, tHandler)}
+                                                        placeholder="₡ 0"
+                                                        className="flex-1 h-9 px-3 text-right text-[14px] font-mono rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] outline-none focus:border-orange-500/50"
+                                                    />
+                                                </div>
+                                            )
+                                        })}
+                                        <div className="flex justify-between items-center pt-1 border-t border-[#192030]">
+                                            <span className="text-[11px] text-[#3D506A]">
+                                                Total: <span className="font-mono text-[#7A8FAA]">{formatCurrency(totalModeSum)}</span>
+                                                {' / '}
+                                                <span className="font-mono">{formatCurrency(totalSelectedPrice)}</span>
+                                            </span>
+                                            {totalModeDiff === 0
+                                                ? <span className="text-[11px] text-emerald-400">✓ Completo</span>
+                                                : totalModeDiff > 0
+                                                    ? <span className="text-[11px] text-red-400">Sobra {formatCurrency(totalModeDiff)}</span>
+                                                    : <span className="text-[11px] text-orange-400">Falta {formatCurrency(-totalModeDiff)}</span>
+                                            }
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                    </div>{/* end scroll area */}
 
                     <Button
                         variant="primary"
