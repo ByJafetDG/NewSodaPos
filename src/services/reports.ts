@@ -9,6 +9,7 @@ export async function getReportData(from: string, to: string) {
                        'quantity', si.quantity,
                        'unitPrice', si.unitPrice,
                        'subtotal', si.subtotal,
+                       'notes', si.notes,
                        'product', json_object('name', p.name)
                    ))
                     FROM SaleItem si
@@ -64,7 +65,7 @@ export async function getReportData(from: string, to: string) {
     const [salesRes, expensesRes, productsRes, creditSalesRes, paymentsRes] = await Promise.all([
         supabase
             .from('Sale')
-            .select('*, client:Client(name), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
+            .select('*, client:Client(name), items:SaleItem(productId, quantity, unitPrice, subtotal, notes, product:Product(name))')
             .or(`and(date.gte.${from},date.lte.${to}),and(paidAt.gte.${from},paidAt.lte.${to},paidAt.not.is.null)`)
             .eq('status', 'COMPLETADA')
             .order('date', { ascending: false }),

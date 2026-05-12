@@ -692,6 +692,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                     const isSelected = selectedIds.has(s.id)
                                     const isExpanded = expandedId === s.id
                                     const mixed = parseMixedNotes((s as any).notes)
+                                    const isSplitCredit = (s as any).notes?.startsWith('Crédito dividido') ?? false
 
                                     return (
                                         <div
@@ -725,7 +726,9 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                                         <p className="text-[13px] font-semibold text-[#E4ECF7]">Cuenta #{s.saleNumber}</p>
                                                         {mixed
                                                             ? <span className="text-[10px] bg-orange-500/12 text-orange-400 border border-orange-500/25 px-1.5 py-0.5 rounded-md">Pago mixto</span>
-                                                            : <span className="text-[10px] text-[#3D506A] bg-[#1C2438] px-1.5 py-0.5 rounded-md">Crédito</span>
+                                                            : isSplitCredit
+                                                                ? <span className="text-[10px] bg-orange-500/12 text-orange-400 border border-orange-500/25 px-1.5 py-0.5 rounded-md">Dividido</span>
+                                                                : <span className="text-[10px] text-[#3D506A] bg-[#1C2438] px-1.5 py-0.5 rounded-md">Crédito</span>
                                                         }
                                                     </div>
                                                     {mixed ? (
@@ -770,11 +773,16 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                             {isExpanded && s.items && s.items.length > 0 && (
                                                 <div className="px-4 pb-3 border-t border-[#192030] pt-2.5 space-y-1">
                                                     {s.items.map((item: any) => (
-                                                        <div key={item.id} className="flex items-center justify-between text-[12px]">
-                                                            <span className="text-[#7A8FAA]">
-                                                                {item.product?.name ?? item.name ?? 'Producto'} × {item.quantity}
-                                                            </span>
-                                                            <span className="text-[#4A6A8A] tabular-nums">{formatCurrency(item.subtotal)}</span>
+                                                        <div key={item.id} className="text-[12px]">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-[#7A8FAA]">
+                                                                    {item.product?.name ?? item.name ?? 'Producto'} × {item.quantity}
+                                                                </span>
+                                                                <span className="text-[#4A6A8A] tabular-nums">{formatCurrency(item.subtotal)}</span>
+                                                            </div>
+                                                            {item.notes && (
+                                                                <p className="text-[10px] text-orange-400/70 mt-0.5">{item.notes}</p>
+                                                            )}
                                                         </div>
                                                     ))}
                                                     {s.discount > 0 && (

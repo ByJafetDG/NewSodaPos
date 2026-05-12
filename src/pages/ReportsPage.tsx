@@ -353,20 +353,28 @@ export function ReportsPage() {
                                 {filteredSales.map((s: any) => {
                                     const cfg = PM_CONFIG[s.paymentMethod] ?? PM_CONFIG['EFECTIVO']
                                     const time = new Date(s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+                                    const isSplit = s.notes?.startsWith('Crédito dividido') ?? false
+                                    const clientName = s.client?.name ?? s.clientName ?? null
                                     return (
                                         <button
                                             key={s.id}
                                             onClick={() => setSelectedSale(s)}
                                             className="w-full flex items-center justify-between py-2 px-2 rounded-lg hover:bg-[#131C2E] transition-colors cursor-pointer border border-transparent hover:border-[#192030] group"
                                         >
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[11px] text-[#3D506A] group-hover:text-[#4A6080] transition-colors">#{s.saleNumber}</span>
-                                                <span className={cn('flex items-center gap-1 text-[11px] font-medium', cfg.color)}>
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <span className="text-[11px] text-[#3D506A] group-hover:text-[#4A6080] transition-colors shrink-0">#{s.saleNumber}</span>
+                                                <span className={cn('flex items-center gap-1 text-[11px] font-medium shrink-0', cfg.color)}>
                                                     {cfg.icon}
                                                     {cfg.label}
                                                 </span>
+                                                {isSplit && (
+                                                    <span className="text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded-md shrink-0">Dividido</span>
+                                                )}
+                                                {isSplit && clientName && (
+                                                    <span className="text-[10px] text-[#3D506A] truncate">{clientName}</span>
+                                                )}
                                             </div>
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-3 shrink-0">
                                                 <span className="text-[11px] text-[#3D506A]">{time}</span>
                                                 <span className="text-[13px] font-semibold text-[#E4ECF7]">{formatCurrency(s.total)}</span>
                                             </div>

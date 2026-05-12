@@ -271,6 +271,107 @@ export async function updateCreditSaleItems(
     if (error) throw error
 }
 
+interface SplitClientAssignment {
+    clientId: string
+    clientName: string
+    products: { productId: string; amount: number }[]
+}
+
+interface CreateSplitCreditSalesInput {
+    clientAssignments: SplitClientAssignment[]
+    cartItems: CartItem[]
+    cashRegisterId: string | null
+    cashierName: string | null
+}
+
+export async function createSplitCreditSales(input: CreateSplitCreditSalesInput): Promise<{ baseSaleNumber: number }> {
+    const now = localISO()
+    const baseSaleNumber = await getNextSaleNumber()
+
+    if (window.electronAPI) {
+        const ops: Array<{ sql: string; params: any[] }> = []
+
+        const allNames = input.clientAssignments.map(c => c.clientName)
+        input.clientAssignments.forEach((client, idx) => {
+            const saleId = crypto.randomUUID()
+            const saleNumber = baseSaleNumber + idx
+            const clientTotal = client.products.reduce((s, p) => s + p.amount, 0)
+            const otherNames = allNames.filter(n => n !== client.clientName).join(', ')
+            ops.push({
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [saleId, saleNumber, now, clientTotal, 0, clientTotal, 'CREDITO', null, null, 1, client.clientId, input.cashRegisterId, 'COMPLETADA', `Crédito dividido. Cajero: ${input.cashierName ?? 'Sin cajero'}`, 'PENDING', null, null]
+            })
+            for (const p of client.products) {
+                const cartItem = input.cartItems.find(i => i.id === p.productId)
+                const totalPrice = cartItem?.subtotal ?? p.amount
+                const itemNote = `Dividido con ${otherNames} (precio total ₡${totalPrice})`
+                ops.push({
+                    sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    params: [crypto.randomUUID(), saleId, p.productId, 1, p.amount, p.amount, itemNote]
+                })
+            }
+        })
+
+        for (const item of input.cartItems) {
+            ops.push({
+                sql: `UPDATE Product SET stockQty = stockQty - ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
+                params: [item.quantity, now, item.id]
+            })
+        }
+
+        await window.electronAPI.dbTransaction(ops)
+        return { baseSaleNumber }
+    }
+
+    const allNames = input.clientAssignments.map(c => c.clientName)
+    for (let idx = 0; idx < input.clientAssignments.length; idx++) {
+        const client = input.clientAssignments[idx]
+        const saleId = crypto.randomUUID()
+        const saleNumber = baseSaleNumber + idx
+        const clientTotal = client.products.reduce((s, p) => s + p.amount, 0)
+        const otherNames = allNames.filter(n => n !== client.clientName).join(', ')
+
+        const { data: sale, error: saleError } = await supabase
+            .from('Sale')
+            .insert({
+                id: saleId, saleNumber, date: now,
+                subtotal: clientTotal, discount: 0, total: clientTotal,
+                paymentMethod: 'CREDITO', amountReceived: null, change: null,
+                isCredit: true, clientId: client.clientId, cashRegisterId: input.cashRegisterId,
+                status: 'COMPLETADA',
+                notes: `Crédito dividido. Cajero: ${input.cashierName ?? 'Sin cajero'}`,
+                syncStatus: 'SYNCED', createdAt: now, updatedAt: now,
+                paymentMethod2: null, amount2: null,
+            })
+            .select('id')
+            .single()
+
+        if (saleError) throw saleError
+
+        const saleItems = client.products.map(p => {
+            const cartItem = input.cartItems.find(i => i.id === p.productId)
+            const totalPrice = cartItem?.subtotal ?? p.amount
+            return {
+                id: crypto.randomUUID(), saleId: sale.id,
+                productId: p.productId, quantity: 1,
+                unitPrice: p.amount, subtotal: p.amount,
+                notes: `Dividido con ${otherNames} (precio total ₡${totalPrice})`,
+                createdAt: now,
+            }
+        })
+        if (saleItems.length > 0) {
+            const { error: itemsError } = await supabase.from('SaleItem').insert(saleItems)
+            if (itemsError) throw itemsError
+        }
+    }
+
+    for (const item of input.cartItems) {
+        await updateProductStock(item.id, -item.quantity)
+    }
+
+    return { baseSaleNumber }
+}
+
 interface CreateCreditNoteInput {
     items: CartItem[]
     subtotal: number

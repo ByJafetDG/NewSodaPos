@@ -120,13 +120,18 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
 }
 
 function SaleMeta({ sale }: { sale: any }) {
-    const cashier = sale.notes?.startsWith('Cajero:')
-        ? sale.notes.slice(8).trim()
-        : (sale.notes ?? 'Sin cajero')
+    const cajeroIdx = (sale.notes ?? '').indexOf('Cajero:')
+    const cashier = cajeroIdx !== -1 ? sale.notes!.slice(cajeroIdx + 8).trim() : 'Sin cajero'
+    const isSplitCredit = sale.notes?.startsWith('Crédito dividido') ?? false
     const clientName = sale.clientName ?? sale.client?.name ?? null
 
     return (
-        <div className="flex items-center gap-3 px-5 py-2.5 bg-[#090C14] border-b border-[#192030]">
+        <div className="flex items-center gap-3 flex-wrap px-5 py-2.5 bg-[#090C14] border-b border-[#192030]">
+            {isSplitCredit && (
+                <span className="text-[10px] font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-md">
+                    Dividido
+                </span>
+            )}
             <div className="flex items-center gap-1.5">
                 <User size={11} className="text-[#3D506A]" />
                 <span className="text-[11px] text-[#3D506A]">Cajero</span>
@@ -151,15 +156,20 @@ function SaleItems({ items }: { items: any[] }) {
             {items.length === 0 ? (
                 <p className="text-[12px] text-[#3D506A] text-center py-6">Sin productos</p>
             ) : items.map((item, i) => (
-                <div key={i} className="flex items-center justify-between px-5 py-2.5 border-b border-[#192030] last:border-0">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span className="text-[11px] text-[#3D506A] shrink-0 w-6 text-right">{item.quantity}×</span>
-                        <MarqueeText text={item.product?.name ?? 'Producto'} className="text-[13px] text-[#E4ECF7] flex-1" />
+                <div key={i} className="flex flex-col px-5 py-2.5 border-b border-[#192030] last:border-0">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <span className="text-[11px] text-[#3D506A] shrink-0 w-6 text-right">{item.quantity}×</span>
+                            <MarqueeText text={item.product?.name ?? 'Producto'} className="text-[13px] text-[#E4ECF7] flex-1" />
+                        </div>
+                        <div className="flex items-center gap-4 shrink-0 ml-3">
+                            <span className="text-[11px] text-[#3D506A]">{formatCurrency(item.unitPrice)} c/u</span>
+                            <span className="text-[13px] font-semibold text-[#E4ECF7] w-[72px] text-right">{formatCurrency(item.subtotal)}</span>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-4 shrink-0 ml-3">
-                        <span className="text-[11px] text-[#3D506A]">{formatCurrency(item.unitPrice)} c/u</span>
-                        <span className="text-[13px] font-semibold text-[#E4ECF7] w-[72px] text-right">{formatCurrency(item.subtotal)}</span>
-                    </div>
+                    {item.notes && (
+                        <p className="text-[10px] text-orange-400/70 ml-8 mt-0.5">{item.notes}</p>
+                    )}
                 </div>
             ))}
         </div>

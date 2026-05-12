@@ -1,7 +1,7 @@
 {
   "name": "pos-modern-v2",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "POS System for Soda El Pelón",
   "author": "Antigravity",
   "type": "module",

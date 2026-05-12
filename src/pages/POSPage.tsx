@@ -5,7 +5,8 @@ import { useHeldOrdersStore } from '@/store/heldOrdersStore'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
 import { settleSaleDirect } from '@/services/clients'
-import { createCreditNote } from '@/services/sales'
+import { createCreditNote, createSplitCreditSales } from '@/services/sales'
+import type { SplitCreditData } from '@/components/modals/CreditModal'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
@@ -18,7 +19,7 @@ import { RuletaModal } from '@/components/modals/RuletaModal'
 import { logSorteoEntry, handleSorteoWin } from '@/services/sorteos'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBusinessConfig } from '@/hooks/useConfig'
-import { sendReceiptEmail, sendSettledEmail, sendMixedCreditEmail } from '@/services/emailReceipt'
+import { sendReceiptEmail, sendSettledEmail, sendMixedCreditEmail, sendSplitCreditEmail } from '@/services/emailReceipt'
 import { MixedPaymentModal, type MixedModalView } from '@/components/modals/MixedPaymentModal'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
 import { SearchDropdown } from '@/components/molecules/SearchDropdown'
@@ -56,7 +57,7 @@ export function POSPage() {
     const { data: config } = useBusinessConfig()
 
     // ── Cart ────────────────────────────────────────────────────────────────
-    const { items, addItem, removeItem, updateQuantity, clearCart, loadOrder, getSubtotal, getTotal, discount } = useCartStore()
+    const { items, addItem, removeItem, removeItems, updateQuantity, clearCart, loadOrder, getSubtotal, getTotal, discount } = useCartStore()
     const { orders: heldOrders, saveOrder: saveHeldOrder, updateOrder: updateHeldOrder, deleteOrder: deleteHeldOrder } = useHeldOrdersStore()
     const subtotal = getSubtotal()
     const total = getTotal()
@@ -328,6 +329,89 @@ export function POSPage() {
     const handleOpenMixedCancel = () => { setMixedModalView('cancel'); setShowMixedModal(true) }
     const handleMixedConfirm = (methods: string[]) => { setMixedMethods(methods); setShowMixedModal(false) }
     const handleCancelMixed = () => { setMixedMethods([]); setShowMixedModal(false) }
+
+    const [splitCreditPending, setSplitCreditPending] = useState(false)
+
+    const handleSplitCreditConfirm = async (data: SplitCreditData) => {
+        setSplitCreditPending(true)
+        try {
+            const sales = await createSplitCreditSales({
+                clientAssignments: data.clientAssignments,
+                cartItems: data.selectedCartItems,
+                cashRegisterId: activeRegister?.id ?? null,
+                cashierName: selectedEmployee?.name ?? null,
+            })
+            removeItems(data.selectedCartItems.map(i => i.id))
+            qc.invalidateQueries({ queryKey: ['credit-sales'] })
+            qc.invalidateQueries({ queryKey: ['active-register'] })
+            setShowCreditModal(false)
+            setPaymentMethod('EFECTIVO')
+            toast.success(`Crédito dividido entre ${data.clientAssignments.length} cuentas`)
+
+            const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
+            if (printerPort && window.electronAPI?.printReceipt) {
+                const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
+                const splitTotal = data.selectedCartItems.reduce((s, i) => s + i.subtotal, 0)
+                window.electronAPI.printReceipt(printerPort, {
+                    businessName: config?.name || 'Soda El Pelón',
+                    address: config?.address,
+                    phone: config?.phone,
+                    header: config?.ticketHeader || null,
+                    saleNumber: sales.baseSaleNumber,
+                    date: new Date().toISOString(),
+                    cashier: selectedEmployee?.name ?? null,
+                    items: data.selectedCartItems.map(i => ({
+                        name: i.product.name,
+                        quantity: i.quantity,
+                        unitPrice: i.unitPrice,
+                        subtotal: i.subtotal,
+                    })),
+                    total: splitTotal,
+                    paymentMethod: 'CREDITO DIVIDIDO',
+                    footer: config?.ticketFooter || '¡Gracias por su compra!',
+                    showCashier: tOpts.showCashier ?? true,
+                    showChange: false,
+                    showHeader: tOpts.showHeader ?? true,
+                    showUnitPrice: tOpts.showUnitPrice ?? false,
+                    currencySymbol: tOpts.currencySymbol ?? '₡',
+                    splitClients: data.clientAssignments.map(a => ({
+                        name: a.clientName,
+                        amount: a.products.reduce((s, p) => s + p.amount, 0),
+                    })),
+                }).catch((err: any) => console.error('[POS] Split credit print error:', err))
+            }
+
+            const allClientNames = data.clientAssignments.map(a => a.clientName)
+            const now = new Date().toISOString()
+            data.clientAssignments.forEach((assignment, idx) => {
+                const client = clients.find((c: any) => c.id === assignment.clientId)
+                if (!client?.email) return
+                const clientTotal = assignment.products.reduce((s, p) => s + p.amount, 0)
+                sendSplitCreditEmail({
+                    to: client.email,
+                    clientName: client.name,
+                    businessName: config?.name ?? '',
+                    saleNumber: (sales?.baseSaleNumber ?? 0) + idx,
+                    date: now,
+                    products: assignment.products.map(p => {
+                        const cartItem = data.selectedCartItems.find(i => i.id === p.productId)
+                        return {
+                            name: cartItem?.product.name ?? 'Producto',
+                            totalPrice: cartItem?.subtotal ?? p.amount,
+                            clientAmount: p.amount,
+                        }
+                    }),
+                    allClientNames,
+                    totalCharged: clientTotal,
+                }).catch(() => {})
+            })
+        } catch (err) {
+            console.error(err)
+            toast.error('Error al procesar crédito dividido')
+        } finally {
+            setSplitCreditPending(false)
+        }
+    }
 
     const handleCharge = async () => {
         if (paymentMethod === 'CREDITO') { setShowCreditModal(true); return }
@@ -966,10 +1050,12 @@ export function POSPage() {
                 discount={discount}
                 itemCount={itemCount}
                 clients={clients}
+                cartItems={items}
                 selectedClientId={selectedClientId}
                 onSelectClient={setSelectedClientId}
                 onConfirm={() => processSale({ isCredit: true, clientId: selectedClientId })}
-                isPending={createSale.isPending}
+                onSplitConfirm={handleSplitCreditConfirm}
+                isPending={createSale.isPending || splitCreditPending}
             />
 
             <MixedPaymentModal

@@ -397,6 +397,21 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
             }
         }
 
+        if (data.splitClients && data.splitClients.length > 0) {
+            bytes.push(ESC, 0x61, 0x01) // Center
+            addText('-- Dividido entre --')
+            bytes.push(LF)
+            bytes.push(ESC, 0x61, 0x00) // Left
+            for (const sc of data.splitClients) {
+                const cName = sc.name || ''
+                const cAmt = ` ${currency}${(sc.amount || 0).toLocaleString()}`
+                const maxLen = 32 - cAmt.length
+                const trunc = cName.length > maxLen ? cName.substring(0, maxLen) : cName.padEnd(maxLen)
+                addText(`${trunc}${cAmt}`)
+                bytes.push(LF)
+            }
+        }
+
         addText('--------------------------------')
         bytes.push(LF)
 

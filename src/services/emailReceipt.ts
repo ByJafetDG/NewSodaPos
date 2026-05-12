@@ -618,6 +618,185 @@ export async function sendMixedCreditEmail(input: SendMixedCreditInput): Promise
     }
 }
 
+export interface SplitCreditProductInfo {
+    name: string
+    totalPrice: number
+    clientAmount: number
+}
+
+interface SendSplitCreditInput {
+    to: string
+    clientName: string
+    businessName: string
+    saleNumber: number
+    date: string
+    products: SplitCreditProductInfo[]
+    allClientNames: string[]
+    totalCharged: number
+}
+
+function buildSplitCreditHTML(input: SendSplitCreditInput): string {
+    const initial = input.businessName.charAt(0).toUpperCase()
+    const dateStr = new Date(input.date).toLocaleDateString('es-CR', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    })
+    const othersStr = input.allClientNames.filter(n => n !== input.clientName).join(', ')
+    const rows = input.products.map(p => `
+        <tr>
+          <td style="padding:14px 0;border-bottom:1px solid #1e293b;">
+            <span style="display:block;font-size:14px;color:#e2e8f0;font-weight:500;">${p.name}</span>
+            <span style="display:block;font-size:11px;color:#475569;margin-top:3px;">Precio total: ${fmt(p.totalPrice)} · Tu parte: <strong style="color:#fb923c;">${fmt(p.clientAmount)}</strong></span>
+          </td>
+          <td style="padding:14px 0;border-bottom:1px solid #1e293b;text-align:right;vertical-align:top;">
+            <span style="font-size:14px;color:#fb923c;font-family:'Courier New',monospace;white-space:nowrap;">${fmt(p.clientAmount)}</span>
+          </td>
+        </tr>`).join('')
+
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Crédito dividido #${input.saleNumber}</title>
+</head>
+<body style="margin:0;padding:0;background:#0b0f1a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0b0f1a;padding:40px 16px;">
+<tr><td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:500px;margin:0 auto;">
+
+  <tr><td style="height:4px;background:linear-gradient(90deg,#ea580c,#f97316,#fb923c);border-radius:4px 4px 0 0;"></td></tr>
+
+  <tr>
+    <td style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 20px;">
+        <tr>
+          <td style="width:56px;height:56px;background:linear-gradient(135deg,#ea580c22,#f9731622);border:1px solid #f9731655;border-radius:14px;text-align:center;vertical-align:middle;">
+            <span style="font-size:24px;font-weight:800;color:#fb923c;letter-spacing:-1px;">${initial}</span>
+          </td>
+        </tr>
+      </table>
+      <h1 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
+      <p style="margin:0 0 20px;font-size:11px;color:#334155;text-transform:uppercase;letter-spacing:2.5px;">Crédito dividido</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+        <tr>
+          <td style="padding:5px 16px;background:#f9731618;border:1px solid #f9731655;border-radius:99px;">
+            <span style="font-size:10px;font-weight:700;color:#fb923c;text-transform:uppercase;letter-spacing:2px;">Compra #${input.saleNumber}</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#0f172a;padding:0 36px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:24px 0 20px;border-bottom:1px dashed #1e293b;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="vertical-align:top;">
+                  <p style="margin:0 0 4px;font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;">Cliente</p>
+                  <p style="margin:0;font-size:17px;font-weight:700;color:#f1f5f9;">${input.clientName}</p>
+                </td>
+                <td style="text-align:right;vertical-align:top;">
+                  <p style="margin:0 0 4px;font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;">Factura</p>
+                  <p style="margin:0 0 5px;font-size:17px;font-weight:700;color:#f1f5f9;font-family:'Courier New',monospace;">#${input.saleNumber}</p>
+                  <p style="margin:0;font-size:11px;color:#475569;">${dateStr}</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  ${othersStr ? `<tr>
+    <td style="background:#1a0e00;padding:12px 36px;border-left:1px solid #f9731633;border-right:1px solid #f9731633;">
+      <p style="margin:0;font-size:12px;color:#92400e;">
+        🤝 Compra compartida con: <strong style="color:#fb923c;">${othersStr}</strong>
+      </p>
+    </td>
+  </tr>` : ''}
+
+  <tr>
+    <td style="background:#0f172a;padding:0 36px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr><td style="padding:18px 0 6px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">Producto</td>
+              <td style="font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;text-align:right;">Tu parte</td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table>
+      <div style="height:20px;"></div>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:linear-gradient(135deg,#1c0e00,#0f172a);padding:28px 36px;text-align:center;border-left:1px solid #f9731644;border-right:1px solid #f9731644;border-top:1px solid #f9731633;">
+      <p style="margin:0 0 8px;font-size:10px;color:#92400e;text-transform:uppercase;letter-spacing:2.5px;">Cargado a tu cuenta</p>
+      <p style="margin:0 0 10px;font-size:42px;font-weight:800;color:#fb923c;font-family:'Courier New',monospace;letter-spacing:-2px;line-height:1;">${fmt(input.totalCharged)}</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+        <tr>
+          <td style="padding:4px 14px;background:#f9731620;border:1px solid #f9731640;border-radius:99px;">
+            <span style="font-size:11px;color:#fb923c;font-weight:600;">Pendiente de pago · Nota #${input.saleNumber}</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#0f172a;padding:26px 36px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;border-top:1px solid #1e293b;">
+      <p style="margin:0;font-size:14px;color:#64748b;line-height:1.8;font-style:italic;">&ldquo;${randomMsg()}&rdquo;</p>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#080d16;padding:18px 36px 24px;border-radius:0 0 14px 14px;border:1px solid #1e293b;border-top:1px solid #0f172a;text-align:center;">
+      <p style="margin:0;font-size:11px;color:#1e293b;line-height:1.9;">
+        Recibo generado automáticamente por <strong style="color:#334155;">${input.businessName}</strong>.<br>
+        ¿Preguntas? Contáctanos directamente.
+      </p>
+    </td>
+  </tr>
+
+  <tr><td style="height:3px;background:linear-gradient(90deg,#fb923c,#f97316,#ea580c);border-radius:0 0 4px 4px;opacity:0.4;"></td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`
+}
+
+export async function sendSplitCreditEmail(input: SendSplitCreditInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
+    try {
+        const html = buildSplitCreditHTML(input)
+        if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
+        const fromName = input.businessName.trim() || 'Recibos'
+        const result = await window.electronAPI.sendEmail({
+            from: `${fromName} <noreply@jafetduarte.dev>`,
+            to: [input.to],
+            subject: `Crédito dividido #${input.saleNumber} — ${fmt(input.totalCharged)} cargado a tu cuenta | ${input.businessName}`,
+            html,
+        })
+        if (!result.success) {
+            const isVerificationError = result.error?.statusCode === 403 ||
+                String(result.error?.message ?? '').includes('verify a domain')
+            return { success: false, error: result.error?.message ?? 'Error desconocido', isVerificationError }
+        }
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+}
+
 export async function sendReceiptEmail(input: SendReceiptInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
     try {
         const html = buildHTML(input)
