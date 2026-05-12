@@ -22,6 +22,13 @@ import { useBusinessConfig } from '@/hooks/useConfig'
 import { sendSettledEmail } from '@/services/emailReceipt'
 import type { Client, ClientType, Sale } from '@/types'
 
+function parseMixedNotes(notes: string | null | undefined): { ef?: number; sinpe?: number; cuenta: number } | null {
+    if (!notes) return null
+    const idx = notes.indexOf('||MIXED||')
+    if (idx === -1) return null
+    try { return JSON.parse(notes.slice(idx + 9)) } catch { return null }
+}
+
 const TYPE_LABELS: Record<ClientType, string> = {
     TRABAJADOR: 'Trabajador',
     ASOCIACION: 'Asociación',
@@ -684,6 +691,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                     const dateStr = sDate.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
                                     const isSelected = selectedIds.has(s.id)
                                     const isExpanded = expandedId === s.id
+                                    const mixed = parseMixedNotes((s as any).notes)
 
                                     return (
                                         <div
@@ -708,16 +716,28 @@ function ClientDetailView({ client, onBack, onEdit }: {
 
                                                 {/* Icon */}
                                                 <div className="w-8 h-8 rounded-lg bg-[#1C2438] flex items-center justify-center shrink-0">
-                                                    <Receipt size={14} className="text-[#3D506A]" />
+                                                    <Receipt size={14} className={mixed ? 'text-orange-400' : 'text-[#3D506A]'} />
                                                 </div>
 
                                                 {/* Info */}
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 flex-wrap">
                                                         <p className="text-[13px] font-semibold text-[#E4ECF7]">Cuenta #{s.saleNumber}</p>
-                                                        <span className="text-[10px] text-[#3D506A] bg-[#1C2438] px-1.5 py-0.5 rounded-md">Crédito</span>
+                                                        {mixed
+                                                            ? <span className="text-[10px] bg-orange-500/12 text-orange-400 border border-orange-500/25 px-1.5 py-0.5 rounded-md">Pago mixto</span>
+                                                            : <span className="text-[10px] text-[#3D506A] bg-[#1C2438] px-1.5 py-0.5 rounded-md">Crédito</span>
+                                                        }
                                                     </div>
-                                                    <p className="text-[11px] text-[#3D506A]">{dateStr} · {s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}</p>
+                                                    {mixed ? (
+                                                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                            {mixed.ef != null && <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-md">Efectivo {formatCurrency(mixed.ef)}</span>}
+                                                            {mixed.sinpe != null && <span className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded-md">SINPE {formatCurrency(mixed.sinpe)}</span>}
+                                                            <span className="text-[10px] bg-orange-500/10 text-orange-400 px-1.5 py-0.5 rounded-md">Cuenta {formatCurrency(mixed.cuenta)}</span>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-[11px] text-[#3D506A]">{dateStr} · {s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}</p>
+                                                    )}
+                                                    {mixed && <p className="text-[10px] text-[#3D506A] mt-0.5">{dateStr} · {s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}</p>}
                                                 </div>
 
                                                 {/* Amount + actions */}
@@ -793,6 +813,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                 const dateStr = sDate.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
                                 const isPending = s.isCredit
                                 const isAnulada = s.status === 'ANULADA'
+                                const mixed = parseMixedNotes((s as any).notes)
 
                                 return (
                                     <div
@@ -801,11 +822,13 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                         className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#0F1623] border border-[#192030] hover:bg-[#141C2E] hover:border-violet-500/20 transition-all cursor-pointer"
                                     >
                                         <div className="w-8 h-8 rounded-lg bg-[#1C2438] flex items-center justify-center shrink-0">
-                                            <Receipt size={14} className={isPending ? 'text-amber-400' : isAnulada ? 'text-red-400' : 'text-emerald-400'} />
+                                            <Receipt size={14} className={mixed ? 'text-orange-400' : isPending ? 'text-amber-400' : isAnulada ? 'text-red-400' : 'text-emerald-400'} />
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <p className="text-[13px] font-semibold text-[#E4ECF7]">Cuenta #{s.saleNumber}</p>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <p className="text-[13px] font-semibold text-[#E4ECF7]">
+                                                    {isPending ? `Cuenta #${s.saleNumber}` : `Venta #${s.saleNumber}`}
+                                                </p>
                                                 <span className={cn(
                                                     'text-[10px] px-1.5 py-0.5 rounded-md font-semibold',
                                                     isAnulada ? 'bg-red-500/10 text-red-400' :
@@ -814,11 +837,19 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                                 )}>
                                                     {isAnulada ? 'Anulada' : isPending ? 'Pendiente' : 'Pagada'}
                                                 </span>
-                                                <span className="text-[10px] text-[#3D506A] bg-[#1C2438] px-1.5 py-0.5 rounded-md">
-                                                    {s.paymentMethod}
-                                                </span>
+                                                {mixed && <span className="text-[10px] bg-orange-500/12 text-orange-400 border border-orange-500/25 px-1.5 py-0.5 rounded-md">Pago mixto</span>}
+                                                {!mixed && <span className="text-[10px] text-[#3D506A] bg-[#1C2438] px-1.5 py-0.5 rounded-md">{s.paymentMethod}</span>}
                                             </div>
-                                            <p className="text-[11px] text-[#3D506A]">{dateStr} · {s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}</p>
+                                            {mixed ? (
+                                                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                    {mixed.ef != null && <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-md">Efectivo {formatCurrency(mixed.ef)}</span>}
+                                                    {mixed.sinpe != null && <span className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded-md">SINPE {formatCurrency(mixed.sinpe)}</span>}
+                                                    <span className="text-[10px] bg-orange-500/10 text-orange-400 px-1.5 py-0.5 rounded-md">Cuenta {formatCurrency(mixed.cuenta)}</span>
+                                                    <span className="text-[10px] text-[#3D506A]">· {dateStr}</span>
+                                                </div>
+                                            ) : (
+                                                <p className="text-[11px] text-[#3D506A]">{dateStr} · {s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}</p>
+                                            )}
                                         </div>
                                         <p className={cn('text-[14px] font-bold tabular-nums shrink-0', isAnulada ? 'text-[#3D506A] line-through' : 'text-[#E4ECF7]')}>
                                             {formatCurrency(s.total)}

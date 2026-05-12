@@ -431,6 +431,193 @@ export async function sendSettledEmail(input: SendSettledInput): Promise<{ succe
     }
 }
 
+export interface MixedPaymentInfo {
+    efectivo?: number
+    sinpe?: number
+    cuenta: number
+}
+
+interface SendMixedCreditInput {
+    to: string
+    clientName: string
+    businessName: string
+    saleNumber: number
+    creditNoteNumber: number
+    date: string
+    items: ReceiptItem[]
+    subtotal: number
+    discount: number
+    fullTotal: number
+    payment: MixedPaymentInfo
+}
+
+function buildMixedCreditHTML(input: SendMixedCreditInput): string {
+    const initial = input.businessName.charAt(0).toUpperCase()
+    const dateStr = new Date(input.date).toLocaleDateString('es-CR', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    })
+    const rows = input.items.map(it => `
+        <tr>
+          <td style="padding:12px 0;border-bottom:1px solid #1e293b;">
+            <span style="display:block;font-size:14px;color:#e2e8f0;font-weight:500;">${it.name}</span>
+            <span style="display:block;font-size:11px;color:#475569;margin-top:3px;">× ${it.quantity} unidad${it.quantity !== 1 ? 'es' : ''} · ${fmt(it.unitPrice)} c/u</span>
+          </td>
+          <td style="padding:12px 0;border-bottom:1px solid #1e293b;text-align:right;vertical-align:top;">
+            <span style="font-size:14px;color:#e2e8f0;font-family:'Courier New',monospace;white-space:nowrap;">${fmt(it.subtotal)}</span>
+          </td>
+        </tr>`).join('')
+    const discountRow = input.discount > 0 ? `
+        <tr>
+          <td style="padding:4px 0;font-size:12px;color:#34d399;">Descuento</td>
+          <td style="padding:4px 0;font-size:12px;color:#34d399;text-align:right;font-family:'Courier New',monospace;">− ${fmt(input.discount)}</td>
+        </tr>` : ''
+    const payRows = [
+        input.payment.efectivo ? `<tr><td style="padding:5px 0;font-size:13px;color:#94a3b8;">💵 Efectivo</td><td style="padding:5px 0;font-size:13px;color:#e2e8f0;text-align:right;font-family:'Courier New',monospace;">${fmt(input.payment.efectivo)}</td></tr>` : '',
+        input.payment.sinpe ? `<tr><td style="padding:5px 0;font-size:13px;color:#94a3b8;">📱 SINPE</td><td style="padding:5px 0;font-size:13px;color:#60a5fa;text-align:right;font-family:'Courier New',monospace;">${fmt(input.payment.sinpe)}</td></tr>` : '',
+        `<tr><td style="padding:5px 0;font-size:13px;color:#94a3b8;">🧾 Cargo a tu cuenta</td><td style="padding:5px 0;font-size:13px;font-weight:700;color:#fb923c;text-align:right;font-family:'Courier New',monospace;">${fmt(input.payment.cuenta)}</td></tr>`,
+    ].filter(Boolean).join('')
+
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pago mixto #${input.saleNumber}</title>
+</head>
+<body style="margin:0;padding:0;background:#0b0f1a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0b0f1a;padding:40px 16px;">
+<tr><td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:500px;margin:0 auto;">
+
+  <tr><td style="height:4px;background:linear-gradient(90deg,#ea580c,#f97316,#fb923c);border-radius:4px 4px 0 0;"></td></tr>
+
+  <tr>
+    <td style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 20px;">
+        <tr>
+          <td style="width:56px;height:56px;background:linear-gradient(135deg,#ea580c22,#f9731622);border:1px solid #f9731655;border-radius:14px;text-align:center;vertical-align:middle;">
+            <span style="font-size:24px;font-weight:800;color:#fb923c;letter-spacing:-1px;">${initial}</span>
+          </td>
+        </tr>
+      </table>
+      <h1 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
+      <p style="margin:0 0 20px;font-size:11px;color:#334155;text-transform:uppercase;letter-spacing:2.5px;">Pago mixto</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+        <tr>
+          <td style="padding:5px 16px;background:#f9731618;border:1px solid #f9731655;border-radius:99px;">
+            <span style="font-size:10px;font-weight:700;color:#fb923c;text-transform:uppercase;letter-spacing:2px;">Compra #${input.saleNumber}</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#0f172a;padding:0 36px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:24px 0 20px;border-bottom:1px dashed #1e293b;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="vertical-align:top;">
+                  <p style="margin:0 0 4px;font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;">Cliente</p>
+                  <p style="margin:0;font-size:17px;font-weight:700;color:#f1f5f9;">${input.clientName}</p>
+                </td>
+                <td style="text-align:right;vertical-align:top;">
+                  <p style="margin:0 0 4px;font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;">Fecha</p>
+                  <p style="margin:0;font-size:11px;color:#475569;">${dateStr}</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#0f172a;padding:0 36px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr><td style="padding:18px 0 6px;font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">Productos</td></tr>
+      </table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;padding-top:12px;border-top:1px dashed #1e293b;">
+        <tr>
+          <td style="font-size:12px;color:#475569;padding:3px 0;">Subtotal</td>
+          <td style="font-size:12px;color:#64748b;text-align:right;font-family:'Courier New',monospace;padding:3px 0;">${fmt(input.subtotal)}</td>
+        </tr>
+        ${discountRow}
+        <tr>
+          <td style="font-size:14px;font-weight:700;color:#e2e8f0;padding:6px 0 2px;">Total compra</td>
+          <td style="font-size:14px;font-weight:700;color:#e2e8f0;text-align:right;font-family:'Courier New',monospace;padding:6px 0 2px;">${fmt(input.fullTotal)}</td>
+        </tr>
+      </table>
+      <div style="height:20px;"></div>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#1a1008;padding:20px 36px;border-left:1px solid #f9731633;border-right:1px solid #f9731633;border-top:1px solid #f9731633;">
+      <p style="margin:0 0 12px;font-size:10px;color:#92400e;text-transform:uppercase;letter-spacing:2px;font-weight:700;">Desglose del pago</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${payRows}</table>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:linear-gradient(135deg,#1c0e00,#0f172a);padding:24px 36px;text-align:center;border-left:1px solid #f9731644;border-right:1px solid #f9731644;border-top:1px solid #f9731633;">
+      <p style="margin:0 0 6px;font-size:10px;color:#92400e;text-transform:uppercase;letter-spacing:2.5px;">Cargado a tu cuenta</p>
+      <p style="margin:0 0 10px;font-size:40px;font-weight:800;color:#fb923c;font-family:'Courier New',monospace;letter-spacing:-2px;line-height:1;">${fmt(input.payment.cuenta)}</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+        <tr>
+          <td style="padding:4px 14px;background:#f9731620;border:1px solid #f9731640;border-radius:99px;">
+            <span style="font-size:11px;color:#fb923c;font-weight:600;">Pendiente de pago · Nota #${input.creditNoteNumber}</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#080d16;padding:18px 36px 24px;border-radius:0 0 14px 14px;border:1px solid #1e293b;border-top:1px solid #0f172a;text-align:center;">
+      <p style="margin:0;font-size:11px;color:#1e293b;line-height:1.9;">
+        Recibo generado automáticamente por <strong style="color:#334155;">${input.businessName}</strong>.<br>
+        ¿Preguntas? Contáctanos directamente.
+      </p>
+    </td>
+  </tr>
+
+  <tr><td style="height:3px;background:linear-gradient(90deg,#fb923c,#f97316,#ea580c);border-radius:0 0 4px 4px;opacity:0.4;"></td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`
+}
+
+export async function sendMixedCreditEmail(input: SendMixedCreditInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
+    try {
+        const html = buildMixedCreditHTML(input)
+        if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
+        const fromName = input.businessName.trim() || 'Recibos'
+        const result = await window.electronAPI.sendEmail({
+            from: `${fromName} <noreply@jafetduarte.dev>`,
+            to: [input.to],
+            subject: `Pago mixto #${input.saleNumber} — ${fmt(input.payment.cuenta)} cargado a tu cuenta | ${input.businessName}`,
+            html,
+        })
+        if (!result.success) {
+            const isVerificationError = result.error?.statusCode === 403 ||
+                String(result.error?.message ?? '').includes('verify a domain')
+            return { success: false, error: result.error?.message ?? 'Error desconocido', isVerificationError }
+        }
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+}
+
 export async function sendReceiptEmail(input: SendReceiptInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
     try {
         const html = buildHTML(input)

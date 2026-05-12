@@ -18,7 +18,7 @@ import { RuletaModal } from '@/components/modals/RuletaModal'
 import { logSorteoEntry, handleSorteoWin } from '@/services/sorteos'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBusinessConfig } from '@/hooks/useConfig'
-import { sendReceiptEmail, sendSettledEmail } from '@/services/emailReceipt'
+import { sendReceiptEmail, sendSettledEmail, sendMixedCreditEmail } from '@/services/emailReceipt'
 import { MixedPaymentModal, type MixedModalView } from '@/components/modals/MixedPaymentModal'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
 import { SearchDropdown } from '@/components/molecules/SearchDropdown'
@@ -481,16 +481,47 @@ export function POSPage() {
             })
 
             if (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId) {
-                await createCreditNote({
+                const mixedPayCtx = {
+                    ...(capturedHasEfectivo ? { ef: Math.max(0, mainTotal - (capturedHasSinpe ? splitAmountNum : 0)) } : {}),
+                    ...(capturedHasSinpe ? { sinpe: splitAmountNum } : {}),
+                    cuenta: capturedCreditAmt,
+                }
+                const creditNote = await createCreditNote({
                     items: saleItems,
                     subtotal: capturedCreditAmt,
                     discount: 0,
                     total: capturedCreditAmt,
                     clientId: capturedCreditClientId,
-                    notes: `Cargo a cuenta. Cajero: ${saleCashier ?? 'Sin cajero'}`,
+                    notes: `Cargo a cuenta. Cajero: ${saleCashier ?? 'Sin cajero'}||MIXED||${JSON.stringify(mixedPayCtx)}`,
                 })
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
                 qc.invalidateQueries({ queryKey: ['clients'] })
+
+                const creditClient = clients.find((c: any) => c.id === capturedCreditClientId)
+                if (creditClient?.email) {
+                    sendMixedCreditEmail({
+                        to: creditClient.email,
+                        clientName: creditClient.name,
+                        businessName: config?.name ?? '',
+                        saleNumber: sale.saleNumber,
+                        creditNoteNumber: creditNote.saleNumber,
+                        date: sale.date,
+                        items: saleItems.map(i => ({
+                            name: i.product.name,
+                            quantity: i.quantity,
+                            unitPrice: i.unitPrice,
+                            subtotal: i.subtotal,
+                        })),
+                        subtotal: saleSubtotal,
+                        discount: saleDiscount,
+                        fullTotal: saleTotal,
+                        payment: {
+                            ...(capturedHasEfectivo ? { efectivo: mixedPayCtx.ef } : {}),
+                            ...(capturedHasSinpe ? { sinpe: mixedPayCtx.sinpe } : {}),
+                            cuenta: capturedCreditAmt,
+                        },
+                    }).catch(() => {})
+                }
             }
 
             setSaleSuccess({
