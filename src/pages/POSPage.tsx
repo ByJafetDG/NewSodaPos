@@ -17,7 +17,7 @@ import { RuletaModal } from '@/components/modals/RuletaModal'
 import { logSorteoEntry, handleSorteoWin } from '@/services/sorteos'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBusinessConfig } from '@/hooks/useConfig'
-import { sendReceiptEmail } from '@/services/emailReceipt'
+import { sendReceiptEmail, sendSettledEmail } from '@/services/emailReceipt'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
 import { SearchDropdown } from '@/components/molecules/SearchDropdown'
 import { ProductCatalog } from '@/components/organisms/pos/ProductCatalog'
@@ -361,6 +361,28 @@ export function POSPage() {
                 pendingDebt.clear()
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
                 qc.invalidateQueries({ queryKey: ['active-register'] })
+
+                const settledClient = clients.find((c: any) => c.id === capturedDebt.clientId)
+                if (settledClient?.email) {
+                    sendSettledEmail({
+                        to: settledClient.email,
+                        clientName: settledClient.name,
+                        businessName: config?.name ?? '',
+                        sales: capturedDebt.sales.map((s: any) => ({
+                            saleNumber: s.saleNumber,
+                            date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
+                            items: (s.items ?? []).map((item: any) => ({
+                                name: item.product?.name ?? item.name ?? 'Producto',
+                                quantity: item.quantity,
+                                unitPrice: item.unitPrice,
+                                subtotal: item.subtotal,
+                            })),
+                            subtotal: s.subtotal,
+                            discount: s.discount,
+                            total: s.total,
+                        })),
+                    }).catch(() => {})
+                }
 
                 setSaleSuccess({
                     total: capturedDebt.debtTotal,

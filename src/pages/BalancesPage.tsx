@@ -12,12 +12,14 @@ import { SaleDetailModal } from '@/components/modals/SaleDetailModal'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import {
     useClients, useCreateClient, useUpdateClient, useDeleteClient,
-    useCreditSales, useSettleSale, useSettleClientSales, useSalesByClient,
+    useCreditSales, useSettleSale, useSettleSaleDirect, useSettleClientSales, useSalesByClient,
     useDeleteCreditSale,
 } from '@/hooks/useClients'
 import { cn, formatCurrency, normalizeStr } from '@/lib/utils'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
 import { useUIStore } from '@/store/uiStore'
+import { useBusinessConfig } from '@/hooks/useConfig'
+import { sendSettledEmail } from '@/services/emailReceipt'
 import type { Client, ClientType, Sale } from '@/types'
 
 const TYPE_LABELS: Record<ClientType, string> = {
@@ -49,9 +51,11 @@ export function BalancesPage() {
     const [formOpen, setFormOpen] = useState(false)
     const [editingClient, setEditingClient] = useState<Client | null>(null)
     const [deletingClient, setDeletingClient] = useState<Client | null>(null)
+    const [confirmSettleAsociacion, setConfirmSettleAsociacion] = useState(false)
 
     const { data: clients = [] } = useClients()
     const { data: allCreditSales = [] } = useCreditSales()
+    const { data: config } = useBusinessConfig()
     const createClient = useCreateClient()
     const updateClient = useUpdateClient()
     const deleteClient = useDeleteClient()
@@ -80,7 +84,32 @@ export function BalancesPage() {
     }
 
     async function handleSettleAll(clientIds: string[]) {
-        for (const id of clientIds) await settleClientSales.mutateAsync(id)
+        const businessName = config?.name ?? ''
+        for (const id of clientIds) {
+            const client = clients.find(c => c.id === id)
+            const sales = pendingSalesFor(id)
+            await settleClientSales.mutateAsync(id)
+            if (client?.email && sales.length > 0) {
+                sendSettledEmail({
+                    to: client.email,
+                    clientName: client.name,
+                    businessName,
+                    sales: sales.map(s => ({
+                        saleNumber: s.saleNumber,
+                        date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
+                        items: (s.items ?? []).map((item: any) => ({
+                            name: item.product?.name ?? item.name ?? 'Producto',
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            subtotal: item.subtotal,
+                        })),
+                        subtotal: s.subtotal,
+                        discount: s.discount,
+                        total: s.total,
+                    })),
+                }).catch(() => {})
+            }
+        }
     }
 
     async function handleSettleSale(saleId: string) {
@@ -144,7 +173,7 @@ export function BalancesPage() {
                 <div className="flex items-center gap-2">
                     {hasAsociacionPending && (
                         <button
-                            onClick={() => handleSettleAll(asociacionIds)}
+                            onClick={() => setConfirmSettleAsociacion(true)}
                             disabled={settleClientSales.isPending}
                             className="flex items-center gap-2 px-4 h-9 rounded-xl bg-amber-500/15 border border-amber-500/25 text-amber-400 text-[13px] font-semibold hover:bg-amber-500/25 transition-colors cursor-pointer disabled:opacity-60"
                         >
@@ -262,6 +291,19 @@ export function BalancesPage() {
                 description={`¿Eliminar a "${deletingClient?.name}"? Esta acción no se puede deshacer.`}
                 isPending={deleteClient.isPending}
             />
+            <DeleteConfirmModal
+                isOpen={confirmSettleAsociacion}
+                onClose={() => setConfirmSettleAsociacion(false)}
+                onConfirm={async () => {
+                    await handleSettleAll(asociacionIds)
+                    setConfirmSettleAsociacion(false)
+                }}
+                title="Saldar Asociación"
+                description={`¿Marcar todas las cuentas pendientes de los clientes de Asociación como pagadas? Total: ${formatCurrency(asociacionPendingTotal)}`}
+                confirmLabel="Saldar todo"
+                confirmVariant="success"
+                isPending={settleClientSales.isPending}
+            />
         </div>
     )
 }
@@ -370,14 +412,34 @@ function ClientDetailView({ client, onBack, onEdit }: {
     const [expandedId, setExpandedId] = useState<string | null>(null)
     const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
     const [deletingSaleId, setDeletingSaleId] = useState<string | null>(null)
+    const [confirmSettleSale, setConfirmSettleSale] = useState<Sale | null>(null)
+    const [confirmSettleSelected, setConfirmSettleSelected] = useState(false)
+    const [confirmSettleAll, setConfirmSettleAll] = useState(false)
 
     const { data: pendingSales = [] } = useCreditSales(client.id)
     const { data: allSales = [] } = useSalesByClient(client.id)
-    const settleSale = useSettleSale()
+    const { data: config } = useBusinessConfig()
+    const settleSale = useSettleSaleDirect()
     const settleClientSales = useSettleClientSales()
     const deleteCreditSale = useDeleteCreditSale()
     const pendingStore = usePendingSettleStore()
     const setCurrentPage = useUIStore(s => s.setCurrentPage)
+
+    function toSaleInfo(s: Sale) {
+        return {
+            saleNumber: s.saleNumber,
+            date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
+            items: (s.items ?? []).map((item: any) => ({
+                name: item.product?.name ?? item.name ?? 'Producto',
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                subtotal: item.subtotal,
+            })),
+            subtotal: s.subtotal,
+            discount: s.discount,
+            total: s.total,
+        }
+    }
 
     const pendingTotal = pendingSales.reduce((s, sale) => s + sale.total, 0)
     const selectedTotal = pendingSales.filter(s => selectedIds.has(s.id)).reduce((s, sale) => s + sale.total, 0)
@@ -396,9 +458,42 @@ function ClientDetailView({ client, onBack, onEdit }: {
         else setSelectedIds(new Set(pendingSales.map(s => s.id)))
     }
 
+    async function handleSettleSingleSale(sale: Sale) {
+        await settleSale.mutateAsync(sale.id)
+        if (client.email) {
+            sendSettledEmail({
+                to: client.email,
+                clientName: client.name,
+                businessName: config?.name ?? '',
+                sales: [toSaleInfo(sale)],
+            }).catch(() => {})
+        }
+    }
+
     async function handleSettleSelected() {
+        const salesToSettle = pendingSales.filter((s: Sale) => selectedIds.has(s.id))
         for (const id of selectedIds) await settleSale.mutateAsync(id)
         setSelectedIds(new Set())
+        if (client.email && salesToSettle.length > 0) {
+            sendSettledEmail({
+                to: client.email,
+                clientName: client.name,
+                businessName: config?.name ?? '',
+                sales: salesToSettle.map(toSaleInfo),
+            }).catch(() => {})
+        }
+    }
+
+    async function handleSettleAll() {
+        await settleClientSales.mutateAsync(client.id)
+        if (client.email && pendingSales.length > 0) {
+            sendSettledEmail({
+                to: client.email,
+                clientName: client.name,
+                businessName: config?.name ?? '',
+                sales: (pendingSales as Sale[]).map(toSaleInfo),
+            }).catch(() => {})
+        }
     }
 
     function handleChargeInPOS() {
@@ -554,7 +649,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                             </span>
                                             <div className="flex items-center gap-1.5 ml-auto">
                                                 <button
-                                                    onClick={handleSettleSelected}
+                                                    onClick={() => setConfirmSettleSelected(true)}
                                                     disabled={settleSale.isPending}
                                                     className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[12px] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-60"
                                                 >
@@ -573,7 +668,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                     )}
                                     {selectedIds.size === 0 && (
                                         <button
-                                            onClick={() => settleClientSales.mutateAsync(client.id)}
+                                            onClick={() => setConfirmSettleAll(true)}
                                             disabled={settleClientSales.isPending}
                                             className="ml-auto flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[12px] font-medium hover:text-emerald-400 hover:border-emerald-500/25 hover:bg-emerald-500/8 transition-all cursor-pointer disabled:opacity-60"
                                         >
@@ -629,7 +724,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                                 <div className="flex items-center gap-2 shrink-0">
                                                     <p className="text-[15px] font-bold text-[#E4ECF7]">{formatCurrency(s.total)}</p>
                                                     <button
-                                                        onClick={(e) => { e.stopPropagation(); settleSale.mutateAsync(s.id) }}
+                                                        onClick={(e) => { e.stopPropagation(); setConfirmSettleSale(s) }}
                                                         className="flex items-center gap-1 px-2.5 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-semibold hover:bg-emerald-500/20 transition-colors cursor-pointer"
                                                     >
                                                         <Banknote size={11} />
@@ -752,6 +847,46 @@ function ClientDetailView({ client, onBack, onEdit }: {
                 title="Eliminar cuenta pendiente"
                 description="Se eliminará esta cuenta y se repondrá el stock. Esta acción no se puede deshacer."
                 isPending={deleteCreditSale.isPending}
+            />
+            <DeleteConfirmModal
+                isOpen={confirmSettleSale !== null}
+                onClose={() => setConfirmSettleSale(null)}
+                onConfirm={async () => {
+                    if (!confirmSettleSale) return
+                    await handleSettleSingleSale(confirmSettleSale)
+                    setConfirmSettleSale(null)
+                }}
+                title="Saldar cuenta"
+                description={`¿Marcar la cuenta #${confirmSettleSale?.saleNumber} (${formatCurrency(confirmSettleSale?.total ?? 0)}) como pagada?`}
+                confirmLabel="Saldar"
+                confirmVariant="success"
+                isPending={settleSale.isPending}
+            />
+            <DeleteConfirmModal
+                isOpen={confirmSettleSelected}
+                onClose={() => setConfirmSettleSelected(false)}
+                onConfirm={async () => {
+                    await handleSettleSelected()
+                    setConfirmSettleSelected(false)
+                }}
+                title="Saldar seleccionadas"
+                description={`¿Marcar ${selectedIds.size} cuenta${selectedIds.size !== 1 ? 's' : ''} como pagadas? Total: ${formatCurrency(selectedTotal)}`}
+                confirmLabel="Saldar"
+                confirmVariant="success"
+                isPending={settleSale.isPending}
+            />
+            <DeleteConfirmModal
+                isOpen={confirmSettleAll}
+                onClose={() => setConfirmSettleAll(false)}
+                onConfirm={async () => {
+                    await handleSettleAll()
+                    setConfirmSettleAll(false)
+                }}
+                title="Saldar todo"
+                description={`¿Marcar las ${pendingSales.length} cuentas de ${client.name} como pagadas? Total: ${formatCurrency(pendingTotal)}`}
+                confirmLabel="Saldar todo"
+                confirmVariant="success"
+                isPending={settleClientSales.isPending}
             />
         </div>
     )

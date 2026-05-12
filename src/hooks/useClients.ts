@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getClients, createClient, updateClient, deleteClient, getCreditSales, settleSale, settleClientSales, getSalesByClient, deleteCreditSale } from '@/services/clients'
+import { getClients, createClient, updateClient, deleteClient, getCreditSales, settleSale, settleClientSales, getSalesByClient, deleteCreditSale, settleSaleDirect } from '@/services/clients'
 import { toast } from '@/components/ui/Toast'
 import type { Client } from '@/types'
 
@@ -52,6 +52,19 @@ export function useSettleSale() {
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['credit-sales'] })
             qc.invalidateQueries({ queryKey: ['clients'] })
+        },
+        onError: (err: Error) => toast.error(err.message),
+    })
+}
+
+export function useSettleSaleDirect() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: (saleId: string) => settleSaleDirect(saleId),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['credit-sales'] })
+            qc.invalidateQueries({ queryKey: ['clients'] })
+            qc.invalidateQueries({ queryKey: ['active-register'] })
         },
         onError: (err: Error) => toast.error(err.message),
     })
