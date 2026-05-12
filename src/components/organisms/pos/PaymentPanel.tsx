@@ -87,14 +87,12 @@ export function PaymentPanel({
         }
     }, [isMixed, mixedMethods.join(',')])
 
-    const padValue =
-        splitFocus === 'sinpe'   ? splitAmount :
-        splitFocus === 'credit'  ? creditAmount :
-        amountReceived
-    const padOnChange =
-        splitFocus === 'sinpe'   ? onChangeSplitAmount :
-        splitFocus === 'credit'  ? onChangeCreditAmount :
-        onChangeAmount
+    const padValue = isMixed
+        ? (splitFocus === 'sinpe' ? splitAmount : splitFocus === 'credit' ? creditAmount : amountReceived)
+        : amountReceived
+    const padOnChange = isMixed
+        ? (splitFocus === 'sinpe' ? onChangeSplitAmount : splitFocus === 'credit' ? onChangeCreditAmount : onChangeAmount)
+        : onChangeAmount
     const padTotal = (splitFocus === 'sinpe' || splitFocus === 'credit')
         ? undefined
         : (hasItems ? cashPortion : undefined)
