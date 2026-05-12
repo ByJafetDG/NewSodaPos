@@ -270,3 +270,62 @@ export async function updateCreditSaleItems(
     const { error } = await supabase.from('Sale').update({ total: newTotal, updatedAt: now }).eq('id', saleId)
     if (error) throw error
 }
+
+interface CreateCreditNoteInput {
+    items: CartItem[]
+    subtotal: number
+    discount: number
+    total: number
+    clientId: string
+    notes?: string | null
+}
+
+export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ id: string; saleNumber: number; date: string }> {
+    const saleNumber = await getNextSaleNumber()
+    const id = crypto.randomUUID()
+    const now = localISO()
+
+    if (window.electronAPI) {
+        const ops: Array<{ sql: string; params: any[] }> = [
+            {
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, 'CREDITO', null, null, 1, input.clientId, null, 'COMPLETADA', input.notes ?? null, 'PENDING', null, null]
+            }
+        ]
+        for (const item of input.items) {
+            ops.push({
+                sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                params: [crypto.randomUUID(), id, item.id, item.quantity, item.unitPrice, item.subtotal, item.notes]
+            })
+        }
+        await window.electronAPI.dbTransaction(ops)
+        return { id, saleNumber, date: now }
+    }
+
+    const { data: sale, error: saleError } = await supabase
+        .from('Sale')
+        .insert({
+            id, saleNumber, date: now,
+            subtotal: input.subtotal, discount: input.discount, total: input.total,
+            paymentMethod: 'CREDITO', amountReceived: null, change: null,
+            isCredit: true, clientId: input.clientId, cashRegisterId: null,
+            status: 'COMPLETADA', notes: input.notes ?? null,
+            syncStatus: 'SYNCED', createdAt: now, updatedAt: now,
+            paymentMethod2: null, amount2: null,
+        })
+        .select('id, saleNumber, date')
+        .single()
+    if (saleError) throw saleError
+
+    const saleItems = input.items.map(item => ({
+        id: crypto.randomUUID(), saleId: sale.id,
+        productId: item.id, quantity: item.quantity,
+        unitPrice: item.unitPrice, subtotal: item.subtotal,
+        notes: item.notes, createdAt: now,
+    }))
+    if (saleItems.length > 0) {
+        const { error: itemsError } = await supabase.from('SaleItem').insert(saleItems)
+        if (itemsError) throw itemsError
+    }
+    return { id: sale.id, saleNumber: sale.saleNumber, date: sale.date }
+}

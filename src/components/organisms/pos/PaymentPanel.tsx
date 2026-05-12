@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { formatCurrency, cn } from '@/lib/utils'
+import { formatCurrency, cn, normalizeStr, fuzzyMatch } from '@/lib/utils'
+import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { PaymentMethodPicker } from '@/components/molecules/PaymentMethodPicker'
 import { NumericPad } from '@/components/molecules/NumericPad'
 import { TotalsPanel } from '@/components/molecules/TotalsPanel'
 import { Button } from '@/components/atoms/Button'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
-import { Trash2, Ticket, X, CreditCard, SplitSquareHorizontal, Smartphone, Inbox } from 'lucide-react'
+import { Trash2, Ticket, X, CreditCard, SplitSquareHorizontal, Smartphone, Inbox, UserCircle2, Search, Banknote } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
+
+interface ClientOption { id: string; name: string }
 
 interface PaymentPanelProps {
     paymentMethod: PaymentMethod
@@ -28,10 +31,17 @@ interface PaymentPanelProps {
     onSorteo?: () => void
     pendingDebt?: { clientName: string; total: number }
     onClearDebt?: () => void
-    splitMode: boolean
-    onToggleSplit: () => void
+    // Mixed payment
+    mixedMethods: string[]
+    onOpenMixedSelect: () => void
+    onOpenMixedCancel: () => void
     splitAmount: string
     onChangeSplitAmount: (v: string) => void
+    creditAmount: string
+    onChangeCreditAmount: (v: string) => void
+    creditClientId: string | null
+    onSelectCreditClient: (id: string | null) => void
+    clients?: ClientOption[]
 }
 
 export function PaymentPanel({
@@ -39,61 +49,90 @@ export function PaymentPanel({
     itemCount, subtotal, discount, total,
     canCharge, isPending, onCharge, onClear, hasItems, onOpenDrawer,
     activeSorteoName, onSorteo, pendingDebt, onClearDebt,
-    splitMode, onToggleSplit, splitAmount, onChangeSplitAmount,
+    mixedMethods, onOpenMixedSelect, onOpenMixedCancel,
+    splitAmount, onChangeSplitAmount,
+    creditAmount, onChangeCreditAmount,
+    creditClientId, onSelectCreditClient, clients = [],
 }: PaymentPanelProps) {
     const [confirmClearDebt, setConfirmClearDebt] = useState(false)
-    const [splitFocus, setSplitFocus] = useState<'secondary' | 'cash'>('secondary')
-    const received = parseFloat(amountReceived) || 0
+    const [splitFocus, setSplitFocus] = useState<'sinpe' | 'cash' | 'credit'>('sinpe')
+    const [clientSearch, setClientSearch] = useState('')
+    const clientSearchKb = useKeyboardInput(clientSearch, setClientSearch)
+
+    const isMixed = mixedMethods.length >= 2
+    const hasSinpe   = isMixed && mixedMethods.includes('SINPE')
+    const hasEfectivo = isMixed ? mixedMethods.includes('EFECTIVO') : paymentMethod === 'EFECTIVO'
+    const hasCuenta  = isMixed && mixedMethods.includes('CUENTA')
+
+    const received       = parseFloat(amountReceived) || 0
     const effectiveTotal = total + (pendingDebt?.total ?? 0)
-    const splitAmountNum = parseFloat(splitAmount) || 0
-    const cashPortion = splitMode && splitAmountNum > 0 ? effectiveTotal - splitAmountNum : effectiveTotal
-    const change = paymentMethod === 'EFECTIVO'
-        ? Math.max(0, received - (splitMode ? cashPortion : effectiveTotal))
-        : 0
-    const showCash = paymentMethod === 'EFECTIVO'
-    const canConfirmCash = !hasItems || received >= (splitMode ? cashPortion : effectiveTotal)
+    const sinpeAmt       = parseFloat(splitAmount) || 0
+    const creditAmt      = parseFloat(creditAmount) || 0
+    const cashPortion    = effectiveTotal - (hasSinpe ? sinpeAmt : 0) - (hasCuenta ? creditAmt : 0)
+    const change         = hasEfectivo ? Math.max(0, received - cashPortion) : 0
+    const canConfirmCash = !hasItems || received >= cashPortion
 
-    useEffect(() => { if (splitMode) setSplitFocus('secondary') }, [splitMode])
+    const filteredClients = clients.filter(c =>
+        !clientSearch ||
+        normalizeStr(c.name).includes(normalizeStr(clientSearch)) ||
+        fuzzyMatch(clientSearch, c.name)
+    )
+    const selectedClient = clients.find(c => c.id === creditClientId)
 
-    const padValue = splitMode && splitFocus === 'secondary' ? splitAmount : amountReceived
-    const padOnChange = splitMode && splitFocus === 'secondary' ? onChangeSplitAmount : onChangeAmount
-    const padTotal = splitMode && splitFocus === 'secondary' ? undefined : (hasItems ? cashPortion : undefined)
+    useEffect(() => {
+        if (isMixed) {
+            if (hasSinpe) setSplitFocus('sinpe')
+            else if (hasCuenta) setSplitFocus('credit')
+            else setSplitFocus('cash')
+        }
+    }, [isMixed, mixedMethods.join(',')])
+
+    const padValue =
+        splitFocus === 'sinpe'   ? splitAmount :
+        splitFocus === 'credit'  ? creditAmount :
+        amountReceived
+    const padOnChange =
+        splitFocus === 'sinpe'   ? onChangeSplitAmount :
+        splitFocus === 'credit'  ? onChangeCreditAmount :
+        onChangeAmount
+    const padTotal = (splitFocus === 'sinpe' || splitFocus === 'credit')
+        ? undefined
+        : (hasItems ? cashPortion : undefined)
+
+    const mixedLabel = isMixed
+        ? mixedMethods.map(m => m === 'EFECTIVO' ? 'Efectivo' : m === 'SINPE' ? 'SINPE' : 'Cuenta').join(' + ')
+        : null
 
     return (
-        /*
-         * The whole panel is a flex-col. Inside scroll-y is on this container
-         * so everything stacks and scrolls if the screen is short.
-         * This ensures the NumericPad always renders — it's never cut by flex.
-         */
         <div className="flex flex-col overflow-y-auto h-full">
 
             {/* ── Payment method ─────────────────────────── */}
             <div className="px-4 pt-4 pb-3 border-b border-[#192030] shrink-0">
                 <div className="flex items-center justify-between mb-2.5">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">Forma de pago</p>
-                    {paymentMethod === 'EFECTIVO' && (
+                    {paymentMethod !== 'CREDITO' && (
                         <button
-                            onClick={onToggleSplit}
+                            onClick={isMixed ? onOpenMixedCancel : onOpenMixedSelect}
                             className={cn(
                                 'flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer',
-                                splitMode
-                                    ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                                isMixed
+                                    ? 'bg-orange-500/12 text-orange-400 border border-orange-500/25 hover:bg-orange-500/20'
                                     : 'text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5'
                             )}
                         >
                             <SplitSquareHorizontal size={11} />
-                            {splitMode ? 'Cancelar mixto' : 'Pago mixto'}
+                            {isMixed ? `Mixto: ${mixedLabel}` : 'Pago mixto'}
                         </button>
                     )}
                 </div>
-                <PaymentMethodPicker value={paymentMethod} onChange={onChangeMethod} />
+                {!isMixed && <PaymentMethodPicker value={paymentMethod} onChange={onChangeMethod} />}
             </div>
 
-            {/* ── Split: SINPE amount ─────────────────────── */}
+            {/* ── SINPE amount ─────────────────────────────── */}
             <AnimatePresence initial={false}>
-                {splitMode && (
+                {hasSinpe && (
                     <motion.div
-                        key="split-section"
+                        key="sinpe-section"
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
@@ -103,35 +142,101 @@ export function PaymentPanel({
                         <div className="px-4 pt-3 pb-3 border-b border-[#192030] space-y-2">
                             <div className="flex items-center gap-1.5">
                                 <Smartphone size={11} className="text-blue-400" />
-                                <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400">
-                                    Cobro por SINPE
-                                </p>
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400">SINPE</p>
                             </div>
                             <div
-                                onClick={() => setSplitFocus('secondary')}
+                                onClick={() => setSplitFocus('sinpe')}
                                 className={cn(
                                     'flex flex-col items-center justify-center gap-0.5 h-14 rounded-xl bg-[#101520] border select-none cursor-pointer active:scale-[0.98] transition-all',
-                                    splitFocus === 'secondary' ? 'border-blue-500/40' : 'border-[#1E2A40]'
+                                    splitFocus === 'sinpe' ? 'border-blue-500/40' : 'border-[#1E2A40]'
                                 )}
                             >
-                                <span className={cn('text-[24px] font-bold font-mono leading-none', splitAmountNum > 0 ? 'text-blue-400' : 'text-[#3D506A]')}>
-                                    {splitAmountNum > 0 ? formatCurrency(splitAmountNum) : '₡ —'}
+                                <span className={cn('text-[24px] font-bold font-mono leading-none', sinpeAmt > 0 ? 'text-blue-400' : 'text-[#3D506A]')}>
+                                    {sinpeAmt > 0 ? formatCurrency(sinpeAmt) : '₡ —'}
                                 </span>
-                                {splitFocus === 'secondary' && <span className="text-[9px] text-blue-400/60 uppercase tracking-wider">Ingresando aquí</span>}
+                                {splitFocus === 'sinpe' && <span className="text-[9px] text-blue-400/60 uppercase tracking-wider">Ingresando aquí</span>}
                             </div>
-                            {splitAmountNum > 0 && splitAmountNum < effectiveTotal && (
-                                <p className="text-[11px] text-[#3D506A] text-center">
-                                    Efectivo a cobrar: <span className="text-emerald-400 font-semibold font-mono">{formatCurrency(cashPortion)}</span>
-                                </p>
-                            )}
                         </div>
                     </motion.div>
                 )}
             </AnimatePresence>
 
-            {/* ── Cash amount section ─────────────────────── */}
+            {/* ── Cargo a cuenta ───────────────────────────── */}
             <AnimatePresence initial={false}>
-                {showCash && (
+                {hasCuenta && (
+                    <motion.div
+                        key="credit-section"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden shrink-0"
+                    >
+                        <div className="px-4 pt-3 pb-3 border-b border-[#192030] space-y-2">
+                            <div className="flex items-center gap-1.5">
+                                <CreditCard size={11} className="text-violet-400" />
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-violet-400">Cargo a cuenta</p>
+                            </div>
+
+                            {selectedClient ? (
+                                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30">
+                                    <UserCircle2 size={13} className="text-violet-400 shrink-0" />
+                                    <span className="flex-1 text-[12px] font-medium text-[#E4ECF7] truncate">{selectedClient.name}</span>
+                                    <button
+                                        onClick={() => { onSelectCreditClient(null); setClientSearch('') }}
+                                        className="text-violet-400/50 hover:text-red-400 transition-colors cursor-pointer"
+                                    >
+                                        <X size={11} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="space-y-1">
+                                    <div className="relative">
+                                        <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#3D506A]" />
+                                        <input
+                                            type="text"
+                                            placeholder="Buscar cliente..."
+                                            className="w-full h-8 pl-7 pr-3 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-violet-500/50"
+                                            {...clientSearchKb}
+                                        />
+                                    </div>
+                                    {filteredClients.length > 0 && (
+                                        <div className="max-h-24 overflow-y-auto space-y-0.5">
+                                            {filteredClients.slice(0, 6).map(c => (
+                                                <button
+                                                    key={c.id}
+                                                    onClick={() => { onSelectCreditClient(c.id); setClientSearch('') }}
+                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#101520] border border-[#192030] hover:bg-[#161D2E] text-left cursor-pointer transition-colors"
+                                                >
+                                                    <UserCircle2 size={12} className="text-[#3D506A] shrink-0" />
+                                                    <span className="text-[11px] text-[#7A8FAA] truncate">{c.name}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div
+                                onClick={() => setSplitFocus('credit')}
+                                className={cn(
+                                    'flex flex-col items-center justify-center gap-0.5 h-14 rounded-xl bg-[#101520] border select-none cursor-pointer active:scale-[0.98] transition-all',
+                                    splitFocus === 'credit' ? 'border-violet-500/40' : 'border-[#1E2A40]'
+                                )}
+                            >
+                                <span className={cn('text-[24px] font-bold font-mono leading-none', creditAmt > 0 ? 'text-violet-400' : 'text-[#3D506A]')}>
+                                    {creditAmt > 0 ? formatCurrency(creditAmt) : '₡ —'}
+                                </span>
+                                {splitFocus === 'credit' && <span className="text-[9px] text-violet-400/60 uppercase tracking-wider">Ingresando aquí</span>}
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* ── Cash section ─────────────────────────────── */}
+            <AnimatePresence initial={false}>
+                {hasEfectivo && (
                     <motion.div
                         key="cash-section"
                         initial={{ opacity: 0, height: 0 }}
@@ -143,9 +248,9 @@ export function PaymentPanel({
                         <div className="px-4 pt-3 pb-3 border-b border-[#192030] space-y-3">
                             <div className="flex items-center justify-between">
                                 <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">
-                                    {splitMode ? 'Efectivo recibido' : 'Monto recibido'}
+                                    {isMixed ? 'Efectivo recibido' : 'Monto recibido'}
                                 </p>
-                                {splitMode && onOpenDrawer && (
+                                {isMixed && onOpenDrawer && (
                                     <button
                                         onClick={onOpenDrawer}
                                         className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5 transition-all cursor-pointer"
@@ -156,28 +261,26 @@ export function PaymentPanel({
                                 )}
                             </div>
 
-                            {/* Amount display — tap to open cash drawer (normal) or focus cash input (split) */}
                             <div
                                 className={cn(
                                     'flex flex-col items-center justify-center gap-0.5 h-16 rounded-xl bg-[#101520] border select-none cursor-pointer active:scale-[0.98] transition-all',
-                                    splitMode && splitFocus === 'cash' ? 'border-emerald-500/40' : 'border-[#1E2A40]'
+                                    isMixed && splitFocus === 'cash' ? 'border-emerald-500/40' : 'border-[#1E2A40]'
                                 )}
-                                onClick={() => { splitMode ? setSplitFocus('cash') : onOpenDrawer?.() }}
+                                onClick={() => isMixed ? setSplitFocus('cash') : onOpenDrawer?.()}
                             >
                                 <span className={`text-[28px] font-bold font-mono leading-none transition-colors ${received > 0 ? 'text-[#E4ECF7]' : 'text-[#3D506A]'}`}>
                                     {received > 0 ? formatCurrency(received) : '₡ —'}
                                 </span>
-                                {received === 0 && !splitMode && (
+                                {received === 0 && !isMixed && (
                                     <span className="text-[9px] uppercase tracking-wider text-[#3D506A]">Toca para abrir cajón</span>
                                 )}
-                                {splitMode && splitFocus === 'cash' && (
+                                {isMixed && splitFocus === 'cash' && (
                                     <span className="text-[9px] text-emerald-400/60 uppercase tracking-wider">Ingresando aquí</span>
                                 )}
                             </div>
 
-                            {/* Change badge */}
                             <AnimatePresence>
-                                {received > 0 && received >= (splitMode ? cashPortion : effectiveTotal) && (
+                                {received > 0 && received >= cashPortion && (
                                     <motion.div
                                         initial={{ opacity: 0, scale: 0.95 }}
                                         animate={{ opacity: 1, scale: 1 }}
@@ -190,21 +293,40 @@ export function PaymentPanel({
                                 )}
                             </AnimatePresence>
 
-                            {/* Numeric pad — serves focused input */}
-                            <NumericPad
-                                value={padValue}
-                                onChange={padOnChange}
-                                total={padTotal}
-                            />
+                            {isMixed && hasSinpe && sinpeAmt > 0 && creditAmt === 0 && (
+                                <p className="text-[11px] text-[#3D506A] text-center">
+                                    Efectivo a cobrar: <span className="text-emerald-400 font-semibold font-mono">{formatCurrency(Math.max(0, cashPortion))}</span>
+                                </p>
+                            )}
+
+                            <NumericPad value={padValue} onChange={padOnChange} total={padTotal} />
                         </div>
                     </motion.div>
                 )}
             </AnimatePresence>
 
-            {/* ── Spacer pushes totals to bottom ─────────── */}
+            {/* ── Non-cash numpad (SINPE-only or credit-only mix) ─ */}
+            <AnimatePresence initial={false}>
+                {!hasEfectivo && isMixed && (
+                    <motion.div
+                        key="noncash-pad"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden shrink-0"
+                    >
+                        <div className="px-4 pt-3 pb-3 border-b border-[#192030]">
+                            <NumericPad value={padValue} onChange={padOnChange} total={padTotal} />
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* ── Spacer ───────────────────────────────────── */}
             <div className="flex-1" />
 
-            {/* ── Totals ─────────────────────────────────── */}
+            {/* ── Totals ──────────────────────────────────── */}
             <div className="px-4 pt-3 pb-3 border-t border-[#192030] shrink-0">
                 <TotalsPanel
                     itemCount={itemCount}
@@ -215,7 +337,7 @@ export function PaymentPanel({
                 />
             </div>
 
-            {/* ── Sorteo button ────────────────────────────── */}
+            {/* ── Sorteo ──────────────────────────────────── */}
             <AnimatePresence>
                 {activeSorteoName && onSorteo && (
                     <motion.div
@@ -232,16 +354,14 @@ export function PaymentPanel({
                                 className="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 active:scale-[0.98] transition-all cursor-pointer"
                             >
                                 <Ticket size={14} className="text-amber-400 shrink-0" />
-                                <span className="text-[12px] font-semibold text-amber-300 truncate">
-                                    {activeSorteoName}
-                                </span>
+                                <span className="text-[12px] font-semibold text-amber-300 truncate">{activeSorteoName}</span>
                             </button>
                         </div>
                     </motion.div>
                 )}
             </AnimatePresence>
 
-            {/* ── Pending debt notice ──────────────────────── */}
+            {/* ── Pending debt ─────────────────────────────── */}
             {pendingDebt && (
                 <div className="px-4 pb-2 shrink-0">
                     <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-violet-500/8 border border-violet-500/20">
@@ -254,7 +374,6 @@ export function PaymentPanel({
                         {onClearDebt && (
                             <button
                                 onClick={() => setConfirmClearDebt(true)}
-                                title="Quitar deuda del carrito"
                                 className="w-5 h-5 rounded-md flex items-center justify-center text-violet-400/50 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer shrink-0"
                             >
                                 <X size={11} />
@@ -279,7 +398,7 @@ export function PaymentPanel({
                     variant="success"
                     size="xl"
                     className="flex-1"
-                    disabled={!canCharge || (showCash && hasItems && !canConfirmCash)}
+                    disabled={!canCharge || (hasEfectivo && hasItems && !canConfirmCash)}
                     loading={isPending}
                     onClick={onCharge}
                 >

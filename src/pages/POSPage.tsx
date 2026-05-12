@@ -5,6 +5,7 @@ import { useHeldOrdersStore } from '@/store/heldOrdersStore'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
 import { settleSaleDirect } from '@/services/clients'
+import { createCreditNote } from '@/services/sales'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
@@ -18,6 +19,7 @@ import { logSorteoEntry, handleSorteoWin } from '@/services/sorteos'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { sendReceiptEmail, sendSettledEmail } from '@/services/emailReceipt'
+import { MixedPaymentModal, type MixedModalView } from '@/components/modals/MixedPaymentModal'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
 import { SearchDropdown } from '@/components/molecules/SearchDropdown'
 import { ProductCatalog } from '@/components/organisms/pos/ProductCatalog'
@@ -83,8 +85,12 @@ export function POSPage() {
     // ── Payment ──────────────────────────────────────────────────────────────
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('EFECTIVO')
     const [amountReceived, setAmountReceived] = useState(() => localStorage.getItem('pos_amount_received') ?? '')
-    const [splitMode, setSplitMode] = useState(false)
+    const [mixedMethods, setMixedMethods] = useState<string[]>([])
     const [splitAmount, setSplitAmount] = useState('')
+    const [creditAmount, setCreditAmount] = useState('')
+    const [creditClientId, setCreditClientId] = useState<string | null>(null)
+    const [showMixedModal, setShowMixedModal] = useState(false)
+    const [mixedModalView, setMixedModalView] = useState<MixedModalView>('select')
 
     useEffect(() => {
         localStorage.setItem('pos_amount_received', amountReceived)
@@ -151,15 +157,24 @@ export function POSPage() {
         : 0
 
     // ── Derived ───────────────────────────────────────────────────────────────
-    const received = parseFloat(amountReceived) || 0
+    const received       = parseFloat(amountReceived) || 0
     const effectiveTotal = total + (pendingDebt.hasDebt ? pendingDebt.debtTotal : 0)
     const splitAmountNum = parseFloat(splitAmount) || 0
-    const cashPortion = splitMode && splitAmountNum > 0 ? effectiveTotal - splitAmountNum : effectiveTotal
+    const creditAmountNum = parseFloat(creditAmount) || 0
+    const isMixed        = mixedMethods.length >= 2
+    const hasSinpeMixed  = isMixed && mixedMethods.includes('SINPE')
+    const hasEfectivoMixed = isMixed && mixedMethods.includes('EFECTIVO')
+    const hasCuentaMixed = isMixed && mixedMethods.includes('CUENTA')
+    const cashPortion    = effectiveTotal - (hasSinpeMixed ? splitAmountNum : 0) - (hasCuentaMixed ? creditAmountNum : 0)
     const canCharge =
         (items.length > 0 || pendingDebt.hasDebt) &&
         !createSale.isPending &&
-        (splitMode
-            ? splitAmountNum > 0 && splitAmountNum < effectiveTotal && received >= cashPortion
+        (isMixed
+            ? (
+                (!hasCuentaMixed || (creditAmountNum > 0 && creditAmountNum < effectiveTotal && !!creditClientId)) &&
+                (!hasSinpeMixed  || splitAmountNum > 0) &&
+                (!hasEfectivoMixed || received >= Math.max(0, cashPortion))
+              )
             : (paymentMethod !== 'EFECTIVO' || received >= effectiveTotal)
         )
 
@@ -305,14 +320,14 @@ export function POSPage() {
 
     const handlePaymentMethodChange = (method: PaymentMethod) => {
         setPaymentMethod(method)
-        if (method !== 'EFECTIVO') { setAmountReceived(''); setSplitMode(false); setSplitAmount('') }
+        if (method !== 'EFECTIVO') setAmountReceived('')
         if (method === 'CREDITO' && items.length > 0) setShowCreditModal(true)
     }
 
-    const handleToggleSplit = () => {
-        if (!splitMode) { setPaymentMethod('EFECTIVO'); setSplitMode(true); setSplitAmount('') }
-        else { setSplitMode(false); setSplitAmount('') }
-    }
+    const handleOpenMixedSelect = () => { setMixedModalView('select'); setShowMixedModal(true) }
+    const handleOpenMixedCancel = () => { setMixedModalView('cancel'); setShowMixedModal(true) }
+    const handleMixedConfirm = (methods: string[]) => { setMixedMethods(methods); setShowMixedModal(false) }
+    const handleCancelMixed = () => { setMixedMethods([]); setShowMixedModal(false) }
 
     const handleCharge = async () => {
         if (paymentMethod === 'CREDITO') { setShowCreditModal(true); return }
@@ -332,6 +347,12 @@ export function POSPage() {
             const saleReceived = received
             const saleCashier = selectedEmployee?.name ?? null
             const capturedDebt = pendingDebt.hasDebt ? { ...pendingDebt } : null
+            const capturedIsMixed = isMixed && !isCredit
+            const capturedHasSinpe = capturedIsMixed && mixedMethods.includes('SINPE')
+            const capturedHasEfectivo = capturedIsMixed && mixedMethods.includes('EFECTIVO')
+            const capturedHasCuenta = capturedIsMixed && mixedMethods.includes('CUENTA')
+            const capturedCreditAmt = capturedHasCuenta ? creditAmountNum : 0
+            const capturedCreditClientId = capturedHasCuenta ? creditClientId : null
 
             // Cart empty + debt only: settle original sales (no new sale, avoids empty-items record)
             if (saleItems.length === 0 && capturedDebt && !isCredit) {
@@ -395,8 +416,9 @@ export function POSPage() {
                 clearCart()
                 setAmountReceived('')
                 setPaymentMethod('EFECTIVO')
-                setSplitMode(false)
-                setSplitAmount('')
+                setMixedMethods([])
+                setCreditAmount('')
+                setCreditClientId(null)
                 setSelectedClientId(null)
                 setShowCreditModal(false)
                 setActiveOrderId(null)
@@ -432,20 +454,45 @@ export function POSPage() {
                 return
             }
 
-            const isSplit = splitMode && !isCredit
-            const splitAmt = isSplit ? splitAmountNum : 0
-            const cashNeeded = isSplit ? saleTotal - splitAmt : saleTotal
+            const mainTotal = isCredit ? saleTotal : saleTotal - capturedCreditAmt
+            const mainPaymentMethod = isCredit ? 'CREDITO' : capturedIsMixed
+                ? (capturedHasEfectivo ? 'EFECTIVO' : 'SINPE')
+                : method
+            const mainPaymentMethod2 = capturedHasEfectivo && capturedHasSinpe ? 'SINPE' : null
+            const mainAmount2 = capturedHasEfectivo && capturedHasSinpe ? splitAmountNum : null
+            const mainAmountReceived = isCredit ? null
+                : capturedHasEfectivo ? saleReceived
+                : capturedHasSinpe ? mainTotal
+                : (method === 'EFECTIVO' ? saleReceived : mainTotal)
+            const cashNeeded = mainTotal - (capturedHasSinpe ? splitAmountNum : 0)
+            const mainChange = isCredit ? 0
+                : capturedHasEfectivo ? Math.max(0, saleReceived - cashNeeded)
+                : (method === 'EFECTIVO' ? Math.max(0, saleReceived - mainTotal) : 0)
             const sale = await createSale.mutateAsync({
-                items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: saleTotal,
-                paymentMethod: isCredit ? 'CREDITO' : method,
-                amountReceived: (method === 'EFECTIVO' || isSplit) && !isCredit ? saleReceived : (isCredit ? null : saleTotal),
-                change: (method === 'EFECTIVO' || isSplit) && !isCredit ? Math.max(0, saleReceived - cashNeeded) : 0,
+                items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: mainTotal,
+                paymentMethod: mainPaymentMethod as any,
+                amountReceived: mainAmountReceived,
+                change: mainChange,
                 isCredit, clientId,
                 cashRegisterId: activeRegister?.id ?? null,
                 notes: `Cajero: ${saleCashier ?? 'Sin cajero'}`,
-                paymentMethod2: isSplit ? 'SINPE' : null,
-                amount2: isSplit ? splitAmt : null,
+                paymentMethod2: mainPaymentMethod2 as any,
+                amount2: mainAmount2,
             })
+
+            if (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId) {
+                await createCreditNote({
+                    items: saleItems,
+                    subtotal: capturedCreditAmt,
+                    discount: 0,
+                    total: capturedCreditAmt,
+                    clientId: capturedCreditClientId,
+                    notes: `Cargo a cuenta. Cajero: ${saleCashier ?? 'Sin cajero'}`,
+                })
+                qc.invalidateQueries({ queryKey: ['credit-sales'] })
+                qc.invalidateQueries({ queryKey: ['clients'] })
+            }
+
             setSaleSuccess({
                 total: saleTotal,
                 itemCount: saleItems.reduce((s, i) => s + i.quantity, 0),
@@ -457,8 +504,9 @@ export function POSPage() {
             clearCart()
             setAmountReceived('')
             setPaymentMethod('EFECTIVO')
-            setSplitMode(false)
-            setSplitAmount('')
+            setMixedMethods([])
+            setCreditAmount('')
+            setCreditClientId(null)
             setSelectedClientId(null)
             setShowCreditModal(false)
             setActiveOrderId(null)
@@ -770,10 +818,16 @@ export function POSPage() {
                                 onSorteo={() => setSorteoOpen(true)}
                                 pendingDebt={pendingDebt.hasDebt ? { clientName: pendingDebt.clientName, total: pendingDebt.debtTotal } : undefined}
                                 onClearDebt={pendingDebt.hasDebt ? handleClearDebt : undefined}
-                                splitMode={splitMode}
-                                onToggleSplit={handleToggleSplit}
+                                mixedMethods={mixedMethods}
+                                onOpenMixedSelect={handleOpenMixedSelect}
+                                onOpenMixedCancel={handleOpenMixedCancel}
                                 splitAmount={splitAmount}
                                 onChangeSplitAmount={setSplitAmount}
+                                creditAmount={creditAmount}
+                                onChangeCreditAmount={setCreditAmount}
+                                creditClientId={creditClientId}
+                                onSelectCreditClient={setCreditClientId}
+                                clients={clients.filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name }))}
                             />
                         </div>
                     </>
@@ -844,10 +898,16 @@ export function POSPage() {
                                     onOpenDrawer={handleOpenDrawer}
                                     pendingDebt={pendingDebt.hasDebt ? { clientName: pendingDebt.clientName, total: pendingDebt.debtTotal } : undefined}
                                     onClearDebt={pendingDebt.hasDebt ? handleClearDebt : undefined}
-                                    splitMode={splitMode}
-                                    onToggleSplit={handleToggleSplit}
+                                    mixedMethods={mixedMethods}
+                                    onOpenMixedSelect={handleOpenMixedSelect}
+                                    onOpenMixedCancel={handleOpenMixedCancel}
                                     splitAmount={splitAmount}
                                     onChangeSplitAmount={setSplitAmount}
+                                    creditAmount={creditAmount}
+                                    onChangeCreditAmount={setCreditAmount}
+                                    creditClientId={creditClientId}
+                                    onSelectCreditClient={setCreditClientId}
+                                    clients={clients.filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name }))}
                                 />
                             </div>
                         </div>
@@ -879,6 +939,15 @@ export function POSPage() {
                 onSelectClient={setSelectedClientId}
                 onConfirm={() => processSale({ isCredit: true, clientId: selectedClientId })}
                 isPending={createSale.isPending}
+            />
+
+            <MixedPaymentModal
+                isOpen={showMixedModal}
+                onClose={() => setShowMixedModal(false)}
+                initialView={mixedModalView}
+                currentMethods={mixedMethods}
+                onConfirm={handleMixedConfirm}
+                onCancelMixed={handleCancelMixed}
             />
 
             <PriceEditModal
