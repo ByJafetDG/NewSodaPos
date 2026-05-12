@@ -526,6 +526,10 @@ export function initDb() {
       ).run()
     }
   } catch {}
+
+  try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN paidAt TEXT`);
+  } catch {}
 }
 
 /**

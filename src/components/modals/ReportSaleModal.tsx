@@ -81,6 +81,10 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
     const date = new Date(sale.date)
     const dateStr = date.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
     const timeStr = date.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+    const paidAt = sale.paidAt ? new Date(sale.paidAt) : null
+    const paidDateStr = paidAt?.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
+    const paidTimeStr = paidAt?.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+    const showBothDates = paidAt && paidDateStr !== dateStr
 
     return (
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#192030]">
@@ -88,7 +92,15 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
                 <h2 className="text-[16px] font-semibold text-[#E4ECF7]">Venta #{sale.saleNumber}</h2>
                 <div className="flex items-center gap-1.5 mt-0.5">
                     <Clock size={11} className="text-[#3D506A]" />
-                    <span className="text-[11px] text-[#3D506A]">{dateStr} · {timeStr}</span>
+                    {showBothDates ? (
+                        <span className="text-[11px] text-[#3D506A]">
+                            Realizada {dateStr} · {timeStr}
+                            <span className="mx-1 text-[#1C2438]">→</span>
+                            <span className="text-emerald-400/80">Pagada {paidDateStr} · {paidTimeStr}</span>
+                        </span>
+                    ) : (
+                        <span className="text-[11px] text-[#3D506A]">{dateStr} · {timeStr}</span>
+                    )}
                 </div>
             </div>
             <div className="flex items-center gap-2">

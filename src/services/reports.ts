@@ -16,9 +16,13 @@ export async function getReportData(from: string, to: string) {
                     WHERE si.saleId = s.id) as items_json
             FROM Sale s
             LEFT JOIN Client c ON s.clientId = c.id
-            WHERE s.date >= ? AND s.date <= ? AND s.status = 'COMPLETADA'
-            ORDER BY s.date DESC
-        `, [from, to])
+            WHERE s.status = 'COMPLETADA'
+              AND (
+                (s.date >= ? AND s.date <= ?)
+                OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
+              )
+            ORDER BY COALESCE(s.paidAt, s.date) DESC
+        `, [from, to, from, to])
 
         const expenses = await window.electronAPI.dbQuery(`
             SELECT e.amount, e.description, e.date,
@@ -61,7 +65,7 @@ export async function getReportData(from: string, to: string) {
         supabase
             .from('Sale')
             .select('*, client:Client(name), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
-            .gte('date', from).lte('date', to)
+            .or(`and(date.gte.${from},date.lte.${to}),and(paidAt.gte.${from},paidAt.lte.${to},paidAt.not.is.null)`)
             .eq('status', 'COMPLETADA')
             .order('date', { ascending: false }),
 

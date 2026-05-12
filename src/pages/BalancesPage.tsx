@@ -13,6 +13,7 @@ import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import {
     useClients, useCreateClient, useUpdateClient, useDeleteClient,
     useCreditSales, useSettleSale, useSettleClientSales, useSalesByClient,
+    useDeleteCreditSale,
 } from '@/hooks/useClients'
 import { cn, formatCurrency, normalizeStr } from '@/lib/utils'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
@@ -368,11 +369,13 @@ function ClientDetailView({ client, onBack, onEdit }: {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [expandedId, setExpandedId] = useState<string | null>(null)
     const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
+    const [deletingSaleId, setDeletingSaleId] = useState<string | null>(null)
 
     const { data: pendingSales = [] } = useCreditSales(client.id)
     const { data: allSales = [] } = useSalesByClient(client.id)
     const settleSale = useSettleSale()
     const settleClientSales = useSettleClientSales()
+    const deleteCreditSale = useDeleteCreditSale()
     const pendingStore = usePendingSettleStore()
     const setCurrentPage = useUIStore(s => s.setCurrentPage)
 
@@ -633,6 +636,13 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                                         Saldar
                                                     </button>
                                                     <button
+                                                        onClick={(e) => { e.stopPropagation(); setDeletingSaleId(s.id) }}
+                                                        className="w-7 h-7 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                                                        title="Eliminar cuenta"
+                                                    >
+                                                        <Trash2 size={13} />
+                                                    </button>
+                                                    <button
                                                         onClick={() => setExpandedId(isExpanded ? null : s.id)}
                                                         className="w-7 h-7 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5 transition-all cursor-pointer"
                                                     >
@@ -730,6 +740,18 @@ function ClientDetailView({ client, onBack, onEdit }: {
                 isOpen={selectedSale !== null}
                 onClose={() => setSelectedSale(null)}
                 sale={selectedSale}
+            />
+            <DeleteConfirmModal
+                isOpen={deletingSaleId !== null}
+                onClose={() => setDeletingSaleId(null)}
+                onConfirm={async () => {
+                    if (!deletingSaleId) return
+                    await deleteCreditSale.mutateAsync(deletingSaleId)
+                    setDeletingSaleId(null)
+                }}
+                title="Eliminar cuenta pendiente"
+                description="Se eliminará esta cuenta y se repondrá el stock. Esta acción no se puede deshacer."
+                isPending={deleteCreditSale.isPending}
             />
         </div>
     )

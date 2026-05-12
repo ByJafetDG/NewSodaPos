@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getClients, createClient, updateClient, deleteClient, getCreditSales, settleSale, settleClientSales, getSalesByClient } from '@/services/clients'
+import { getClients, createClient, updateClient, deleteClient, getCreditSales, settleSale, settleClientSales, getSalesByClient, deleteCreditSale } from '@/services/clients'
 import { toast } from '@/components/ui/Toast'
 import type { Client } from '@/types'
 
@@ -74,5 +74,19 @@ export function useSalesByClient(clientId: string | null) {
         queryFn: () => getSalesByClient(clientId!),
         enabled: !!clientId,
         staleTime: 1000 * 30,
+    })
+}
+
+export function useDeleteCreditSale() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: deleteCreditSale,
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['credit-sales'] })
+            qc.invalidateQueries({ queryKey: ['sales-by-client'] })
+            qc.invalidateQueries({ queryKey: ['active-register'] })
+            qc.invalidateQueries({ queryKey: ['register-history'] })
+        },
+        onError: (err: Error) => toast.error(err.message),
     })
 }

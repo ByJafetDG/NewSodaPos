@@ -56,6 +56,7 @@ export interface Sale {
     clientId: string | null; client?: Client; items: SaleItem[]; status: SaleStatus
     notes: string | null; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
     paymentMethod2?: PaymentMethod | null; amount2?: number | null
+    paidAt?: string | null
 }
 
 export interface CartItem {

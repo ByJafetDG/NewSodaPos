@@ -4,7 +4,7 @@ import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
-import { settleSale as settleSaleService } from '@/services/clients'
+import { settleSaleDirect } from '@/services/clients'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
@@ -156,7 +156,7 @@ export function POSPage() {
     const splitAmountNum = parseFloat(splitAmount) || 0
     const cashPortion = splitMode && splitAmountNum > 0 ? effectiveTotal - splitAmountNum : effectiveTotal
     const canCharge =
-        items.length > 0 &&
+        (items.length > 0 || pendingDebt.hasDebt) &&
         !createSale.isPending &&
         (splitMode
             ? splitAmountNum > 0 && splitAmountNum < effectiveTotal && received >= cashPortion
@@ -333,6 +333,83 @@ export function POSPage() {
             const saleCashier = selectedEmployee?.name ?? null
             const capturedDebt = pendingDebt.hasDebt ? { ...pendingDebt } : null
 
+            // Cart empty + debt only: settle original sales (no new sale, avoids empty-items record)
+            if (saleItems.length === 0 && capturedDebt && !isCredit) {
+                const debtItems = capturedDebt.sales.flatMap((s: any) =>
+                    (s.items ?? []).map((item: any) => ({
+                        name: item.product?.name ?? 'Producto',
+                        quantity: item.quantity,
+                        unitPrice: item.unitPrice,
+                        subtotal: item.subtotal,
+                    }))
+                )
+                const debtItemCount = debtItems.reduce((n: number, i: any) => n + i.quantity, 0)
+                const changeGiven = method === 'EFECTIVO' ? Math.max(0, saleReceived - capturedDebt.debtTotal) : 0
+                const firstSale = capturedDebt.sales[0] as any
+
+                for (let idx = 0; idx < capturedDebt.saleIds.length; idx++) {
+                    const id = capturedDebt.saleIds[idx]
+                    try {
+                        await settleSaleDirect(id, {
+                            paymentMethod: method,
+                            cashRegisterId: activeRegister?.id ?? null,
+                            amountReceived: idx === 0 ? (method === 'EFECTIVO' ? saleReceived : capturedDebt.debtTotal) : null,
+                            change: idx === 0 ? changeGiven : null,
+                        })
+                    } catch { /* ignore individual errors */ }
+                }
+                pendingDebt.clear()
+                qc.invalidateQueries({ queryKey: ['credit-sales'] })
+                qc.invalidateQueries({ queryKey: ['active-register'] })
+
+                setSaleSuccess({
+                    total: capturedDebt.debtTotal,
+                    itemCount: debtItemCount,
+                    items: debtItems,
+                    cashier: saleCashier ?? 'Sin cajero',
+                    paymentMethod: method,
+                })
+                if (activeOrderId) deleteHeldOrder(activeOrderId)
+                clearCart()
+                setAmountReceived('')
+                setPaymentMethod('EFECTIVO')
+                setSplitMode(false)
+                setSplitAmount('')
+                setSelectedClientId(null)
+                setShowCreditModal(false)
+                setActiveOrderId(null)
+                setActiveOrderName(null)
+                setMergeSnapshot(null)
+                setSorteoDeclined(false)
+                if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
+
+                const printerPort2 = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
+                if (printerPort2 && window.electronAPI?.printReceipt && firstSale) {
+                    const tOpts2 = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
+                    await window.electronAPI.printReceipt(printerPort2, {
+                        businessName: config?.name || 'Soda El Pelón',
+                        address: config?.address,
+                        phone: config?.phone,
+                        header: config?.ticketHeader || null,
+                        saleNumber: firstSale.saleNumber,
+                        date: new Date().toISOString(),
+                        cashier: saleCashier,
+                        items: debtItems,
+                        total: capturedDebt.debtTotal,
+                        paymentMethod: method,
+                        amountReceived: method === 'EFECTIVO' ? saleReceived : null,
+                        change: changeGiven,
+                        footer: config?.ticketFooter || '¡Gracias por su compra!',
+                        showCashier: tOpts2.showCashier ?? true,
+                        showChange: tOpts2.showChange ?? true,
+                        showHeader: tOpts2.showHeader ?? true,
+                        showUnitPrice: tOpts2.showUnitPrice ?? false,
+                        currencySymbol: tOpts2.currencySymbol ?? '₡',
+                    }).catch((err: any) => console.error('[POS] Auto-print error:', err))
+                }
+                return
+            }
+
             const isSplit = splitMode && !isCredit
             const splitAmt = isSplit ? splitAmountNum : 0
             const cashNeeded = isSplit ? saleTotal - splitAmt : saleTotal
@@ -371,10 +448,11 @@ export function POSPage() {
             // Settle pending debt sales if navigated from Balances
             if (capturedDebt && capturedDebt.saleIds.length > 0) {
                 for (const id of capturedDebt.saleIds) {
-                    try { await settleSaleService(id) } catch { /* ignore individual settle errors */ }
+                    try { await settleSaleDirect(id) } catch { /* ignore individual settle errors */ }
                 }
                 pendingDebt.clear()
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
+                qc.invalidateQueries({ queryKey: ['active-register'] })
             }
 
             // Auto-record non-participation if sorteo was eligible but never used

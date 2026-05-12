@@ -65,15 +65,17 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
     if (window.electronAPI) {
         // Validate stock before committing — second line of defense after cartStore
         const ids = input.items.map(i => i.id)
-        const placeholders = ids.map(() => '?').join(',')
-        const stocks: any[] = await window.electronAPI.dbQuery(
-            `SELECT id, name, stockQty, isInfinite FROM Product WHERE id IN (${placeholders})`,
-            ids
-        )
-        for (const item of input.items) {
-            const prod = stocks.find((s: any) => s.id === item.id)
-            if (prod && !prod.isInfinite && prod.stockQty < item.quantity) {
-                throw new Error(`Stock insuficiente para "${prod.name}": disponible ${prod.stockQty}, solicitado ${item.quantity}`)
+        if (ids.length > 0) {
+            const placeholders = ids.map(() => '?').join(',')
+            const stocks: any[] = await window.electronAPI.dbQuery(
+                `SELECT id, name, stockQty, isInfinite FROM Product WHERE id IN (${placeholders})`,
+                ids
+            )
+            for (const item of input.items) {
+                const prod = stocks.find((s: any) => s.id === item.id)
+                if (prod && !prod.isInfinite && prod.stockQty < item.quantity) {
+                    throw new Error(`Stock insuficiente para "${prod.name}": disponible ${prod.stockQty}, solicitado ${item.quantity}`)
+                }
             }
         }
 
@@ -140,11 +142,12 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
         createdAt: now,
     }))
 
-    const { error: itemsError } = await supabase
-        .from('SaleItem')
-        .insert(saleItems)
-
-    if (itemsError) throw itemsError
+    if (saleItems.length > 0) {
+        const { error: itemsError } = await supabase
+            .from('SaleItem')
+            .insert(saleItems)
+        if (itemsError) throw itemsError
+    }
 
     // 3. Update stock for each product (decrease)
     for (const item of input.items) {

@@ -211,6 +211,7 @@ export function PaymentPanel({
                     subtotal={subtotal}
                     discount={discount}
                     total={total}
+                    debtTotal={pendingDebt?.total}
                 />
             </div>
 
@@ -284,7 +285,7 @@ export function PaymentPanel({
                 >
                     {isPending
                         ? 'Procesando...'
-                        : hasItems
+                        : hasItems || pendingDebt
                             ? `Cobrar ${formatCurrency(effectiveTotal)}`
                             : 'Sin productos'
                     }
