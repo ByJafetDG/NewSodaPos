@@ -3,18 +3,7 @@ import { supabase } from '@/lib/supabase'
 export async function getReportData(from: string, to: string) {
     if (window.electronAPI) {
         const sales = await window.electronAPI.dbQuery(`
-            SELECT s.*, c.name as clientName,
-                   (SELECT json_group_array(json_object(
-                       'productId', si.productId,
-                       'quantity', si.quantity,
-                       'unitPrice', si.unitPrice,
-                       'subtotal', si.subtotal,
-                       'notes', si.notes,
-                       'product', json_object('name', p.name)
-                   ))
-                    FROM SaleItem si
-                    JOIN Product p ON si.productId = p.id
-                    WHERE si.saleId = s.id) as items_json
+            SELECT s.*, c.name as clientName
             FROM Sale s
             LEFT JOIN Client c ON s.clientId = c.id
             WHERE s.status = 'COMPLETADA'
@@ -24,6 +13,31 @@ export async function getReportData(from: string, to: string) {
               )
             ORDER BY COALESCE(s.paidAt, s.date) DESC
         `, [from, to, from, to])
+
+        const rawItems = await window.electronAPI.dbQuery(`
+            SELECT si.saleId, si.productId, si.quantity, si.unitPrice, si.subtotal,
+                   COALESCE(p.name, 'Producto') as productName
+            FROM SaleItem si
+            INNER JOIN Sale s ON si.saleId = s.id
+            LEFT JOIN Product p ON si.productId = p.id
+            WHERE s.status = 'COMPLETADA'
+              AND (
+                (s.date >= ? AND s.date <= ?)
+                OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
+              )
+        `, [from, to, from, to])
+
+        const itemsMap: Record<string, any[]> = {}
+        for (const item of rawItems as any[]) {
+            if (!itemsMap[item.saleId]) itemsMap[item.saleId] = []
+            itemsMap[item.saleId].push({
+                productId: item.productId,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                subtotal: item.subtotal,
+                product: { name: item.productName },
+            })
+        }
 
         const expenses = await window.electronAPI.dbQuery(`
             SELECT e.amount, e.description, e.date,
@@ -53,7 +67,7 @@ export async function getReportData(from: string, to: string) {
             sales: sales.map((s: any) => ({
                 ...s,
                 isCredit: !!s.isCredit,
-                items: JSON.parse(s.items_json || '[]'),
+                items: itemsMap[s.id] ?? [],
             })),
             expenses: expenses.map((e: any) => ({ ...e, category: JSON.parse(e.category) })),
             products: products.map((p: any) => ({ ...p, category: JSON.parse(p.category) })),
@@ -65,7 +79,7 @@ export async function getReportData(from: string, to: string) {
     const [salesRes, expensesRes, productsRes, creditSalesRes, paymentsRes] = await Promise.all([
         supabase
             .from('Sale')
-            .select('*, client:Client(name), items:SaleItem(productId, quantity, unitPrice, subtotal, notes, product:Product(name))')
+            .select('*, client:Client(name), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
             .or(`and(date.gte.${from},date.lte.${to}),and(paidAt.gte.${from},paidAt.lte.${to},paidAt.not.is.null)`)
             .eq('status', 'COMPLETADA')
             .order('date', { ascending: false }),

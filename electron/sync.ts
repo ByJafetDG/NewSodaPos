@@ -339,42 +339,87 @@ async function pullSync() {
         }
 
         // 8. Sync CashRegisters (parent of Sale and Expense)
-        const { data: registers, error: regError } = await supabase.from('CashRegister').select('*');
+        const { data: registers, error: regError } = await supabase.from('CashRegister').select('*').limit(1000);
         if (regError) throw regError;
         if (registers) {
             transaction(() => {
                 for (const reg of registers) {
                     execute(`
-                        INSERT OR REPLACE INTO CashRegister (id, openedAt, closedAt, initialAmount, finalAmount, salesCash, salesCard, salesSinpe, salesTransfer, salesCredit, expensesTotal, notes, status, syncStatus, updatedAt)
+                        INSERT INTO CashRegister (id, openedAt, closedAt, initialAmount, finalAmount, salesCash, salesCard, salesSinpe, salesTransfer, salesCredit, expensesTotal, notes, status, syncStatus, updatedAt)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            openedAt = excluded.openedAt,
+                            closedAt = excluded.closedAt,
+                            initialAmount = excluded.initialAmount,
+                            finalAmount = excluded.finalAmount,
+                            salesCash = excluded.salesCash,
+                            salesCard = excluded.salesCard,
+                            salesSinpe = excluded.salesSinpe,
+                            salesTransfer = excluded.salesTransfer,
+                            salesCredit = excluded.salesCredit,
+                            expensesTotal = excluded.expensesTotal,
+                            notes = excluded.notes,
+                            status = excluded.status,
+                            syncStatus = 'SYNCED',
+                            updatedAt = excluded.updatedAt
                     `, [reg.id, reg.openedAt, reg.closedAt ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
                 }
             });
         }
 
         // 9. Sync Sales (depends on CashRegister, Client)
-        const { data: sales, error: saleError } = await supabase.from('Sale').select('*');
+        const { data: sales, error: saleError } = await supabase.from('Sale').select('*').order('date', { ascending: false }).limit(2000);
         if (saleError) throw saleError;
         if (sales) {
             transaction(() => {
                 for (const sale of sales) {
                     execute(`
-                        INSERT OR REPLACE INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt)
+                        INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            saleNumber = excluded.saleNumber,
+                            date = excluded.date,
+                            subtotal = excluded.subtotal,
+                            discount = excluded.discount,
+                            total = excluded.total,
+                            paymentMethod = excluded.paymentMethod,
+                            amountReceived = excluded.amountReceived,
+                            change = excluded.change,
+                            cashRegisterId = excluded.cashRegisterId,
+                            isCredit = excluded.isCredit,
+                            clientId = excluded.clientId,
+                            status = excluded.status,
+                            notes = excluded.notes,
+                            syncStatus = 'SYNCED',
+                            updatedAt = excluded.updatedAt
+                        ON CONFLICT(saleNumber) DO UPDATE SET
+                            date = excluded.date,
+                            subtotal = excluded.subtotal,
+                            discount = excluded.discount,
+                            total = excluded.total,
+                            status = excluded.status,
+                            updatedAt = excluded.updatedAt
                     `, [sale.id, sale.saleNumber, sale.date, sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt]);
                 }
             });
         }
 
         // 10. Sync SaleItems (depends on Sale, Product)
-        const { data: saleItems, error: saleItemError } = await supabase.from('SaleItem').select('*');
+        const { data: saleItems, error: saleItemError } = await supabase.from('SaleItem').select('*').order('createdAt', { ascending: false }).limit(5000);
         if (saleItemError) throw saleItemError;
         if (saleItems) {
             transaction(() => {
                 for (const item of saleItems) {
                     execute(`
-                        INSERT OR REPLACE INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes)
+                        INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            saleId = excluded.saleId,
+                            productId = excluded.productId,
+                            quantity = excluded.quantity,
+                            unitPrice = excluded.unitPrice,
+                            subtotal = excluded.subtotal,
+                            notes = excluded.notes
                     `, [item.id, item.saleId, item.productId, item.quantity, item.unitPrice, item.subtotal, item.notes ?? null]);
                 }
             });
@@ -387,8 +432,18 @@ async function pullSync() {
             transaction(() => {
                 for (const exp of expenses) {
                     execute(`
-                        INSERT OR REPLACE INTO Expense (id, description, amount, categoryId, supplier, date, notes, cashRegisterId, syncStatus, updatedAt)
+                        INSERT INTO Expense (id, description, amount, categoryId, supplier, date, notes, cashRegisterId, syncStatus, updatedAt)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            description = excluded.description,
+                            amount = excluded.amount,
+                            categoryId = excluded.categoryId,
+                            supplier = excluded.supplier,
+                            date = excluded.date,
+                            notes = excluded.notes,
+                            cashRegisterId = excluded.cashRegisterId,
+                            syncStatus = 'SYNCED',
+                            updatedAt = excluded.updatedAt
                     `, [exp.id, exp.description, exp.amount, exp.categoryId, exp.supplier ?? null, exp.date, exp.notes ?? null, exp.cashRegisterId ?? null, exp.updatedAt]);
                 }
             });
@@ -401,8 +456,17 @@ async function pullSync() {
             transaction(() => {
                 for (const mov of movements) {
                     execute(`
-                        INSERT OR REPLACE INTO InventoryMovement (id, productId, type, quantity, cost, reference, notes, date, syncStatus)
+                        INSERT INTO InventoryMovement (id, productId, type, quantity, cost, reference, notes, date, syncStatus)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED')
+                        ON CONFLICT(id) DO UPDATE SET
+                            productId = excluded.productId,
+                            type = excluded.type,
+                            quantity = excluded.quantity,
+                            cost = excluded.cost,
+                            reference = excluded.reference,
+                            notes = excluded.notes,
+                            date = excluded.date,
+                            syncStatus = 'SYNCED'
                     `, [mov.id, mov.productId, mov.type, mov.quantity, mov.cost ?? null, mov.reference ?? null, mov.notes ?? null, mov.date]);
                 }
             });
@@ -415,8 +479,16 @@ async function pullSync() {
             transaction(() => {
                 for (const pay of payments) {
                     execute(`
-                        INSERT OR REPLACE INTO Payment (id, clientId, amount, method, reference, notes, date, syncStatus)
+                        INSERT INTO Payment (id, clientId, amount, method, reference, notes, date, syncStatus)
                         VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED')
+                        ON CONFLICT(id) DO UPDATE SET
+                            clientId = excluded.clientId,
+                            amount = excluded.amount,
+                            method = excluded.method,
+                            reference = excluded.reference,
+                            notes = excluded.notes,
+                            date = excluded.date,
+                            syncStatus = 'SYNCED'
                     `, [pay.id, pay.clientId, pay.amount, pay.method, pay.reference ?? null, pay.notes ?? null, pay.date]);
                 }
             });
