@@ -202,6 +202,7 @@ export function initDb() {
       printerModel TEXT,
       drawerEnabled INTEGER DEFAULT 1,
       modalsKeyboardEnabled INTEGER DEFAULT 1,
+      syncStatus TEXT DEFAULT 'SYNCED',
       createdAt TEXT DEFAULT (datetime('now')),
       updatedAt TEXT DEFAULT (datetime('now'))
     );
@@ -533,6 +534,10 @@ export function initDb() {
 
   try {
     db.exec(`ALTER TABLE SaleItem ADD COLUMN notes TEXT`);
+  } catch {}
+
+  try {
+    db.exec(`ALTER TABLE BusinessConfig ADD COLUMN syncStatus TEXT DEFAULT 'SYNCED'`);
   } catch {}
 }
 

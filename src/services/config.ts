@@ -30,13 +30,13 @@ export async function updateBusinessConfig(input: UpdateConfigInput) {
             const fields = Object.entries(input).map(([k]) => `${k} = ?`).join(', ')
             const values = Object.values(input).map(v => typeof v === 'boolean' ? (v ? 1 : 0) : v)
             await window.electronAPI.dbExecute(
-                `UPDATE BusinessConfig SET ${fields}, updatedAt = ? WHERE id = 'default'`,
+                `UPDATE BusinessConfig SET ${fields}, updatedAt = ?, syncStatus = 'PENDING' WHERE id = 'default'`,
                 [...values, now]
             )
         } else {
             await window.electronAPI.dbExecute(
-                `INSERT INTO BusinessConfig (id, name, address, phone, ticketHeader, ticketFooter, printerPort, printerModel, drawerEnabled, updatedAt)
-                 VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT INTO BusinessConfig (id, name, address, phone, ticketHeader, ticketFooter, printerPort, printerModel, drawerEnabled, syncStatus, updatedAt)
+                 VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
                 [
                     input.name ?? 'Mi Soda', input.address ?? null, input.phone ?? null,
                     input.ticketHeader ?? null, input.ticketFooter ?? '¡Gracias por su compra!',

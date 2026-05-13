@@ -129,7 +129,7 @@ ipcMain.handle('db:execute-transaction', (_, ops: Array<{ sql: string; params: a
 
 // Sync Stats
 ipcMain.handle('sync:stats', async () => {
-    const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Product', 'Category'];
+    const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Product', 'Category', 'BusinessConfig'];
     let totalPending = 0;
     for (const table of tables) {
         try {
@@ -146,7 +146,7 @@ ipcMain.handle('sync:force-push', async () => {
     if (isDev) {
         return { totalRemaining: 0, remaining: {}, pushErrors: ['[DEV MODE] Push deshabilitado — ejecuta el build de producción para sincronizar.'] };
     }
-    const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Category', 'Subcategory', 'Product'];
+    const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Category', 'Subcategory', 'Product', 'BusinessConfig'];
     for (const table of tables) {
         try {
             execute(`UPDATE ${table} SET syncStatus = 'PENDING' WHERE syncStatus = 'SYNCED' OR syncStatus IS NULL`, []);

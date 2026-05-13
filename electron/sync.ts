@@ -159,6 +159,7 @@ async function processEmailQueue() {
 async function pullSync() {
     console.log('[SyncEngine] Pulling updates from Supabase...');
     try {
+        execute('PRAGMA foreign_keys = OFF');
         // 1. Sync Categories
         const { data: categories, error: catError } = await supabase.from('Category').select('*');
         if (catError) throw catError;
@@ -260,18 +261,19 @@ async function pullSync() {
             transaction(() => {
                 for (const conf of configs) {
                     execute(`
-            INSERT INTO BusinessConfig (id, name, address, phone, ticketHeader, ticketFooter, printerPort, printerModel, drawerEnabled, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO BusinessConfig (id, name, address, phone, ticketHeader, ticketFooter, printerPort, printerModel, drawerEnabled, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
-              name = excluded.name,
-              address = excluded.address,
-              phone = excluded.phone,
-              ticketHeader = excluded.ticketHeader,
-              ticketFooter = excluded.ticketFooter,
-              printerPort = excluded.printerPort,
-              printerModel = excluded.printerModel,
-              drawerEnabled = excluded.drawerEnabled,
-              updatedAt = excluded.updatedAt
+              name =          CASE WHEN syncStatus = 'PENDING' THEN name          ELSE excluded.name          END,
+              address =       CASE WHEN syncStatus = 'PENDING' THEN address       ELSE excluded.address       END,
+              phone =         CASE WHEN syncStatus = 'PENDING' THEN phone         ELSE excluded.phone         END,
+              ticketHeader =  CASE WHEN syncStatus = 'PENDING' THEN ticketHeader  ELSE excluded.ticketHeader  END,
+              ticketFooter =  CASE WHEN syncStatus = 'PENDING' THEN ticketFooter  ELSE excluded.ticketFooter  END,
+              printerPort =   CASE WHEN syncStatus = 'PENDING' THEN printerPort   ELSE excluded.printerPort   END,
+              printerModel =  CASE WHEN syncStatus = 'PENDING' THEN printerModel  ELSE excluded.printerModel  END,
+              drawerEnabled = CASE WHEN syncStatus = 'PENDING' THEN drawerEnabled ELSE excluded.drawerEnabled END,
+              syncStatus =    CASE WHEN syncStatus = 'PENDING' THEN 'PENDING'     ELSE 'SYNCED'               END,
+              updatedAt =     CASE WHEN syncStatus = 'PENDING' THEN updatedAt     ELSE excluded.updatedAt     END
           `, [conf.id, conf.name, conf.address, conf.phone, conf.ticketHeader, conf.ticketFooter, conf.printerPort, conf.printerModel, conf.drawerEnabled ? 1 : 0, conf.updatedAt]);
                 }
             });
@@ -497,6 +499,8 @@ async function pullSync() {
         console.log('[SyncEngine] Pull items success.');
     } catch (err) {
         console.error('[SyncEngine] Pull failed:', err);
+    } finally {
+        execute('PRAGMA foreign_keys = ON');
     }
 }
 
@@ -515,10 +519,12 @@ export async function pushSync(): Promise<string[]> {
     const pendingProducts = query(`SELECT * FROM Product WHERE syncStatus = 'PENDING'`) as any[];
     const pendingCategories = query(`SELECT * FROM Category WHERE syncStatus = 'PENDING'`) as any[];
     const pendingSubcategories = query(`SELECT * FROM Subcategory WHERE syncStatus = 'PENDING'`) as any[];
+    const pendingConfig = query(`SELECT * FROM BusinessConfig WHERE syncStatus = 'PENDING'`) as any[];
 
     const totalPending = pendingSales.length + pendingExpenses.length + pendingMovements.length +
         pendingRegisters.length + pendingPayments.length + pendingEmployees.length +
-        pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length;
+        pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length +
+        pendingConfig.length;
 
     if (totalPending === 0) return [];
 
@@ -626,7 +632,32 @@ export async function pushSync(): Promise<string[]> {
         }
     }
 
-    // 5. Subcategories — referenced by Product (after Category)
+    // 5. BusinessConfig
+    for (const conf of pendingConfig) {
+        try {
+            const { error } = await supabase.from('BusinessConfig').upsert({
+                id: conf.id,
+                name: conf.name,
+                address: conf.address,
+                phone: conf.phone,
+                ticketHeader: conf.ticketHeader,
+                ticketFooter: conf.ticketFooter,
+                printerPort: conf.printerPort,
+                printerModel: conf.printerModel,
+                drawerEnabled: !!conf.drawerEnabled,
+                updatedAt: new Date().toISOString()
+            });
+            if (error) throw error;
+            execute(`UPDATE BusinessConfig SET syncStatus = 'SYNCED' WHERE id = ?`, [conf.id]);
+        } catch (err: any) {
+            const msg = `BusinessConfig ${conf.id}: ${err?.message ?? err}`;
+            logError(msg);
+            errors.push(msg);
+            persistSyncError('BusinessConfig', conf.id, msg);
+        }
+    }
+
+    // 6. Subcategories — referenced by Product (after Category)
     for (const sub of pendingSubcategories) {
         try {
             const { error } = await supabase.from('Subcategory').upsert({

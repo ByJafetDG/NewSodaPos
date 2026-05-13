@@ -32,7 +32,7 @@ export function SplashScreen() {
                         </div>
                         <div className="flex flex-col items-center gap-1">
                             <p className="text-[22px] font-bold text-[#E4ECF7] tracking-tight">Soda POS</p>
-                            <p className="text-[13px] text-[#3D506A]">v2.0</p>
+                            <p className="text-[13px] text-[#3D506A]">v{__APP_VERSION__}</p>
                         </div>
                     </motion.div>
 
