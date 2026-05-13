@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, CreditCard, Banknote, Smartphone, User, Clock } from 'lucide-react'
+import { X, CreditCard, Banknote, Smartphone, User, Clock, Printer } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
+import { useBusinessConfig } from '@/hooks/useConfig'
+import { toast } from '@/components/ui/Toast'
 
 function MarqueeText({ text, className }: { text: string; className?: string }) {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -77,6 +79,9 @@ export function ReportSaleModal({ sale, onClose }: ReportSaleModalProps) {
 }
 
 function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
+    const { data: config } = useBusinessConfig()
+    const [printing, setPrinting] = useState(false)
+
     const cfg = PM_CONFIG[sale.paymentMethod] ?? PM_CONFIG.EFECTIVO
     const date = new Date(sale.date)
     const dateStr = date.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -85,6 +90,53 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
     const paidDateStr = paidAt?.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
     const paidTimeStr = paidAt?.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
     const showBothDates = paidAt && paidDateStr !== dateStr
+
+    const handleReprint = async () => {
+        const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
+        if (!printerPort || !window.electronAPI?.printReceipt) {
+            toast.error('Impresora no configurada o no disponible')
+            return
+        }
+
+        const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
+        const cajeroIdx = (sale.notes ?? '').indexOf('Cajero:')
+        const cashier = cajeroIdx !== -1 ? sale.notes!.slice(cajeroIdx + 8).trim() : 'Sin cajero'
+
+        setPrinting(true)
+        try {
+            await window.electronAPI.printReceipt(printerPort, {
+                businessName: config?.name || 'Soda El Pelón',
+                address: config?.address,
+                phone: config?.phone,
+                header: config?.ticketHeader || null,
+                saleNumber: sale.saleNumber,
+                date: sale.date,
+                cashier: cashier,
+                items: (sale.items ?? []).map((i: any) => ({
+                    name: i.product?.name || 'Producto',
+                    quantity: i.quantity,
+                    unitPrice: i.unitPrice,
+                    subtotal: i.subtotal,
+                })),
+                total: sale.total,
+                paymentMethod: sale.paymentMethod,
+                amountReceived: sale.amountReceived,
+                change: sale.change,
+                footer: config?.ticketFooter || '¡Gracias por su compra!',
+                showCashier: tOpts.showCashier ?? true,
+                showChange: tOpts.showChange ?? true,
+                showHeader: tOpts.showHeader ?? true,
+                showUnitPrice: tOpts.showUnitPrice ?? false,
+                currencySymbol: tOpts.currencySymbol ?? '₡',
+            })
+            toast.success('Ticket enviado a la impresora')
+        } catch (err) {
+            console.error(err)
+            toast.error('Error al intentar imprimir')
+        } finally {
+            setPrinting(false)
+        }
+    }
 
     return (
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#192030]">
@@ -104,10 +156,20 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
                 </div>
             </div>
             <div className="flex items-center gap-2">
-                <span className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[12px] font-medium', cfg.color, cfg.badge)}>
+                <span className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[12px] font-medium mr-1', cfg.color, cfg.badge)}>
                     {cfg.icon}
                     {cfg.label}
                 </span>
+
+                <button
+                    onClick={handleReprint}
+                    disabled={printing}
+                    title="Reimprimir ticket"
+                    className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/20 flex items-center justify-center transition-all cursor-pointer disabled:opacity-50"
+                >
+                    <Printer size={13} className={cn(printing && 'animate-pulse')} />
+                </button>
+
                 <button
                     onClick={onClose}
                     className="w-8 h-8 rounded-lg bg-[#1A2236] border border-[#1E2A40] text-[#3D506A] hover:text-[#E4ECF7] flex items-center justify-center transition-all cursor-pointer"
