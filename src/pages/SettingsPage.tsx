@@ -27,8 +27,8 @@ function timeAgo(date: Date) {
     return `hace ${Math.floor(min / 60)}h`
 }
 
-type TicketOptions = { showCashier: boolean; showChange: boolean; showHeader: boolean; showUnitPrice: boolean; currencySymbol: string }
-const DEFAULT_TICKET_OPTIONS: TicketOptions = { showCashier: true, showChange: true, showHeader: true, showUnitPrice: false, currencySymbol: '₡' }
+type TicketOptions = { showCashier: boolean; showChange: boolean; showHeader: boolean; showUnitPrice: boolean; showDecimals: boolean; currencySymbol: string }
+const DEFAULT_TICKET_OPTIONS: TicketOptions = { showCashier: true, showChange: true, showHeader: true, showUnitPrice: false, showDecimals: true, currencySymbol: '₡' }
 const CURRENCY_OPTIONS = ['₡', '$', '€', '£', '¥']
 
 const SECTIONS: { id: Section; label: string; desc: string; icon: React.ElementType; color: string }[] = [
@@ -430,6 +430,12 @@ export function SettingsPage() {
                                         description="Precio por unidad de cada producto"
                                         value={ticketOpts.showUnitPrice}
                                         onChange={v => setTicketOpts(p => ({ ...p, showUnitPrice: v }))}
+                                    />
+                                    <ToggleRow
+                                        label="Mostrar decimales"
+                                        description="Forzar 2 decimales en los montos (ej: ,00)"
+                                        value={ticketOpts.showDecimals}
+                                        onChange={v => setTicketOpts(p => ({ ...p, showDecimals: v }))}
                                     />
                                     {ticketHeader && (
                                         <ToggleRow
@@ -949,7 +955,12 @@ function TicketPreview({ bizName, bizAddress, bizPhone, ticketHeader, ticketFoot
     opts: TicketOptions
 }) {
     const sep = <div className="border-t border-dashed border-gray-300 my-1.5" />
-    const sym = opts.currencySymbol || '₡'
+    const sym = opts.currencySymbol === '₡' ? '¢' : (opts.currencySymbol || '₡')
+    const fmt = (n: number) => n.toLocaleString('es-CR', {
+        minimumFractionDigits: opts.showDecimals ? 2 : 0,
+        maximumFractionDigits: opts.showDecimals ? 2 : 0
+    })
+
     return (
         <div className="bg-white text-black font-mono p-4 rounded-lg shadow-xl text-[11px] leading-relaxed border-2 border-gray-100 w-[240px] select-none">
             <div className="text-center font-bold text-[13px]">{bizName || 'Mi Soda'}</div>
@@ -963,19 +974,19 @@ function TicketPreview({ bizName, bizAddress, bizPhone, ticketHeader, ticketFoot
             {sep}
             <div className="flex justify-between">
                 <span>1x Casado con pollo</span>
-                <span>{sym}2,500</span>
+                <span>{sym}{fmt(2500)}</span>
             </div>
-            {opts.showUnitPrice && <div className="text-right text-[10px] text-gray-400">{sym}2,500 c/u</div>}
+            {opts.showUnitPrice && <div className="text-right text-[10px] text-gray-400">{sym}{fmt(2500)} c/u</div>}
             <div className="flex justify-between">
                 <span>2x Refresco natural</span>
-                <span>{sym}800</span>
+                <span>{sym}{fmt(800)}</span>
             </div>
-            {opts.showUnitPrice && <div className="text-right text-[10px] text-gray-400">{sym}400 c/u</div>}
+            {opts.showUnitPrice && <div className="text-right text-[10px] text-gray-400">{sym}{fmt(400)} c/u</div>}
             {sep}
-            <div className="text-right font-bold">TOTAL: {sym}3,300</div>
+            <div className="text-right font-bold">TOTAL: {sym}{fmt(3300)}</div>
             <div className="text-[10px]">Pago: EFECTIVO</div>
-            {opts.showChange && <div className="text-[10px]">Recibido: {sym}5,000</div>}
-            {opts.showChange && <div className="text-[10px]">Vuelto: {sym}1,700</div>}
+            {opts.showChange && <div className="text-[10px]">Recibido: {sym}{fmt(5000)}</div>}
+            {opts.showChange && <div className="text-[10px]">Vuelto: {sym}{fmt(1700)}</div>}
             {ticketFooter && (
                 <>
                     {sep}

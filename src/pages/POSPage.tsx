@@ -151,39 +151,39 @@ export function POSPage() {
 
     // ── Sorteos ──────────────────────────────────────────────────────────────
     const qc = useQueryClient()
-    const cartProductIds  = items.map(i => i.product.id)
+    const cartProductIds = items.map(i => i.product.id)
     const cartCategoryIds = [...new Set(items.map(i => i.product.categoryId))]
     const { data: cartSorteo } = useCartSorteo(cartProductIds, cartCategoryIds)
     const showSorteoButton = !!cartSorteo && !sorteoDeclined && items.length > 0
     const qualifyingCount = cartSorteo
         ? items.reduce((sum, item) => {
             const hit = cartSorteo.participants.some(p =>
-                (p.type === 'PRODUCT'   && p.refId === item.product.id) ||
-                (p.type === 'CATEGORY'  && p.refId === item.product.categoryId)
+                (p.type === 'PRODUCT' && p.refId === item.product.id) ||
+                (p.type === 'CATEGORY' && p.refId === item.product.categoryId)
             )
             return hit ? sum + item.quantity : sum
-          }, 0)
+        }, 0)
         : 0
 
     // ── Derived ───────────────────────────────────────────────────────────────
-    const received       = parseFloat(amountReceived) || 0
+    const received = parseFloat(amountReceived) || 0
     const effectiveTotal = total + (pendingDebt.hasDebt ? pendingDebt.debtTotal : 0)
     const splitAmountNum = parseFloat(splitAmount) || 0
     const creditAmountNum = parseFloat(creditAmount) || 0
-    const isMixed        = mixedMethods.length >= 2
-    const hasSinpeMixed  = isMixed && mixedMethods.includes('SINPE')
+    const isMixed = mixedMethods.length >= 2
+    const hasSinpeMixed = isMixed && mixedMethods.includes('SINPE')
     const hasEfectivoMixed = isMixed && mixedMethods.includes('EFECTIVO')
     const hasCuentaMixed = isMixed && mixedMethods.includes('CUENTA')
-    const cashPortion    = effectiveTotal - (hasSinpeMixed ? splitAmountNum : 0) - (hasCuentaMixed ? creditAmountNum : 0)
+    const cashPortion = effectiveTotal - (hasSinpeMixed ? splitAmountNum : 0) - (hasCuentaMixed ? creditAmountNum : 0)
     const canCharge =
         (items.length > 0 || pendingDebt.hasDebt) &&
         !createSale.isPending &&
         (isMixed
             ? (
                 (!hasCuentaMixed || (creditAmountNum > 0 && creditAmountNum < effectiveTotal && !!creditClientId)) &&
-                (!hasSinpeMixed  || splitAmountNum > 0) &&
+                (!hasSinpeMixed || splitAmountNum > 0) &&
                 (!hasEfectivoMixed || received >= Math.max(0, cashPortion))
-              )
+            )
             : (paymentMethod !== 'EFECTIVO' || received >= effectiveTotal)
         )
 
@@ -447,7 +447,7 @@ export function POSPage() {
                     }),
                     allClientNames,
                     totalCharged: clientTotal,
-                }).catch(() => {})
+                }).catch(() => { })
             })
         } catch (err) {
             console.error(err)
@@ -468,9 +468,9 @@ export function POSPage() {
             const saleItems = items
             const cartOnlyTotal = total        // only cart items — for the Sale record
             const saleTotal = effectiveTotal   // cart + debt — for change calculation & UI
-            const capturedSorteo    = cartSorteo
-            const capturedDeclined  = sorteoDeclined
-            const capturedQtyCount  = qualifyingCount
+            const capturedSorteo = cartSorteo
+            const capturedDeclined = sorteoDeclined
+            const capturedQtyCount = qualifyingCount
             const saleSubtotal = subtotal
             const saleDiscount = discount
             const saleReceived = received
@@ -539,7 +539,7 @@ export function POSPage() {
                             discount: s.discount,
                             total: s.total,
                         })),
-                    }).catch(() => {})
+                    }).catch(() => { })
                 }
 
                 setSaleSuccess({
@@ -575,6 +575,8 @@ export function POSPage() {
                         saleNumber: firstSale.saleNumber,
                         date: new Date().toISOString(),
                         cashier: saleCashier,
+                        clientName: settledClient?.name,
+                        clientCode: settledClient?.code,
                         items: debtItems,
                         total: capturedDebt.debtTotal,
                         paymentMethod: method,
@@ -585,6 +587,7 @@ export function POSPage() {
                         showChange: tOpts2.showChange ?? true,
                         showHeader: tOpts2.showHeader ?? true,
                         showUnitPrice: tOpts2.showUnitPrice ?? false,
+                        showDecimals: tOpts2.showDecimals ?? true,
                         currencySymbol: tOpts2.currencySymbol ?? '₡',
                     }).catch((err: any) => console.error('[POS] Auto-print error:', err))
                 }
@@ -600,12 +603,12 @@ export function POSPage() {
             const paymentTotal = capturedDebt ? saleTotal - capturedCreditAmt : mainTotal // full amount cashier must cover
             const mainAmountReceived = isCredit ? null
                 : capturedHasEfectivo ? saleReceived
-                : capturedHasSinpe ? paymentTotal
-                : (method === 'EFECTIVO' ? saleReceived : paymentTotal)
+                    : capturedHasSinpe ? paymentTotal
+                        : (method === 'EFECTIVO' ? saleReceived : paymentTotal)
             const cashNeeded = paymentTotal - (capturedHasSinpe ? splitAmountNum : 0)
             const mainChange = isCredit ? 0
                 : capturedHasEfectivo ? Math.max(0, saleReceived - cashNeeded)
-                : (method === 'EFECTIVO' ? Math.max(0, saleReceived - paymentTotal) : 0)
+                    : (method === 'EFECTIVO' ? Math.max(0, saleReceived - paymentTotal) : 0)
             const sale = await createSale.mutateAsync({
                 items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: mainTotal,
                 paymentMethod: mainPaymentMethod as any,
@@ -665,7 +668,7 @@ export function POSPage() {
                             ...(capturedHasSinpe ? { sinpe: mixedPayCtx.sinpe } : {}),
                             cuenta: capturedCreditAmt,
                         },
-                    }).catch(() => {})
+                    }).catch(() => { })
                 }
             }
 
@@ -727,6 +730,7 @@ export function POSPage() {
             // --- AUTOMATIC PRINTING — await before drawer to avoid COM port conflict ---
             if (printerPort && window.electronAPI?.printReceipt) {
                 const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
+                const selClient = clientId ? clients.find((c: any) => c.id === clientId) : null;
                 await window.electronAPI.printReceipt(printerPort, {
                     businessName: config?.name || 'Soda El Pelón',
                     address: config?.address,
@@ -735,6 +739,8 @@ export function POSPage() {
                     saleNumber: sale.saleNumber,
                     date: sale.date,
                     cashier: saleCashier,
+                    clientName: selClient?.name,
+                    clientCode: selClient?.code,
                     items: [
                         ...saleItems.map(i => ({
                             name: i.product.name,
@@ -758,6 +764,7 @@ export function POSPage() {
                     showChange: tOpts.showChange ?? true,
                     showHeader: tOpts.showHeader ?? true,
                     showUnitPrice: tOpts.showUnitPrice ?? false,
+                    showDecimals: tOpts.showDecimals ?? true,
                     currencySymbol: tOpts.currencySymbol ?? '₡',
                 }).catch(err => console.error('[POS] Auto-print error:', err))
             }

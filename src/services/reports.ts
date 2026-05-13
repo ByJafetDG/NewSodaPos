@@ -3,8 +3,8 @@ import { supabase } from '@/lib/supabase'
 export async function getReportData(from: string, to: string) {
     if (window.electronAPI) {
         const sales = await window.electronAPI.dbQuery(`
-            SELECT s.*, c.name as clientName
-            FROM Sale s
+            SELECT s.*, c.name as clientName, c.code as clientCode
+FROM Sale s
             LEFT JOIN Client c ON s.clientId = c.id
             WHERE s.status = 'COMPLETADA'
               AND (
@@ -79,7 +79,7 @@ export async function getReportData(from: string, to: string) {
     const [salesRes, expensesRes, productsRes, creditSalesRes, paymentsRes] = await Promise.all([
         supabase
             .from('Sale')
-            .select('*, client:Client(name), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
+            .select('*, client:Client(name, code), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
             .or(`and(date.gte.${from},date.lte.${to}),and(paidAt.gte.${from},paidAt.lte.${to},paidAt.not.is.null)`)
             .eq('status', 'COMPLETADA')
             .order('date', { ascending: false }),

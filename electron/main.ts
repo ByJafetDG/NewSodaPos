@@ -315,12 +315,23 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
         const bytes: number[] = []
 
         const currency = data.currencySymbol || '₡'
+        // Fallback for Colón symbol: use cent symbol '¢' (0xA2 in WPC1252) which looks similar
+        const displayCurrency = currency === '₡' ? '¢' : currency
+
+        // Helper for consistent money formatting (thousands: . decimals: ,)
+        const formatMoney = (val: number) => {
+            const showDecimals = data.showDecimals !== false // default to true if undefined
+            return (val || 0).toLocaleString('es-CR', {
+                minimumFractionDigits: showDecimals ? 2 : 0,
+                maximumFractionDigits: showDecimals ? 2 : 0
+            })
+        }
 
         // WPC1252: Spanish accents sit at their Unicode positions (0xC0-0xFF),
         // so passthrough for c < 256 works. Only map chars outside that range.
         const addText = (text: string) => {
             const map: { [key: string]: number } = {
-                '₡': 0x43, // no WPC1252 slot — print as 'C'
+                '₡': 0x43, // Fallback 'C' if somehow passed to addText, but we handle it above
                 '€': 0x80, // WPC1252 maps € at 0x80
             }
             for (let i = 0; i < text.length; i++) {
@@ -371,11 +382,19 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
         addText(`Ticket #${data.saleNumber}`)
         bytes.push(LF)
         bytes.push(ESC, 0x45, 0x00) // Bold off
-        addText(new Date(data.date).toLocaleString())
+        addText(new Date(data.date).toLocaleString('es-CR'))
         bytes.push(LF)
         if (data.cashier && data.showCashier !== false) {
             addText(`Cajero: ${data.cashier}`)
             bytes.push(LF)
+        }
+        if (data.clientName) {
+            addText(`Cliente: ${data.clientName}`)
+            bytes.push(LF)
+            if (data.clientCode) {
+                addText(`ID/Ced: ${data.clientCode}`)
+                bytes.push(LF)
+            }
         }
 
         addText('--------------------------------')
@@ -386,13 +405,13 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
         for (const item of items) {
             const qty = `${item.quantity}x `
             const itemName = item.name || ''
-            const price = ` ${currency}${(item.subtotal || 0).toLocaleString()}`
+            const price = ` ${displayCurrency}${formatMoney(item.subtotal)}`
             const maxName = 32 - qty.length - price.length
             const truncName = itemName.length > maxName ? itemName.substring(0, maxName) : itemName.padEnd(maxName)
             addText(`${qty}${truncName}${price}`)
             bytes.push(LF)
             if (data.showUnitPrice && item.unitPrice) {
-                addText(`   ${currency}${item.unitPrice.toLocaleString()} c/u`)
+                addText(`   ${displayCurrency}${formatMoney(item.unitPrice)} c/u`)
                 bytes.push(LF)
             }
         }
@@ -404,7 +423,7 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
             bytes.push(ESC, 0x61, 0x00) // Left
             for (const sc of data.splitClients) {
                 const cName = sc.name || ''
-                const cAmt = ` ${currency}${(sc.amount || 0).toLocaleString()}`
+                const cAmt = ` ${displayCurrency}${formatMoney(sc.amount)}`
                 const maxLen = 32 - cAmt.length
                 const trunc = cName.length > maxLen ? cName.substring(0, maxLen) : cName.padEnd(maxLen)
                 addText(`${trunc}${cAmt}`)
@@ -419,7 +438,7 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
         bytes.push(ESC, 0x61, 0x02) // Right align
         bytes.push(ESC, 0x45, 0x01) // Bold
         bytes.push(GS, 0x21, 0x01)  // Double height
-        addText(`TOTAL: ${currency}${(data.total || 0).toLocaleString()}`)
+        addText(`TOTAL: ${displayCurrency}${formatMoney(data.total)}`)
         bytes.push(LF)
         bytes.push(GS, 0x21, 0x00)  // Normal
         bytes.push(ESC, 0x45, 0x00) // Bold off
@@ -430,9 +449,9 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
         bytes.push(LF)
 
         if (data.amountReceived && data.showChange !== false) {
-            addText(`Recibido: ${currency}${data.amountReceived.toLocaleString()}`)
+            addText(`Recibido: ${displayCurrency}${formatMoney(data.amountReceived)}`)
             bytes.push(LF)
-            addText(`Vuelto: ${currency}${(data.change || 0).toLocaleString()}`)
+            addText(`Vuelto: ${displayCurrency}${formatMoney(data.change)}`)
             bytes.push(LF)
         }
 

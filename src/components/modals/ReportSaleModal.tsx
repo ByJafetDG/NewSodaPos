@@ -34,8 +34,8 @@ function MarqueeText({ text, className }: { text: string; className?: string }) 
 
 const PM_CONFIG: Record<string, { label: string; color: string; badge: string; icon: React.ReactNode }> = {
     EFECTIVO: { label: 'Efectivo', color: 'text-emerald-400', badge: 'bg-emerald-500/10 border-emerald-500/25', icon: <Banknote size={13} /> },
-    SINPE:    { label: 'SINPE',    color: 'text-blue-400',    badge: 'bg-blue-500/10 border-blue-500/25',       icon: <Smartphone size={13} /> },
-    CREDITO:  { label: 'Crédito', color: 'text-violet-400',  badge: 'bg-violet-500/10 border-violet-500/25',   icon: <CreditCard size={13} /> },
+    SINPE: { label: 'SINPE', color: 'text-blue-400', badge: 'bg-blue-500/10 border-blue-500/25', icon: <Smartphone size={13} /> },
+    CREDITO: { label: 'Crédito', color: 'text-violet-400', badge: 'bg-violet-500/10 border-violet-500/25', icon: <CreditCard size={13} /> },
 }
 
 interface ReportSaleModalProps {
@@ -112,6 +112,8 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
                 saleNumber: sale.saleNumber,
                 date: sale.date,
                 cashier: cashier,
+                clientName: sale.clientName || sale.client?.name,
+                clientCode: sale.clientCode || sale.client?.code,
                 items: (sale.items ?? []).map((i: any) => ({
                     name: i.product?.name || 'Producto',
                     quantity: i.quantity,
@@ -127,6 +129,7 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
                 showChange: tOpts.showChange ?? true,
                 showHeader: tOpts.showHeader ?? true,
                 showUnitPrice: tOpts.showUnitPrice ?? false,
+                showDecimals: tOpts.showDecimals ?? true,
                 currencySymbol: tOpts.currencySymbol ?? '₡',
             })
             toast.success('Ticket enviado a la impresora')
