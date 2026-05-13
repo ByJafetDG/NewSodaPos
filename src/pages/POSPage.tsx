@@ -115,11 +115,19 @@ export function POSPage() {
 
     // Autosave: cart changes → update linked held order in store
     useEffect(() => {
-        if (activeOrderId && items.length > 0) {
-            const debtSnapshot = pendingDebt.hasDebt
-                ? { clientId: pendingDebt.clientId, clientName: pendingDebt.clientName, saleIds: pendingDebt.saleIds, debtTotal: pendingDebt.debtTotal, sales: pendingDebt.sales }
-                : undefined
-            updateHeldOrder(activeOrderId, items, discount, debtSnapshot)
+        if (activeOrderId) {
+            if (items.length > 0) {
+                const debtSnapshot = pendingDebt.hasDebt
+                    ? { clientId: pendingDebt.clientId, clientName: pendingDebt.clientName, saleIds: pendingDebt.saleIds, debtTotal: pendingDebt.debtTotal, sales: pendingDebt.sales }
+                    : undefined
+                updateHeldOrder(activeOrderId, items, discount, debtSnapshot)
+            } else {
+                // All items removed manually — delete the now-empty held order
+                deleteHeldOrder(activeOrderId)
+                setActiveOrderId(null)
+                setActiveOrderName(null)
+                toast.warning('Cuenta vaciada — se eliminó automáticamente')
+            }
         }
     }, [items, discount, activeOrderId])
 
@@ -307,7 +315,43 @@ export function POSPage() {
     }
 
     const handleLoadHeldOrder = (order: HeldOrder) => {
-        loadOrder(order.items, order.discount)
+        // Validate stock against current product data before loading
+        const warnings: string[] = []
+        const validItems: CartItem[] = []
+
+        for (const item of order.items) {
+            const current = products.find(p => p.id === item.id)
+
+            if (!current || !current.isActive) {
+                warnings.push(`"${item.product.name}" ya no existe o fue desactivado`)
+                continue
+            }
+
+            if (!current.isInfinite && current.stockQty <= 0) {
+                warnings.push(`"${current.name}" tiene stock agotado (0 disponible)`)
+                continue
+            }
+
+            if (!current.isInfinite && current.stockQty < item.quantity) {
+                const adjusted = { ...item, quantity: current.stockQty, subtotal: current.stockQty * item.unitPrice }
+                validItems.push(adjusted)
+                warnings.push(`"${current.name}": solo hay ${current.stockQty} (se pidieron ${item.quantity})`)
+                continue
+            }
+
+            validItems.push(item)
+        }
+
+        if (warnings.length > 0) {
+            toast.warning(`Cuenta cargada con ajustes:\n${warnings.join('\n')}`, 6000)
+        }
+
+        if (validItems.length === 0) {
+            toast.error('No se pudo cargar: todos los productos están agotados o fueron eliminados')
+            return
+        }
+
+        loadOrder(validItems, order.discount)
         setActiveOrderId(order.id)
         setActiveOrderName(order.name)
         setHeldOrdersView(null)
@@ -422,7 +466,8 @@ export function POSPage() {
         try {
             // Capture before clearCart — closures over Zustand state can become stale after async points
             const saleItems = items
-            const saleTotal = effectiveTotal
+            const cartOnlyTotal = total        // only cart items — for the Sale record
+            const saleTotal = effectiveTotal   // cart + debt — for change calculation & UI
             const capturedSorteo    = cartSorteo
             const capturedDeclined  = sorteoDeclined
             const capturedQtyCount  = qualifyingCount
@@ -452,6 +497,7 @@ export function POSPage() {
                 const changeGiven = method === 'EFECTIVO' ? Math.max(0, saleReceived - capturedDebt.debtTotal) : 0
                 const firstSale = capturedDebt.sales[0] as any
 
+                const failedSettles: string[] = []
                 for (let idx = 0; idx < capturedDebt.saleIds.length; idx++) {
                     const id = capturedDebt.saleIds[idx]
                     try {
@@ -461,7 +507,14 @@ export function POSPage() {
                             amountReceived: idx === 0 ? (method === 'EFECTIVO' ? saleReceived : capturedDebt.debtTotal) : null,
                             change: idx === 0 ? changeGiven : null,
                         })
-                    } catch { /* ignore individual errors */ }
+                    } catch (err) {
+                        console.error(`[POS] Failed to settle sale ${id}:`, err)
+                        failedSettles.push(id)
+                    }
+                }
+                if (failedSettles.length > 0) {
+                    toast.error(`${failedSettles.length} de ${capturedDebt.saleIds.length} deuda(s) no se pudieron liquidar. Revisa Cuentas.`, 8000)
+                    if (failedSettles.length === capturedDebt.saleIds.length) return // all failed — abort
                 }
                 pendingDebt.clear()
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
@@ -538,20 +591,21 @@ export function POSPage() {
                 return
             }
 
-            const mainTotal = isCredit ? saleTotal : saleTotal - capturedCreditAmt
+            const mainTotal = isCredit ? cartOnlyTotal : cartOnlyTotal - capturedCreditAmt
             const mainPaymentMethod = isCredit ? 'CREDITO' : capturedIsMixed
                 ? (capturedHasEfectivo ? 'EFECTIVO' : 'SINPE')
                 : method
             const mainPaymentMethod2 = capturedHasEfectivo && capturedHasSinpe ? 'SINPE' : null
             const mainAmount2 = capturedHasEfectivo && capturedHasSinpe ? splitAmountNum : null
+            const paymentTotal = capturedDebt ? saleTotal - capturedCreditAmt : mainTotal // full amount cashier must cover
             const mainAmountReceived = isCredit ? null
                 : capturedHasEfectivo ? saleReceived
-                : capturedHasSinpe ? mainTotal
-                : (method === 'EFECTIVO' ? saleReceived : mainTotal)
-            const cashNeeded = mainTotal - (capturedHasSinpe ? splitAmountNum : 0)
+                : capturedHasSinpe ? paymentTotal
+                : (method === 'EFECTIVO' ? saleReceived : paymentTotal)
+            const cashNeeded = paymentTotal - (capturedHasSinpe ? splitAmountNum : 0)
             const mainChange = isCredit ? 0
                 : capturedHasEfectivo ? Math.max(0, saleReceived - cashNeeded)
-                : (method === 'EFECTIVO' ? Math.max(0, saleReceived - mainTotal) : 0)
+                : (method === 'EFECTIVO' ? Math.max(0, saleReceived - paymentTotal) : 0)
             const sale = await createSale.mutateAsync({
                 items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: mainTotal,
                 paymentMethod: mainPaymentMethod as any,
@@ -571,7 +625,14 @@ export function POSPage() {
                     cuenta: capturedCreditAmt,
                 }
                 const creditNote = await createCreditNote({
-                    items: saleItems,
+                    items: [{
+                        id: `credit-ref-${Date.now()}`,
+                        product: { id: 'credit-charge', name: `Cargo a cuenta (Venta #${sale.saleNumber})` } as any,
+                        quantity: 1,
+                        unitPrice: capturedCreditAmt,
+                        subtotal: capturedCreditAmt,
+                        notes: `Ref. venta #${sale.saleNumber}`,
+                    }],
                     subtotal: capturedCreditAmt,
                     discount: 0,
                     total: capturedCreditAmt,
@@ -611,7 +672,10 @@ export function POSPage() {
             setSaleSuccess({
                 total: saleTotal,
                 itemCount: saleItems.reduce((s, i) => s + i.quantity, 0),
-                items: saleItems.map(i => ({ name: i.product.name, quantity: i.quantity })),
+                items: [
+                    ...saleItems.map(i => ({ name: i.product.name, quantity: i.quantity })),
+                    ...(capturedDebt ? [{ name: `Abono deuda (${capturedDebt.clientName})`, quantity: 1 }] : []),
+                ],
                 cashier: saleCashier ?? 'Sin cajero',
                 paymentMethod: isCredit ? 'CREDITO' : method,
             })
@@ -632,8 +696,20 @@ export function POSPage() {
 
             // Settle pending debt sales if navigated from Balances
             if (capturedDebt && capturedDebt.saleIds.length > 0) {
+                const settleFailures: string[] = []
                 for (const id of capturedDebt.saleIds) {
-                    try { await settleSaleDirect(id) } catch { /* ignore individual settle errors */ }
+                    try {
+                        await settleSaleDirect(id, {
+                            paymentMethod: method,
+                            cashRegisterId: activeRegister?.id ?? null,
+                        })
+                    } catch (err) {
+                        console.error(`[POS] Failed to settle debt ${id}:`, err)
+                        settleFailures.push(id)
+                    }
+                }
+                if (settleFailures.length > 0) {
+                    toast.error(`${settleFailures.length} deuda(s) no se liquidaron correctamente. Revisa Cuentas.`)
                 }
                 pendingDebt.clear()
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
@@ -659,12 +735,20 @@ export function POSPage() {
                     saleNumber: sale.saleNumber,
                     date: sale.date,
                     cashier: saleCashier,
-                    items: saleItems.map(i => ({
-                        name: i.product.name,
-                        quantity: i.quantity,
-                        unitPrice: i.unitPrice,
-                        subtotal: i.subtotal,
-                    })),
+                    items: [
+                        ...saleItems.map(i => ({
+                            name: i.product.name,
+                            quantity: i.quantity,
+                            unitPrice: i.unitPrice,
+                            subtotal: i.subtotal,
+                        })),
+                        ...(capturedDebt ? [{
+                            name: `Abono deuda (${capturedDebt.clientName})`,
+                            quantity: 1,
+                            unitPrice: capturedDebt.debtTotal,
+                            subtotal: capturedDebt.debtTotal,
+                        }] : []),
+                    ],
                     total: saleTotal,
                     paymentMethod: isCredit ? 'CREDITO' : method,
                     amountReceived: method === 'EFECTIVO' && !isCredit ? saleReceived : null,
@@ -693,7 +777,7 @@ export function POSPage() {
                             unitPrice: i.unitPrice,
                             subtotal: i.subtotal,
                         })),
-                        subtotal: saleSubtotal, discount: saleDiscount, total: saleTotal,
+                        subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
                     }).then(result => {
                         if (result.success) {
                             toast.success(`Recibo enviado a ${client.email}`)
