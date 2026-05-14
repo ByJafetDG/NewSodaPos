@@ -165,7 +165,7 @@ export function ReportsPage() {
         if (filterCajero && extractCajero(s.notes) !== filterCajero) return false
         if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false
         if (timeActive) {
-            const d = new Date(s.date)
+            const d = new Date(s.paidAt ?? s.date)
             const saleMinutes = d.getHours() * 60 + d.getMinutes()
             const filterMinutes = filterHour * 60 + parseInt(MINUTES[filterMinuteIdx])
             if (saleMinutes < filterMinutes) return false
@@ -476,7 +476,7 @@ export function ReportsPage() {
                                     const isAnulada = s.status === 'ANULADA'
                                     const isModificada = !!s.modifiedFromSaleId
                                     const cfg = PM_CONFIG[s.paymentMethod] ?? PM_CONFIG['EFECTIVO']
-                                    const time = new Date(s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+                                    const time = new Date(s.paidAt ?? s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
                                     const isSplit = s.notes?.startsWith('Crédito dividido') ?? false
                                     const clientName = s.client?.name ?? s.clientName ?? null
                                     return (
