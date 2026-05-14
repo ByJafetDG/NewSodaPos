@@ -337,7 +337,6 @@ export function POSPage() {
                 }
             } else {
                 const existingByName = clients.find(c => normalizeStr(c.name) === normalizeStr(data.name))
-                    ?? clients.find(c => fuzzyMatch(data.name, c.name))
                 if (existingByName) {
                     finalId = existingByName.id
                     const updates: Record<string, any> = {}
@@ -861,7 +860,7 @@ export function POSPage() {
                     ? clients.find(c => c.id === capturedInvoiceClient.existingId)
                     : null
                 const recipientEmail = capturedInvoiceClient.email.trim() || invoiceFull?.email || null
-                const recipientName = invoiceFull?.name ?? capturedInvoiceClient.name
+                const recipientName = capturedInvoiceClient.name
                 const invoicePayload = {
                     clientName: recipientName,
                     businessName: config?.name ?? 'Mi Soda',
