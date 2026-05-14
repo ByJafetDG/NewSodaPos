@@ -22,6 +22,7 @@ interface CreateSaleInput {
     notes: string | null
     paymentMethod2?: PaymentMethod | null
     amount2?: number | null
+    creditPart?: { clientId: string; amount: number } | null
 }
 
 /**
@@ -89,11 +90,28 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
         for (const item of input.items) {
             ops.push({
                 sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                params: [crypto.randomUUID(), id, item.id, item.quantity, item.unitPrice, item.subtotal, item.notes]
+                params: [crypto.randomUUID(), id, item.product.id, item.quantity, item.unitPrice, item.subtotal, item.notes]
             })
             ops.push({
                 sql: `UPDATE Product SET stockQty = stockQty - ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
-                params: [item.quantity, now, item.id]
+                params: [item.quantity, now, item.product.id]
+            })
+        }
+
+        // Atomic Credit Part for mixed payments
+        if (input.creditPart && input.creditPart.amount > 0) {
+            const creditId = crypto.randomUUID()
+            const creditSaleNumber = saleNumber + 1
+            const creditAmt = input.creditPart.amount
+            const creditNotes = `Cargo a cuenta. Ref. venta #${saleNumber}`
+            
+            ops.push({
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [creditId, creditSaleNumber, now, creditAmt, 0, creditAmt, 'CREDITO', null, null, 1, input.creditPart.clientId, input.cashRegisterId, 'COMPLETADA', creditNotes, 'PENDING', null, null]
+            })
+            ops.push({
+                sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                params: [crypto.randomUUID(), creditId, 'credit-charge', 1, creditAmt, creditAmt, `Ref. venta #${saleNumber}`]
             })
         }
 
@@ -130,11 +148,33 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
 
     if (saleError) throw saleError
 
+    // Cloud fallback for Credit Part (Not strictly atomic but consistent with current logic)
+    if (input.creditPart && input.creditPart.amount > 0) {
+        const creditAmt = input.creditPart.amount
+        const creditId = crypto.randomUUID()
+        const creditSaleNumber = saleNumber + 1
+        const { error: creditError } = await supabase.from('Sale').insert({
+            id: creditId, saleNumber: creditSaleNumber, date: now,
+            subtotal: creditAmt, discount: 0, total: creditAmt,
+            paymentMethod: 'CREDITO', amountReceived: null, change: null,
+            isCredit: true, clientId: input.creditPart.clientId, cashRegisterId: input.cashRegisterId,
+            status: 'COMPLETADA', notes: `Cargo a cuenta. Ref. venta #${saleNumber}`,
+            syncStatus: 'SYNCED', createdAt: now, updatedAt: now
+        })
+        if (!creditError) {
+            await supabase.from('SaleItem').insert({
+                id: crypto.randomUUID(), saleId: creditId, productId: 'credit-charge',
+                quantity: 1, unitPrice: creditAmt, subtotal: creditAmt, notes: `Ref. venta #${saleNumber}`,
+                createdAt: now
+            })
+        }
+    }
+
     // 2. Insert sale items (each needs explicit id + createdAt for Supabase)
     const saleItems = input.items.map((item) => ({
         id: crypto.randomUUID(),
         saleId: sale.id,
-        productId: item.id,
+        productId: item.product.id,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         subtotal: item.subtotal,
@@ -396,7 +436,7 @@ export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ 
         for (const item of input.items) {
             ops.push({
                 sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                params: [crypto.randomUUID(), id, item.id, item.quantity, item.unitPrice, item.subtotal, item.notes]
+                params: [crypto.randomUUID(), id, item.product.id, item.quantity, item.unitPrice, item.subtotal, item.notes]
             })
         }
         await window.electronAPI.dbTransaction(ops)
@@ -420,7 +460,7 @@ export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ 
 
     const saleItems = input.items.map(item => ({
         id: crypto.randomUUID(), saleId: sale.id,
-        productId: item.id, quantity: item.quantity,
+        productId: item.product.id, quantity: item.quantity,
         unitPrice: item.unitPrice, subtotal: item.subtotal,
         notes: item.notes, createdAt: now,
     }))

@@ -619,40 +619,28 @@ export function POSPage() {
                 notes: `Cajero: ${saleCashier ?? 'Sin cajero'}`,
                 paymentMethod2: mainPaymentMethod2 as any,
                 amount2: mainAmount2,
+                creditPart: (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId) 
+                    ? { clientId: capturedCreditClientId, amount: capturedCreditAmt }
+                    : null
             })
 
             if (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId) {
-                const mixedPayCtx = {
-                    ...(capturedHasEfectivo ? { ef: Math.max(0, mainTotal - (capturedHasSinpe ? splitAmountNum : 0)) } : {}),
-                    ...(capturedHasSinpe ? { sinpe: splitAmountNum } : {}),
-                    cuenta: capturedCreditAmt,
-                }
-                const creditNote = await createCreditNote({
-                    items: [{
-                        id: `credit-ref-${Date.now()}`,
-                        product: { id: 'credit-charge', name: `Cargo a cuenta (Venta #${sale.saleNumber})` } as any,
-                        quantity: 1,
-                        unitPrice: capturedCreditAmt,
-                        subtotal: capturedCreditAmt,
-                        notes: `Ref. venta #${sale.saleNumber}`,
-                    }],
-                    subtotal: capturedCreditAmt,
-                    discount: 0,
-                    total: capturedCreditAmt,
-                    clientId: capturedCreditClientId,
-                    notes: `Cargo a cuenta. Cajero: ${saleCashier ?? 'Sin cajero'}||MIXED||${JSON.stringify(mixedPayCtx)}`,
-                })
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
                 qc.invalidateQueries({ queryKey: ['clients'] })
 
                 const creditClient = clients.find((c: any) => c.id === capturedCreditClientId)
                 if (creditClient?.email) {
+                    const mixedPayCtx = {
+                        ...(capturedHasEfectivo ? { ef: Math.max(0, mainTotal - (capturedHasSinpe ? splitAmountNum : 0)) } : {}),
+                        ...(capturedHasSinpe ? { sinpe: splitAmountNum } : {}),
+                        cuenta: capturedCreditAmt,
+                    }
                     sendMixedCreditEmail({
                         to: creditClient.email,
                         clientName: creditClient.name,
                         businessName: config?.name ?? '',
                         saleNumber: sale.saleNumber,
-                        creditNoteNumber: creditNote.saleNumber,
+                        creditNoteNumber: sale.saleNumber + 1,
                         date: sale.date,
                         items: saleItems.map(i => ({
                             name: i.product.name,

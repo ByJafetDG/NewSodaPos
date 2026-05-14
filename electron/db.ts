@@ -36,6 +36,7 @@ if (!isDev) {
 
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
 /**
  * Initialize local database tables mirroring the Prisma schema
@@ -53,6 +54,10 @@ export function initDb() {
       createdAt TEXT DEFAULT (datetime('now')),
       updatedAt TEXT DEFAULT (datetime('now'))
     );
+
+    -- Ensure system category exists
+    INSERT OR IGNORE INTO Category (id, name, type, isActive, syncStatus) 
+    VALUES ('system', 'Sistema', 'PRODUCTO', 1, 'SYNCED');
 
     CREATE TABLE IF NOT EXISTS Product (
       id TEXT PRIMARY KEY,
@@ -72,6 +77,10 @@ export function initDb() {
       updatedAt TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (categoryId) REFERENCES Category(id)
     );
+
+    -- Ensure credit-charge system product exists
+    INSERT OR IGNORE INTO Product (id, name, categoryId, price, isActive, isInfinite, syncStatus)
+    VALUES ('credit-charge', 'Cargo a cuenta', 'system', 0, 1, 1, 'SYNCED');
 
     CREATE TABLE IF NOT EXISTS Client (
       id TEXT PRIMARY KEY,
@@ -429,6 +438,17 @@ export function initDb() {
   try {
     db.exec(`ALTER TABLE Sale ADD COLUMN paymentMethod2 TEXT`);
   } catch {}
+
+  // Cleanup: Fix broken SaleItems from mixed payments that used temp UUIDs
+  try {
+    db.exec(`
+      UPDATE SaleItem 
+      SET productId = 'credit-charge' 
+      WHERE productId LIKE 'credit-ref-%'
+    `);
+  } catch (err) {
+    console.error('[Migration] Failed to cleanup SaleItems:', err);
+  }
 
   try {
     db.exec(`ALTER TABLE Sale ADD COLUMN amount2 REAL`);

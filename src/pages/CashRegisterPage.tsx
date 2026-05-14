@@ -193,7 +193,7 @@ export function CashRegisterPage() {
                 {/* History */}
                 <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-3">Historial de cajas</p>
-                    {history.length === 0 ? (
+                    {history.filter(r => r.status === 'CLOSED').length === 0 ? (
                         <EmptyState
                             icon={<Wallet size={28} className="text-[#3D506A]" />}
                             title="Sin historial"
@@ -201,7 +201,7 @@ export function CashRegisterPage() {
                         />
                     ) : (
                         <div className="space-y-2">
-                            {history.map(r => (
+                            {history.filter(r => r.status === 'CLOSED').map(r => (
                                 <RegisterRow
                                     key={r.id}
                                     register={r}
