@@ -159,19 +159,23 @@ export function ReportsPage() {
         return Array.from(names).sort()
     }, [sales])
 
-    const filteredSales = (sales as any[]).filter((s: any) => {
-        if (!showAnuladas && s.status === 'ANULADA') return false
-        if (showSoloModificadas && !s.modifiedFromSaleId) return false
-        if (filterCajero && extractCajero(s.notes) !== filterCajero) return false
-        if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false
-        if (timeActive) {
-            const d = new Date(s.paidAt ?? s.date)
-            const saleMinutes = d.getHours() * 60 + d.getMinutes()
-            const filterMinutes = filterHour * 60 + parseInt(MINUTES[filterMinuteIdx])
-            if (saleMinutes < filterMinutes) return false
-        }
-        return true
-    })
+    const filteredSales = (sales as any[])
+        .filter((s: any) => {
+            if (!showAnuladas && s.status === 'ANULADA') return false
+            if (showSoloModificadas && !s.modifiedFromSaleId) return false
+            if (filterCajero && extractCajero(s.notes) !== filterCajero) return false
+            if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false
+            if (timeActive) {
+                const d = new Date(s.paidAt ?? s.date)
+                const saleMinutes = d.getHours() * 60 + d.getMinutes()
+                const filterMinutes = filterHour * 60 + parseInt(MINUTES[filterMinuteIdx])
+                if (saleMinutes < filterMinutes) return false
+            }
+            return true
+        })
+        .sort((a: any, b: any) =>
+            new Date(b.paidAt ?? b.date).getTime() - new Date(a.paidAt ?? a.date).getTime()
+        )
 
     const maxPayment = Math.max(...Object.values(effectivePayment), 1)
     const maxHourly = Math.max(...effectiveHourly, 1)
