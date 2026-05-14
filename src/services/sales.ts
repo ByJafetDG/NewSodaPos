@@ -23,6 +23,7 @@ interface CreateSaleInput {
     paymentMethod2?: PaymentMethod | null
     amount2?: number | null
     creditPart?: { clientId: string; amount: number } | null
+    modifiedFromSaleId?: string | null
 }
 
 /**
@@ -82,8 +83,8 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
 
         const ops: Array<{ sql: string; params: any[] }> = [
             {
-                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING', input.paymentMethod2 ?? null, input.amount2 ?? null]
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2, modifiedFromSaleId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING', input.paymentMethod2 ?? null, input.amount2 ?? null, input.modifiedFromSaleId ?? null]
             }
         ]
 
@@ -144,6 +145,7 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
             updatedAt: now,
             paymentMethod2: input.paymentMethod2 ?? null,
             amount2: input.amount2 ?? null,
+            modifiedFromSaleId: input.modifiedFromSaleId ?? null,
         })
         .select('*')
         .single()
@@ -219,54 +221,152 @@ export async function getSalesToday() {
     return data
 }
 
+function methodToRegisterColumn(method: string): string | null {
+    switch (method) {
+        case 'EFECTIVO':      return 'salesCash'
+        case 'SINPE':         return 'salesSinpe'
+        case 'TARJETA':       return 'salesCard'
+        case 'TRANSFERENCIA': return 'salesTransfer'
+        case 'CREDITO':       return 'salesCredit'
+        default:              return null
+    }
+}
+
 /**
- * Void a sale (cancel it and revert stock)
+ * Void a sale atomically: mark ANULADA, revert stock, adjust CLOSED cash register columns
  */
 export async function voidSale(saleId: string): Promise<void> {
-    const now = new Date().toISOString()
-
-    // 1. Get the sale and its items to know what to revert
-    let items: any[] = []
-    let currentStatus = ''
+    const now = localISO()
 
     if (window.electronAPI) {
-        const sale = await window.electronAPI.dbGet('SELECT status FROM Sale WHERE id = ?', [saleId])
-        if (!sale) throw new Error('Venta no encontrada')
-        currentStatus = sale.status
-        items = await window.electronAPI.dbQuery('SELECT productId, quantity FROM SaleItem WHERE saleId = ?', [saleId])
-    } else {
-        const { data: sale, error: fetchError } = await supabase
-            .from('Sale')
-            .select('status, items:SaleItem(productId, quantity)')
-            .eq('id', saleId)
-            .single()
-
-        if (fetchError) throw fetchError
-        currentStatus = sale.status
-        items = sale.items
-    }
-
-    if (currentStatus === 'ANULADA') return // Already voided
-
-    // 2. Void the sale
-    if (window.electronAPI) {
-        await window.electronAPI.dbExecute(
-            "UPDATE Sale SET status = 'ANULADA', updatedAt = ?, syncStatus = 'PENDING' WHERE id = ?",
-            [now, saleId]
+        const sale = await window.electronAPI.dbGet(
+            'SELECT status, total, paymentMethod, paymentMethod2, amount2, cashRegisterId FROM Sale WHERE id = ?',
+            [saleId]
         )
-    } else {
-        const { error: updateError } = await supabase
-            .from('Sale')
-            .update({ status: 'ANULADA', updatedAt: now, syncStatus: 'SYNCED' })
-            .eq('id', saleId)
+        if (!sale) throw new Error('Venta no encontrada')
+        if (sale.status === 'ANULADA') return
 
-        if (updateError) throw updateError
+        const items: any[] = await window.electronAPI.dbQuery(
+            'SELECT productId, quantity FROM SaleItem WHERE saleId = ?',
+            [saleId]
+        )
+
+        const ops: Array<{ sql: string; params: any[] }> = []
+        ops.push({
+            sql: `UPDATE Sale SET status = 'ANULADA', isCredit = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+            params: [now, saleId]
+        })
+        for (const item of items) {
+            ops.push({
+                sql: `UPDATE Product SET stockQty = stockQty + ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
+                params: [item.quantity, now, item.productId]
+            })
+        }
+        if (sale.cashRegisterId) {
+            const reg = await window.electronAPI.dbGet(
+                'SELECT status FROM CashRegister WHERE id = ?',
+                [sale.cashRegisterId]
+            )
+            if (reg?.status === 'CLOSED') {
+                const col = methodToRegisterColumn(sale.paymentMethod)
+                if (col) {
+                    ops.push({
+                        sql: `UPDATE CashRegister SET ${col} = MAX(0, COALESCE(${col}, 0) - ?), syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+                        params: [sale.total, now, sale.cashRegisterId]
+                    })
+                }
+                if (sale.paymentMethod2 && sale.amount2) {
+                    const col2 = methodToRegisterColumn(sale.paymentMethod2)
+                    if (col2) {
+                        ops.push({
+                            sql: `UPDATE CashRegister SET ${col2} = MAX(0, COALESCE(${col2}, 0) - ?), syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+                            params: [sale.amount2, now, sale.cashRegisterId]
+                        })
+                    }
+                }
+            }
+        }
+        await window.electronAPI.dbTransaction(ops)
+        window.electronAPI.triggerSyncPush?.().catch(() => {})
+        return
     }
 
-    // 3. Revert stock (add back the quantities)
-    for (const item of items) {
+    const { data: sale, error: fetchError } = await supabase
+        .from('Sale')
+        .select('status, total, paymentMethod, paymentMethod2, amount2, cashRegisterId, items:SaleItem(productId, quantity)')
+        .eq('id', saleId)
+        .single()
+    if (fetchError) throw fetchError
+    if (sale.status === 'ANULADA') return
+
+    const { error: updateError } = await supabase
+        .from('Sale')
+        .update({ status: 'ANULADA', isCredit: false, updatedAt: now, syncStatus: 'SYNCED' })
+        .eq('id', saleId)
+    if (updateError) throw updateError
+
+    for (const item of (sale.items ?? [])) {
         await updateProductStock(item.productId, item.quantity)
     }
+}
+
+/**
+ * Fetch sale items mapped to CartItem format for cart restoration (modify flow)
+ */
+export async function getSaleItemsForCart(saleId: string): Promise<import('@/types').CartItem[]> {
+    if (window.electronAPI) {
+        const rows: any[] = await window.electronAPI.dbQuery(
+            `SELECT si.productId, si.quantity, si.unitPrice, si.subtotal, si.notes,
+                    p.name, p.barcode, p.categoryId, p.price, p.cost, p.unit,
+                    p.stockQty, p.minStock, p.isActive, p.isInfinite, p.imageUrl, p.syncStatus
+             FROM SaleItem si
+             LEFT JOIN Product p ON p.id = si.productId
+             WHERE si.saleId = ? AND si.productId != 'credit-charge'`,
+            [saleId]
+        )
+        return rows
+            .filter(r => r.name)
+            .map(r => ({
+                id: r.productId,
+                product: {
+                    id: r.productId,
+                    name: r.name,
+                    barcode: r.barcode ?? null,
+                    categoryId: r.categoryId,
+                    price: r.price,
+                    cost: r.cost,
+                    unit: r.unit,
+                    stockQty: r.stockQty,
+                    minStock: r.minStock,
+                    isActive: r.isActive === 1,
+                    isInfinite: r.isInfinite === 1,
+                    imageUrl: r.imageUrl ?? null,
+                    syncStatus: r.syncStatus,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                },
+                quantity: r.quantity,
+                unitPrice: r.unitPrice,
+                subtotal: r.subtotal,
+                notes: r.notes ?? null,
+            }))
+    }
+    const { data, error } = await supabase
+        .from('SaleItem')
+        .select('productId, quantity, unitPrice, subtotal, notes, product:Product(id, name, barcode, categoryId, price, cost, unit, stockQty, minStock, isActive, isInfinite, imageUrl, syncStatus, createdAt, updatedAt)')
+        .eq('saleId', saleId)
+        .neq('productId', 'credit-charge')
+    if (error) throw error
+    return ((data ?? []) as any[])
+        .filter((r: any) => r.product)
+        .map((r: any) => ({
+            id: r.productId,
+            product: r.product,
+            quantity: r.quantity,
+            unitPrice: r.unitPrice,
+            subtotal: r.subtotal,
+            notes: r.notes ?? null,
+        }))
 }
 
 // ===== Update Credit Sale Items =====
@@ -474,4 +574,36 @@ export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ 
         if (itemsError) throw itemsError
     }
     return { id: sale.id, saleNumber: sale.saleNumber, date: sale.date }
+}
+
+/**
+ * Fetch a single sale with items for comparison view
+ */
+export async function getSaleDetails(saleId: string): Promise<any | null> {
+    if (window.electronAPI) {
+        const sale = await window.electronAPI.dbGet(
+            `SELECT s.*, c.name as clientName FROM Sale s LEFT JOIN Client c ON s.clientId = c.id WHERE s.id = ?`,
+            [saleId]
+        )
+        if (!sale) return null
+        const items: any[] = await window.electronAPI.dbQuery(
+            `SELECT si.productId, si.quantity, si.unitPrice, si.subtotal, si.notes,
+                    COALESCE(p.name, 'Producto eliminado') as productName
+             FROM SaleItem si LEFT JOIN Product p ON si.productId = p.id
+             WHERE si.saleId = ?`,
+            [saleId]
+        )
+        return {
+            ...sale,
+            isCredit: !!sale.isCredit,
+            items: items.map((i: any) => ({ ...i, product: { name: i.productName } })),
+        }
+    }
+    const { data, error } = await supabase
+        .from('Sale')
+        .select('*, client:Client(name), items:SaleItem(productId, quantity, unitPrice, subtotal, notes, product:Product(name))')
+        .eq('id', saleId)
+        .single()
+    if (error || !data) return null
+    return data
 }

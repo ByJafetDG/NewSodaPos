@@ -1,9 +1,10 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Search, UserCircle2, ChevronDown } from 'lucide-react'
+import { Search, UserCircle2, ChevronDown, Pencil, X } from 'lucide-react'
 import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
+import { usePendingSaleLoadStore } from '@/store/pendingSaleLoadStore'
 import { settleSaleDirect } from '@/services/clients'
 import { createCreditNote, createSplitCreditSales } from '@/services/sales'
 import type { SplitCreditData } from '@/components/modals/CreditModal'
@@ -150,6 +151,16 @@ export function POSPage() {
     const [createProductBarcode, setCreateProductBarcode] = useState('')
     const [showInvoiceModal, setShowInvoiceModal] = useState(false)
     const [invoiceClient, setInvoiceClient] = useState<{ name: string; cedula: string; email: string; existingId?: string } | null>(null)
+
+    // ── Pending sale load (from Reports page modify flow) ────────────────────
+    const pendingSaleLoad = usePendingSaleLoadStore()
+    useEffect(() => {
+        if (pendingSaleLoad.items && pendingSaleLoad.items.length > 0) {
+            loadOrder(pendingSaleLoad.items, pendingSaleLoad.discount)
+            pendingSaleLoad.clear()
+            toast.info('Venta cargada — realiza los cambios y confirma')
+        }
+    }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Pending debt (from Balances page) ────────────────────────────────────
     const pendingDebt = usePendingSettleStore()
@@ -674,9 +685,10 @@ export function POSPage() {
                 notes: `Cajero: ${saleCashier ?? 'Sin cajero'}`,
                 paymentMethod2: mainPaymentMethod2 as any,
                 amount2: mainAmount2,
-                creditPart: (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId) 
+                creditPart: (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId)
                     ? { clientId: capturedCreditClientId, amount: capturedCreditAmt }
-                    : null
+                    : null,
+                modifiedFromSaleId: pendingSaleLoad.originalSaleId ?? null,
             })
 
             if (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId) {
@@ -727,6 +739,7 @@ export function POSPage() {
             })
             if (activeOrderId) deleteHeldOrder(activeOrderId)
             clearCart()
+            pendingSaleLoad.clearModifying()
             setAmountReceived('')
             setPaymentMethod('EFECTIVO')
             setMixedMethods([])
@@ -1056,6 +1069,27 @@ export function POSPage() {
                 onOpenHeldOrders={() => setHeldOrdersView((heldOrders.length === 0 && !mergeSnapshot) ? 'save' : 'choice')}
                 activeOrderName={activeOrderName}
             />
+
+            {/* ── Modifying sale banner ────────────────────────────────────── */}
+            {pendingSaleLoad.originalSaleNumber !== null && (
+                <div className="flex items-center gap-2.5 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 shrink-0">
+                    <Pencil size={12} className="text-amber-400 shrink-0" />
+                    <span className="text-[12px] font-semibold text-amber-300 shrink-0">
+                        Modificando venta #{pendingSaleLoad.originalSaleNumber}
+                    </span>
+                    {pendingSaleLoad.originalClientName && (
+                        <span className="text-[11px] text-amber-400/70 truncate">
+                            — {pendingSaleLoad.originalClientName}
+                        </span>
+                    )}
+                    <button
+                        onClick={() => pendingSaleLoad.clearModifying()}
+                        className="ml-auto w-5 h-5 flex items-center justify-center rounded-full bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-all cursor-pointer shrink-0"
+                    >
+                        <X size={9} />
+                    </button>
+                </div>
+            )}
 
             {/* ── Main content ─────────────────────────────────────────────── */}
             <div className="flex flex-1 min-h-0">

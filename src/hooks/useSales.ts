@@ -58,11 +58,11 @@ export function useVoidSale() {
     return useMutation({
         mutationFn: voidSale,
         onSuccess: () => {
-            // Invalidate everything related to the sale
             queryClient.invalidateQueries({ queryKey: ['products'] })
             queryClient.invalidateQueries({ queryKey: ['credit-sales'] })
             queryClient.invalidateQueries({ queryKey: ['clients-balances'] })
             queryClient.invalidateQueries({ queryKey: ['sales'] })
+            queryClient.invalidateQueries({ queryKey: ['reports'] })
         },
     })
 }

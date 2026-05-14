@@ -1,23 +1,29 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import {
     BarChart3, Banknote, Smartphone, CreditCard,
     TrendingUp, ShoppingBag, PackageX, AlertTriangle, Calendar,
-    Receipt, Search, Clock, X,
+    Receipt, Search, Clock, X, Ban, UserCircle2, Pencil, ChevronDown,
 } from 'lucide-react'
 import { useProductsStock } from '@/hooks/useInventory'
 import { useReportData } from '@/hooks/useReports'
+import { useVoidSale } from '@/hooks/useSales'
+import { getSaleItemsForCart } from '@/services/sales'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { cn, formatCurrency } from '@/lib/utils'
 import { ReportSaleModal } from '@/components/modals/ReportSaleModal'
 import { TimeWheelPicker, HOURS, MINUTES } from '@/components/ui/TimeWheelPicker'
+import { usePendingSaleLoadStore } from '@/store/pendingSaleLoadStore'
+import { useUIStore } from '@/store/uiStore'
+import { toast } from '@/components/ui/Toast'
 
 function toLocalISO(d: Date): string {
     const pad = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,'0')}`
 }
 
-function getDateRange(filter: string, customFrom: string, customTo: string): [string, string] {
-    if (filter === 'Personalizado' && customFrom && customTo) return [customFrom, customTo]
+function getDateRange(filter: string, customFrom: string, customTo: string, showCustom: boolean): [string, string] {
+    if (showCustom && customFrom && customTo)
+        return [`${customFrom}T00:00:00.000`, `${customTo}T23:59:59.999`]
     const now = new Date()
     const from = new Date(now)
     const to = new Date(now)
@@ -40,6 +46,12 @@ const PM_CONFIG: Record<string, { label: string; color: string; bg: string; icon
 const DATE_FILTERS = ['Hoy', 'Semana', 'Mes', 'Año', 'Todo'] as const
 type DateFilter = typeof DATE_FILTERS[number]
 
+function extractCajero(notes: string | null | undefined): string {
+    const idx = (notes ?? '').indexOf('Cajero:')
+    if (idx === -1) return 'Sin cajero'
+    return (notes as string).slice(idx + 8).split('||')[0].trim() || 'Sin cajero'
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function ReportsPage() {
@@ -51,9 +63,52 @@ export function ReportsPage() {
     // Sale detail
     const [selectedSale, setSelectedSale] = useState<any | null>(null)
 
+    const voidSaleMutation = useVoidSale()
+    const pendingSaleLoad = usePendingSaleLoadStore()
+    const setCurrentPage = useUIStore(s => s.setCurrentPage)
+
+    const handleVoidSale = async (saleId: string) => {
+        await voidSaleMutation.mutateAsync(saleId)
+        setSelectedSale(null)
+        toast.success('Venta anulada')
+    }
+
+    const handleModifySale = async (saleId: string) => {
+        const saleInfo = sales.find((s: any) => s.id === saleId)
+        const items = await getSaleItemsForCart(saleId)
+        if (items.length === 0) {
+            throw new Error('No se pudieron recuperar los productos de esta venta')
+        }
+        await voidSaleMutation.mutateAsync(saleId)
+        pendingSaleLoad.set(
+            items,
+            saleInfo?.discount ?? 0,
+            saleId,
+            saleInfo?.saleNumber ?? 0,
+            saleInfo?.clientName ?? saleInfo?.client?.name ?? null
+        )
+        setSelectedSale(null)
+        setCurrentPage('pos')
+    }
+
     // Recent sales filters
     const [orderSearch, setOrderSearch] = useState('')
     const orderKb = useKeyboardInput(orderSearch, setOrderSearch, { mode: 'numeric' })
+    const [showAnuladas, setShowAnuladas] = useState(false)
+    const [showSoloModificadas, setShowSoloModificadas] = useState(false)
+    const [filterCajero, setFilterCajero] = useState('')
+    const [showCajeroMenu, setShowCajeroMenu] = useState(false)
+    const cajeroMenuRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        if (!showCajeroMenu) return
+        function handleOutside(e: MouseEvent) {
+            if (cajeroMenuRef.current && !cajeroMenuRef.current.contains(e.target as Node))
+                setShowCajeroMenu(false)
+        }
+        document.addEventListener('mousedown', handleOutside)
+        return () => document.removeEventListener('mousedown', handleOutside)
+    }, [showCajeroMenu])
 
     const [filterHour, setFilterHour] = useState(0)
     const [filterMinuteIdx, setFilterMinuteIdx] = useState(0)
@@ -72,14 +127,14 @@ export function ReportsPage() {
         return () => document.removeEventListener('mousedown', handleOutside)
     }, [showTimePicker])
 
-    const [from, to] = getDateRange(dateFilter, customFrom, customTo)
+    const [from, to] = getDateRange(dateFilter, customFrom, customTo, showCustom)
     const { data: reportData } = useReportData(from, to)
     const { data: productsStock = [] } = useProductsStock()
 
     const sales = reportData?.sales ?? []
     const products = reportData?.products?.length ? reportData.products : productsStock
 
-    // Point 2: Use pre-calculated stats from SQL for speed
+    // Use pre-calculated stats from SQL for speed; stats always count COMPLETADA only
     const effectivePayment: Record<string, number> = { EFECTIVO: 0, SINPE: 0, CREDITO: 0 }
     if (reportData?.paymentStats) {
         reportData.paymentStats.forEach((ps: any) => {
@@ -89,12 +144,25 @@ export function ReportsPage() {
     const effectiveTop = reportData?.topProducts ?? []
     const effectiveHourly = reportData?.hourlyStats ?? Array(24).fill(0)
 
-    const totalSalesAmt = sales.reduce((sum: number, s: any) => sum + s.total, 0)
-    const avgTicket = sales.length > 0 ? Math.round(totalSalesAmt / sales.length) : 0
+    // Stats only on completed sales
+    const completedSales = (sales as any[]).filter((s: any) => s.status !== 'ANULADA')
+    const totalSalesAmt = completedSales.reduce((sum: number, s: any) => sum + s.total, 0)
+    const avgTicket = completedSales.length > 0 ? Math.round(totalSalesAmt / completedSales.length) : 0
     const inventoryValue = products.reduce((sum: any, p: any) => sum + ((p.price ?? 0) * (p.stockQty ?? 0)), 0)
     const pendingCredit = (reportData?.totalDebt ?? 0) - (reportData?.totalPaid ?? 0)
 
-    const filteredSales = sales.filter((s: any) => {
+    const cajeros = useMemo(() => {
+        const names = new Set<string>()
+        ;(sales as any[]).forEach((s: any) => {
+            names.add(extractCajero(s.notes))
+        })
+        return Array.from(names).sort()
+    }, [sales])
+
+    const filteredSales = (sales as any[]).filter((s: any) => {
+        if (!showAnuladas && s.status === 'ANULADA') return false
+        if (showSoloModificadas && !s.modifiedFromSaleId) return false
+        if (filterCajero && extractCajero(s.notes) !== filterCajero) return false
         if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false
         if (timeActive) {
             const d = new Date(s.date)
@@ -114,7 +182,12 @@ export function ReportsPage() {
 
     return (
         <div className="flex flex-col h-full">
-            <ReportSaleModal sale={selectedSale} onClose={() => setSelectedSale(null)} />
+            <ReportSaleModal
+                sale={selectedSale}
+                onClose={() => setSelectedSale(null)}
+                onVoid={handleVoidSale}
+                onModify={handleModifySale}
+            />
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#192030] shrink-0">
                 <div className="flex items-center gap-3">
@@ -262,8 +335,8 @@ export function ReportsPage() {
                             <span className="text-[11px] text-[#3D506A]">{filteredSales.length} ventas</span>
                         </div>
 
-                        {/* Filters */}
-                        <div className="flex items-center gap-2 mb-3">
+                        {/* Filters row 1: search + time */}
+                        <div className="flex items-center gap-2 mb-2">
                             <div className="flex-1 relative">
                                 <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none" />
                                 <input
@@ -323,6 +396,75 @@ export function ReportsPage() {
                             </div>
                         </div>
 
+                        {/* Filters row 2: anuladas, modificadas, cajero */}
+                        <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                            <button
+                                onClick={() => setShowAnuladas(v => !v)}
+                                className={cn(
+                                    'flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium transition-all cursor-pointer',
+                                    showAnuladas
+                                        ? 'bg-red-500/15 border-red-500/30 text-red-400'
+                                        : 'bg-[#101520] border-[#1A2236] text-[#3D506A] hover:text-[#7A8FAA]'
+                                )}
+                            >
+                                <Ban size={10} />
+                                Anuladas
+                            </button>
+                            <button
+                                onClick={() => setShowSoloModificadas(v => !v)}
+                                className={cn(
+                                    'flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium transition-all cursor-pointer',
+                                    showSoloModificadas
+                                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                                        : 'bg-[#101520] border-[#1A2236] text-[#3D506A] hover:text-[#7A8FAA]'
+                                )}
+                            >
+                                <Pencil size={10} />
+                                Modificadas
+                            </button>
+
+                            <div className="relative" ref={cajeroMenuRef}>
+                                <button
+                                    onClick={() => setShowCajeroMenu(v => !v)}
+                                    className={cn(
+                                        'flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium transition-all cursor-pointer',
+                                        filterCajero
+                                            ? 'bg-blue-500/15 border-blue-500/30 text-blue-400'
+                                            : 'bg-[#101520] border-[#1A2236] text-[#3D506A] hover:text-[#7A8FAA]'
+                                    )}
+                                >
+                                    <UserCircle2 size={10} />
+                                    {filterCajero || 'Cajero'}
+                                    <ChevronDown size={9} className="opacity-60" />
+                                </button>
+                                {showCajeroMenu && (
+                                    <div className="absolute left-0 top-8 z-50 rounded-xl bg-[#0F1623] border border-[#192030] shadow-2xl shadow-black/60 py-1 min-w-[140px]">
+                                        <button
+                                            onClick={() => { setFilterCajero(''); setShowCajeroMenu(false) }}
+                                            className={cn(
+                                                'w-full text-left px-3 py-1.5 text-[11px] hover:bg-[#131C2E] transition-colors cursor-pointer',
+                                                !filterCajero ? 'text-blue-400 font-medium' : 'text-[#7A8FAA]'
+                                            )}
+                                        >
+                                            Todos
+                                        </button>
+                                        {cajeros.map(c => (
+                                            <button
+                                                key={c}
+                                                onClick={() => { setFilterCajero(c); setShowCajeroMenu(false) }}
+                                                className={cn(
+                                                    'w-full text-left px-3 py-1.5 text-[11px] hover:bg-[#131C2E] transition-colors cursor-pointer truncate',
+                                                    filterCajero === c ? 'text-blue-400 font-medium' : 'text-[#7A8FAA]'
+                                                )}
+                                            >
+                                                {c}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                         {filteredSales.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-6 gap-2">
                                 <Receipt size={24} className="text-[#3D506A]" />
@@ -331,6 +473,8 @@ export function ReportsPage() {
                         ) : (
                             <div className="space-y-0.5 overflow-y-auto max-h-[320px]">
                                 {filteredSales.map((s: any) => {
+                                    const isAnulada = s.status === 'ANULADA'
+                                    const isModificada = !!s.modifiedFromSaleId
                                     const cfg = PM_CONFIG[s.paymentMethod] ?? PM_CONFIG['EFECTIVO']
                                     const time = new Date(s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
                                     const isSplit = s.notes?.startsWith('Crédito dividido') ?? false
@@ -339,24 +483,47 @@ export function ReportsPage() {
                                         <button
                                             key={s.id}
                                             onClick={() => setSelectedSale(s)}
-                                            className="w-full flex items-center justify-between py-2 px-2 rounded-lg hover:bg-[#131C2E] transition-colors cursor-pointer border border-transparent hover:border-[#192030] group"
+                                            className={cn(
+                                                'w-full flex items-center justify-between py-2 px-2 rounded-lg transition-colors cursor-pointer border group',
+                                                isAnulada
+                                                    ? 'opacity-50 bg-transparent border-transparent hover:bg-[#131C2E] hover:border-[#192030]'
+                                                    : 'hover:bg-[#131C2E] border-transparent hover:border-[#192030]'
+                                            )}
                                         >
                                             <div className="flex items-center gap-2 min-w-0">
                                                 <span className="text-[11px] text-[#3D506A] group-hover:text-[#4A6080] transition-colors shrink-0">#{s.saleNumber}</span>
-                                                <span className={cn('flex items-center gap-1 text-[11px] font-medium shrink-0', cfg.color)}>
-                                                    {cfg.icon}
-                                                    {cfg.label}
-                                                </span>
+                                                {isAnulada ? (
+                                                    <span className="flex items-center gap-1 text-[11px] font-medium text-red-400/70 shrink-0">
+                                                        <Ban size={11} />
+                                                        Anulada
+                                                    </span>
+                                                ) : (
+                                                    <span className={cn('flex items-center gap-1 text-[11px] font-medium shrink-0', cfg.color)}>
+                                                        {cfg.icon}
+                                                        {cfg.label}
+                                                    </span>
+                                                )}
+                                                {isModificada && !isAnulada && (
+                                                    <span className="flex items-center gap-0.5 text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded-md shrink-0">
+                                                        <Pencil size={9} />
+                                                        Mod.
+                                                    </span>
+                                                )}
                                                 {isSplit && (
                                                     <span className="text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded-md shrink-0">Dividido</span>
                                                 )}
-                                                {isSplit && clientName && (
+                                                {(isSplit || isModificada) && clientName && (
                                                     <span className="text-[10px] text-[#3D506A] truncate">{clientName}</span>
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-3 shrink-0">
                                                 <span className="text-[11px] text-[#3D506A]">{time}</span>
-                                                <span className="text-[13px] font-semibold text-[#E4ECF7]">{formatCurrency(s.total)}</span>
+                                                <span className={cn(
+                                                    'text-[13px] font-semibold',
+                                                    isAnulada ? 'text-[#3D506A] line-through' : 'text-[#E4ECF7]'
+                                                )}>
+                                                    {formatCurrency(s.total)}
+                                                </span>
                                             </div>
                                         </button>
                                     )

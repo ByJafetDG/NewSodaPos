@@ -557,6 +557,10 @@ export function initDb() {
   } catch {}
 
   try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN modifiedFromSaleId TEXT`);
+  } catch {}
+
+  try {
     db.exec(`ALTER TABLE SaleItem ADD COLUMN notes TEXT`);
   } catch {}
 

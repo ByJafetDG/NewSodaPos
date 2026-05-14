@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, CreditCard, Banknote, Smartphone, User, Clock, Printer, Receipt } from 'lucide-react'
+import { X, CreditCard, Banknote, Smartphone, User, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { toast } from '@/components/ui/Toast'
+import { getSaleDetails } from '@/services/sales'
 
 function MarqueeText({ text, className }: { text: string; className?: string }) {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -41,9 +42,39 @@ const PM_CONFIG: Record<string, { label: string; color: string; badge: string; i
 interface ReportSaleModalProps {
     sale: any | null
     onClose: () => void
+    onVoid?: (saleId: string) => Promise<void>
+    onModify?: (saleId: string) => Promise<void>
 }
 
-export function ReportSaleModal({ sale, onClose }: ReportSaleModalProps) {
+export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleModalProps) {
+    const [tab, setTab] = useState<'detail' | 'compare'>('detail')
+    const [originalSale, setOriginalSale] = useState<any | null>(null)
+    const [loadingOriginal, setLoadingOriginal] = useState(false)
+
+    useEffect(() => {
+        if (!sale) { setTab('detail'); setOriginalSale(null) }
+    }, [sale])
+
+    const handleLoadOriginal = async () => {
+        if (originalSale || !sale?.modifiedFromSaleId) return
+        setLoadingOriginal(true)
+        try {
+            const data = await getSaleDetails(sale.modifiedFromSaleId)
+            setOriginalSale(data)
+        } catch {
+            toast.error('No se pudo cargar la venta original')
+        } finally {
+            setLoadingOriginal(false)
+        }
+    }
+
+    const handleTabCompare = () => {
+        setTab('compare')
+        handleLoadOriginal()
+    }
+
+    const hasCompare = !!sale?.modifiedFromSaleId
+
     return (
         <AnimatePresence>
             {sale && (
@@ -63,13 +94,55 @@ export function ReportSaleModal({ sale, onClose }: ReportSaleModalProps) {
                         className="fixed inset-0 z-[201] flex items-center justify-center p-6 pointer-events-none"
                     >
                         <div
-                            className="w-full max-w-[440px] rounded-2xl bg-[#0F1623] border border-[#192030] shadow-2xl shadow-black/60 overflow-hidden pointer-events-auto"
+                            className={cn(
+                                'rounded-2xl bg-[#0F1623] border border-[#192030] shadow-2xl shadow-black/60 overflow-hidden pointer-events-auto',
+                                tab === 'compare' ? 'w-full max-w-[820px]' : 'w-full max-w-[440px]'
+                            )}
                             onClick={e => e.stopPropagation()}
                         >
                             <SaleHeader sale={sale} onClose={onClose} />
-                            <SaleMeta sale={sale} />
-                            <SaleItems items={sale.items ?? []} />
-                            <SaleTotals sale={sale} />
+
+                            {/* Tab bar — only when sale was modified */}
+                            {hasCompare && (
+                                <div className="flex border-b border-[#192030]">
+                                    <button
+                                        onClick={() => setTab('detail')}
+                                        className={cn(
+                                            'flex-1 py-2 text-[12px] font-medium transition-all cursor-pointer',
+                                            tab === 'detail' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                        )}
+                                    >
+                                        Detalle
+                                    </button>
+                                    <button
+                                        onClick={handleTabCompare}
+                                        className={cn(
+                                            'flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px] font-medium transition-all cursor-pointer',
+                                            tab === 'compare' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                        )}
+                                    >
+                                        <GitCompare size={12} />
+                                        Comparativa
+                                    </button>
+                                </div>
+                            )}
+
+                            {tab === 'detail' ? (
+                                <>
+                                    <SaleMeta sale={sale} />
+                                    <SaleItems items={sale.items ?? []} />
+                                    <SaleTotals sale={sale} />
+                                    {sale.status !== 'ANULADA' && (onVoid || onModify) && (
+                                        <SaleActions sale={sale} onVoid={onVoid} onModify={onModify} onClose={onClose} />
+                                    )}
+                                </>
+                            ) : (
+                                <CompareView
+                                    currentSale={sale}
+                                    originalSale={originalSale}
+                                    loading={loadingOriginal}
+                                />
+                            )}
                         </div>
                     </motion.div>
                 </>
@@ -100,7 +173,9 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
 
         const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
         const cajeroIdx = (sale.notes ?? '').indexOf('Cajero:')
-        const cashier = cajeroIdx !== -1 ? sale.notes!.slice(cajeroIdx + 8).trim() : 'Sin cajero'
+        const cashier = cajeroIdx !== -1
+            ? sale.notes!.slice(cajeroIdx + 8).split('||')[0].trim()
+            : 'Sin cajero'
 
         setPrinting(true)
         try {
@@ -186,7 +261,9 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
 
 function SaleMeta({ sale }: { sale: any }) {
     const cajeroIdx = (sale.notes ?? '').indexOf('Cajero:')
-    const cashier = cajeroIdx !== -1 ? sale.notes!.slice(cajeroIdx + 8).trim() : 'Sin cajero'
+    const cashier = cajeroIdx !== -1
+        ? sale.notes!.slice(cajeroIdx + 8).split('||')[0].trim()
+        : 'Sin cajero'
     const isSplitCredit = sale.notes?.startsWith('Crédito dividido') ?? false
     const clientName = sale.clientName ?? sale.client?.name ?? null
 
@@ -274,6 +351,191 @@ function SaleTotals({ sale }: { sale: any }) {
                     <span className="text-[#3D506A]">Cambio</span>
                     <span className="text-[#7A8FAA]">{formatCurrency(sale.change)}</span>
                 </div>
+            )}
+        </div>
+    )
+}
+
+function CompareView({ currentSale, originalSale, loading }: { currentSale: any; originalSale: any | null; loading: boolean }) {
+    const cfgCurrent = PM_CONFIG[currentSale.paymentMethod] ?? PM_CONFIG.EFECTIVO
+    const cfgOriginal = originalSale ? (PM_CONFIG[originalSale.paymentMethod] ?? PM_CONFIG.EFECTIVO) : null
+
+    return (
+        <div className="flex divide-x divide-[#192030] min-h-[300px]">
+            {/* Left: original */}
+            <div className="flex-1 flex flex-col">
+                <div className="px-4 py-2.5 bg-[#090C14] border-b border-[#192030]">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Original</p>
+                    {originalSale && (
+                        <p className="text-[12px] text-[#7A8FAA] mt-0.5">
+                            Venta #{originalSale.saleNumber}
+                            <span className={cn('ml-2 text-[11px]', cfgOriginal?.color)}>{cfgOriginal?.label}</span>
+                        </p>
+                    )}
+                </div>
+                {loading ? (
+                    <div className="flex-1 flex items-center justify-center">
+                        <p className="text-[11px] text-[#3D506A]">Cargando...</p>
+                    </div>
+                ) : !originalSale ? (
+                    <div className="flex-1 flex items-center justify-center">
+                        <p className="text-[11px] text-[#3D506A]">No disponible</p>
+                    </div>
+                ) : (
+                    <>
+                        <div className="overflow-y-auto flex-1">
+                            {(originalSale.items ?? []).map((item: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between px-4 py-2 border-b border-[#192030] last:border-0">
+                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                        <span className="text-[11px] text-[#3D506A] shrink-0">{item.quantity}×</span>
+                                        <span className="text-[12px] text-[#E4ECF7] truncate">{item.product?.name ?? 'Producto'}</span>
+                                    </div>
+                                    <span className="text-[12px] font-semibold text-[#E4ECF7] ml-3 shrink-0">{formatCurrency(item.subtotal)}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="px-4 py-2.5 border-t border-[#192030] bg-[#090C14] flex justify-between items-baseline">
+                            <span className="text-[11px] text-[#3D506A]">Total</span>
+                            <span className="text-[16px] font-bold text-[#E4ECF7]">{formatCurrency(originalSale.total)}</span>
+                        </div>
+                    </>
+                )}
+            </div>
+
+            {/* Right: current (modified) */}
+            <div className="flex-1 flex flex-col">
+                <div className="px-4 py-2.5 bg-[#090C14] border-b border-[#192030]">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-500/60">Modificada</p>
+                    <p className="text-[12px] text-[#7A8FAA] mt-0.5">
+                        Venta #{currentSale.saleNumber}
+                        <span className={cn('ml-2 text-[11px]', cfgCurrent.color)}>{cfgCurrent.label}</span>
+                    </p>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                    {(currentSale.items ?? []).map((item: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between px-4 py-2 border-b border-[#192030] last:border-0">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span className="text-[11px] text-[#3D506A] shrink-0">{item.quantity}×</span>
+                                <span className="text-[12px] text-[#E4ECF7] truncate">{item.product?.name ?? 'Producto'}</span>
+                            </div>
+                            <span className="text-[12px] font-semibold text-[#E4ECF7] ml-3 shrink-0">{formatCurrency(item.subtotal)}</span>
+                        </div>
+                    ))}
+                </div>
+                <div className="px-4 py-2.5 border-t border-[#192030] bg-[#090C14] flex justify-between items-baseline">
+                    <span className="text-[11px] text-[#3D506A]">Total</span>
+                    <span className={cn(
+                        'text-[16px] font-bold',
+                        originalSale
+                            ? currentSale.total > originalSale.total
+                                ? 'text-red-400'
+                                : currentSale.total < originalSale.total
+                                    ? 'text-emerald-400'
+                                    : 'text-[#E4ECF7]'
+                            : 'text-[#E4ECF7]'
+                    )}>
+                        {formatCurrency(currentSale.total)}
+                        {originalSale && currentSale.total !== originalSale.total && (
+                            <span className="text-[12px] ml-1.5 opacity-60">
+                                ({currentSale.total > originalSale.total ? '+' : ''}{formatCurrency(currentSale.total - originalSale.total)})
+                            </span>
+                        )}
+                    </span>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function SaleActions({
+    sale,
+    onVoid,
+    onModify,
+    onClose,
+}: {
+    sale: any
+    onVoid?: (id: string) => Promise<void>
+    onModify?: (id: string) => Promise<void>
+    onClose: () => void
+}) {
+    const [confirm, setConfirm] = useState<'void' | 'modify' | null>(null)
+    const [loading, setLoading] = useState(false)
+
+    const handleConfirm = async () => {
+        setLoading(true)
+        try {
+            if (confirm === 'void' && onVoid) await onVoid(sale.id)
+            if (confirm === 'modify' && onModify) await onModify(sale.id)
+            onClose()
+        } catch (err: any) {
+            toast.error(err?.message ?? 'Error al procesar')
+        } finally {
+            setLoading(false)
+            setConfirm(null)
+        }
+    }
+
+    if (confirm) {
+        const isModify = confirm === 'modify'
+        return (
+            <div className="px-5 py-3 border-t border-[#192030] bg-[#090C14]">
+                <div className="flex items-start gap-2 mb-3">
+                    <AlertTriangle size={14} className={cn('shrink-0 mt-0.5', isModify ? 'text-amber-400' : 'text-red-400')} />
+                    <div>
+                        <p className="text-[12px] font-semibold text-[#E4ECF7]">
+                            {isModify ? '¿Cargar en POS para editar?' : '¿Anular esta venta?'}
+                        </p>
+                        <p className="text-[11px] text-[#3D506A] mt-0.5">
+                            {isModify
+                                ? 'La venta se anulará y sus productos se cargarán en el POS.'
+                                : 'El stock se revertirá. Esta acción no se puede deshacer.'}
+                        </p>
+                    </div>
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => setConfirm(null)}
+                        disabled={loading}
+                        className="flex-1 h-8 rounded-lg bg-[#1A2236] border border-[#1E2A40] text-[12px] text-[#7A8FAA] hover:text-[#E4ECF7] transition-all cursor-pointer disabled:opacity-50"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        onClick={handleConfirm}
+                        disabled={loading}
+                        className={cn(
+                            'flex-1 h-8 rounded-lg border text-[12px] font-medium transition-all cursor-pointer disabled:opacity-50',
+                            isModify
+                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-400 hover:bg-amber-500/25'
+                                : 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25'
+                        )}
+                    >
+                        {loading ? '...' : isModify ? 'Cargar en POS' : 'Anular venta'}
+                    </button>
+                </div>
+            </div>
+        )
+    }
+
+    return (
+        <div className="px-5 py-3 border-t border-[#192030] bg-[#090C14] flex gap-2">
+            {onVoid && (
+                <button
+                    onClick={() => setConfirm('void')}
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-red-500/10 border border-red-500/20 text-[12px] text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
+                >
+                    <Trash2 size={12} />
+                    Anular
+                </button>
+            )}
+            {onModify && !sale.isCredit && (
+                <button
+                    onClick={() => setConfirm('modify')}
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[12px] text-amber-400 hover:bg-amber-500/20 transition-all cursor-pointer"
+                >
+                    <Pencil size={12} />
+                    Modificar
+                </button>
             )}
         </div>
     )

@@ -4,13 +4,10 @@ export async function getReportData(from: string, to: string) {
     if (window.electronAPI) {
         const sales = await window.electronAPI.dbQuery(`
             SELECT s.*, c.name as clientName, c.code as clientCode
-FROM Sale s
+            FROM Sale s
             LEFT JOIN Client c ON s.clientId = c.id
-            WHERE s.status = 'COMPLETADA'
-              AND (
-                (s.date >= ? AND s.date <= ?)
-                OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
-              )
+            WHERE (s.date >= ? AND s.date <= ?)
+               OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
             ORDER BY COALESCE(s.paidAt, s.date) DESC
         `, [from, to, from, to])
 
@@ -20,11 +17,8 @@ FROM Sale s
             FROM SaleItem si
             INNER JOIN Sale s ON si.saleId = s.id
             LEFT JOIN Product p ON si.productId = p.id
-            WHERE s.status = 'COMPLETADA'
-              AND (
-                (s.date >= ? AND s.date <= ?)
-                OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
-              )
+            WHERE (s.date >= ? AND s.date <= ?)
+               OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
         `, [from, to, from, to])
 
         const itemsMap: Record<string, any[]> = {}
@@ -90,7 +84,7 @@ FROM Sale s
         )
 
         return {
-            sales: sales.map((s: any) => ({
+            sales: (sales as any[]).map((s: any) => ({
                 ...s,
                 isCredit: !!s.isCredit,
                 items: itemsMap[s.id] ?? [],
@@ -115,7 +109,6 @@ FROM Sale s
             .from('Sale')
             .select('*, client:Client(name, code), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
             .or(`and(date.gte.${from},date.lte.${to}),and(paidAt.gte.${from},paidAt.lte.${to},paidAt.not.is.null)`)
-            .eq('status', 'COMPLETADA')
             .order('date', { ascending: false }),
 
         supabase
