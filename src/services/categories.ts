@@ -1,5 +1,4 @@
 import { supabase } from '@/lib/supabase'
-import { deleteSubcategoriesByCategoryId } from '@/services/subcategories'
 import type { Category } from '@/types'
 
 /**
@@ -7,14 +6,15 @@ import type { Category } from '@/types'
  */
 export async function getCategories(activeOnly = true): Promise<Category[]> {
     if (window.electronAPI) {
-        let sql = 'SELECT * FROM Category';
-        if (activeOnly) sql += ' WHERE isActive = 1';
+        let sql = 'SELECT * FROM Category WHERE (isDeleted IS NULL OR isDeleted = 0)';
+        if (activeOnly) sql += ' AND isActive = 1';
         sql += ' ORDER BY sortOrder ASC';
 
         const data = await window.electronAPI.dbQuery(sql);
         return data.map(c => ({
             ...c,
-            isActive: !!c.isActive
+            isActive: !!c.isActive,
+            isDeleted: !!c.isDeleted,
         })) as unknown as Category[];
     }
 
@@ -114,35 +114,22 @@ export async function updateCategory(
 }
 
 /**
- * Delete a category (only if no products reference it)
+ * Soft-delete a category (marks isDeleted=1, hides from all lists)
  */
 export async function deleteCategory(id: string): Promise<void> {
+    const now = new Date().toISOString();
+
     if (window.electronAPI) {
-        const products = await window.electronAPI.dbQuery('SELECT id FROM Product WHERE categoryId = ?', [id]);
-        if (products.length > 0) {
-            throw new Error(`No se puede eliminar: hay ${products.length} producto(s) en esta categoría`);
-        }
-        await deleteSubcategoriesByCategoryId(id)
-        await window.electronAPI.dbExecute('DELETE FROM Category WHERE id = ?', [id]);
+        await window.electronAPI.dbExecute(
+            `UPDATE Category SET isDeleted = 1, isActive = 0, syncStatus = 'SYNCED', updatedAt = ? WHERE id = ?`,
+            [now, id]
+        );
         return;
     }
 
-    // Check if any products reference this category
-    const { count, error: countError } = await supabase
-        .from('Product')
-        .select('id', { count: 'exact', head: true })
-        .eq('categoryId', id)
-
-    if (countError) throw countError
-    if ((count ?? 0) > 0) {
-        throw new Error(`No se puede eliminar: hay ${count} producto(s) en esta categoría`)
-    }
-
-    await deleteSubcategoriesByCategoryId(id)
-
     const { error } = await supabase
         .from('Category')
-        .delete()
+        .update({ isActive: false, updatedAt: now })
         .eq('id', id)
 
     if (error) throw error

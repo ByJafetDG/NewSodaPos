@@ -573,6 +573,10 @@ export function initDb() {
     db.exec(`ALTER TABLE BusinessConfig ADD COLUMN syncStatus TEXT DEFAULT 'SYNCED'`);
   } catch {}
 
+  try {
+    db.exec(`ALTER TABLE Category ADD COLUMN isDeleted INTEGER DEFAULT 0`);
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);

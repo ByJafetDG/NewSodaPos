@@ -25,6 +25,7 @@ type EntrySubTab = 'ingresar' | 'movimientos'
 export function InventoryPage() {
     const { data: products = [] } = useProducts(false)
     const { data: categories = [] } = useCategories()
+    const { data: allCategories = [] } = useCategories(false)
     const { data: subcategories = [] } = useSubcategories()
     const { data: movements = [] } = useInventoryMovements()
 
@@ -210,7 +211,7 @@ export function InventoryPage() {
             <ManageCategoriesModal
                 isOpen={manageCatOpen}
                 onClose={() => setManageCatOpen(false)}
-                categories={categories}
+                categories={allCategories}
                 onCreate={data => createCategory.mutateAsync(data)}
                 onUpdate={(id, data) => updateCategory.mutateAsync({ id, ...data })}
                 onDelete={cat => { setManageCatOpen(false); setDeletingCategory(cat) }}
@@ -239,7 +240,7 @@ export function InventoryPage() {
                 onClose={() => setDeletingCategory(null)}
                 onConfirm={handleDeleteCategoryConfirm}
                 title="Eliminar categoría"
-                description={`¿Eliminar la categoría "${deletingCategory?.name}"? Los productos quedarán sin categoría.`}
+                description={`¿Eliminar la categoría "${deletingCategory?.name}"? La categoría quedará oculta del sistema pero los productos existentes no se verán afectados.`}
                 isPending={deleteCategory.isPending}
             />
 

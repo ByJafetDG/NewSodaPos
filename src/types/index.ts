@@ -18,7 +18,7 @@ export interface SyncInfo {
 export type CategoryType = 'PRODUCTO' | 'MENU' | 'BUFFET' | 'INGREDIENTE'
 export interface Category {
     id: string; name: string; type: CategoryType; icon: string | null
-    sortOrder: number; isActive: boolean; createdAt: Date; updatedAt: Date
+    sortOrder: number; isActive: boolean; isDeleted?: boolean; createdAt: Date; updatedAt: Date
 }
 
 export interface Subcategory {

@@ -349,7 +349,7 @@ export function ManageCategoriesModal({
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="flex items-center gap-2 px-3 py-2.5">
+                                            <div className={cn("flex items-center gap-2 px-3 py-2.5", !cat.isActive && "opacity-50")}>
                                                 <div className="flex flex-col gap-0.5 shrink-0">
                                                     <button
                                                         onClick={() => moveCategory(idx, -1)}
@@ -370,6 +370,9 @@ export function ManageCategoriesModal({
                                                 <div className="flex-1 min-w-0">
                                                     <span className="text-[13px] font-medium text-[#E4ECF7]">{cat.name}</span>
                                                     <span className="ml-2 text-[11px] text-[#3D506A]">{TYPE_LABELS[cat.type]}</span>
+                                                    {!cat.isActive && (
+                                                        <span className="ml-2 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[#1C2438] text-[#3D506A] border border-[#283A56]">INACTIVA</span>
+                                                    )}
                                                 </div>
                                                 <button
                                                     onClick={() => openSubcategories(cat.id)}
