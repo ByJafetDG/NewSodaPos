@@ -43,7 +43,7 @@ interface PaymentPanelProps {
     onSelectCreditClient: (id: string | null) => void
     clients?: ClientOption[]
     // Invoice name
-    invoiceClient?: { name: string; cedula: string; email: string; existingId?: string } | null
+    invoiceClient?: { name: string; cedula: string; email: string; extraEmail?: string; existingId?: string } | null
     onOpenInvoiceModal?: () => void
 }
 

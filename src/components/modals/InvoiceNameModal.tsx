@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { UserCircle2, Search, Check } from 'lucide-react'
+import { UserCircle2, Search, Check, Plus, X } from 'lucide-react'
 import { BaseModal } from './BaseModal'
 import { Button } from '../atoms/Button'
 import { cn, normalizeStr, fuzzyMatch } from '@/lib/utils'
@@ -10,7 +10,7 @@ import type { Client } from '@/types'
 interface InvoiceNameModalProps {
     isOpen: boolean
     onClose: () => void
-    onAccept: (data: { name: string; cedula: string; email: string; existingId?: string }) => void
+    onAccept: (data: { name: string; cedula: string; email: string; extraEmail?: string; existingId?: string }) => void
     clients: Client[]
     initialData?: { name: string; cedula: string; email: string; existingId?: string } | null
 }
@@ -19,6 +19,8 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
     const [name, setName] = useState(initialData?.name ?? '')
     const [cedula, setCedula] = useState(initialData?.cedula ?? '')
     const [email, setEmail] = useState(initialData?.email ?? '')
+    const [extraEmail, setExtraEmail] = useState('')
+    const [showExtraEmail, setShowExtraEmail] = useState(false)
     const [selectedId, setSelectedId] = useState<string | undefined>(initialData?.existingId)
 
     useEffect(() => {
@@ -27,6 +29,8 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
         setName(initialData?.name ?? '')
         setCedula(initialData?.cedula ?? '')
         setEmail(initialData?.email ?? '')
+        setExtraEmail('')
+        setShowExtraEmail(false)
         setSelectedId(initialData?.existingId)
     }, [isOpen])
 
@@ -36,6 +40,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
     }, { mode: 'alpha' })
     const cedulaKb = useKeyboardInput(cedula, setCedula, { mode: 'alpha' })
     const emailKb = useKeyboardInput(email, setEmail, { mode: 'alpha' })
+    const extraEmailKb = useKeyboardInput(extraEmail, setExtraEmail, { mode: 'alpha' })
 
     const filteredClients = useMemo(() => {
         if (!name.trim()) return clients.slice(0, 10)
@@ -61,6 +66,8 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
         setName('')
         setCedula('')
         setEmail('')
+        setExtraEmail('')
+        setShowExtraEmail(false)
         setSelectedId(undefined)
     }
 
@@ -72,7 +79,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
         if (!name.trim()) return
-        onAccept({ name: name.trim(), cedula: cedula.trim(), email: email.trim(), existingId: selectedId })
+        onAccept({ name: name.trim(), cedula: cedula.trim(), email: email.trim(), extraEmail: extraEmail.trim() || undefined, existingId: selectedId })
         useKeyboardStore.getState().close()
         onClose()
     }
@@ -102,13 +109,42 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
                     </div>
 
                     <div className="space-y-1.5">
-                        <label className={labelClass}>Correo (Opcional)</label>
+                        <div className="flex items-center justify-between">
+                            <label className={labelClass}>Correo (Opcional)</label>
+                            {!showExtraEmail && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowExtraEmail(true)}
+                                    className="flex items-center gap-1 text-[10px] text-[#3D506A] hover:text-violet-400 transition-colors"
+                                >
+                                    <Plus size={10} />
+                                    CC
+                                </button>
+                            )}
+                        </div>
                         <input
                             type="text"
                             {...emailKb}
                             placeholder="cliente@ejemplo.com"
                             className={inputClass}
                         />
+                        {showExtraEmail && (
+                            <div className="flex gap-2 items-center">
+                                <input
+                                    type="text"
+                                    {...extraEmailKb}
+                                    placeholder="correo adicional (CC)..."
+                                    className={cn(inputClass, 'flex-1')}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => { setShowExtraEmail(false); setExtraEmail('') }}
+                                    className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-[#101520] border border-[#1E2A40] text-[#3D506A] hover:text-red-400 hover:border-red-500/30 transition-colors"
+                                >
+                                    <X size={12} />
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     <div className="pt-2 flex gap-3">

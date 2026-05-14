@@ -150,7 +150,7 @@ export function POSPage() {
     const [showCreateProduct, setShowCreateProduct] = useState(false)
     const [createProductBarcode, setCreateProductBarcode] = useState('')
     const [showInvoiceModal, setShowInvoiceModal] = useState(false)
-    const [invoiceClient, setInvoiceClient] = useState<{ name: string; cedula: string; email: string; existingId?: string } | null>(null)
+    const [invoiceClient, setInvoiceClient] = useState<{ name: string; cedula: string; email: string; extraEmail?: string; existingId?: string } | null>(null)
 
     // ── Pending sale load (from Reports page modify flow) ────────────────────
     const pendingSaleLoad = usePendingSaleLoadStore()
@@ -322,7 +322,7 @@ export function POSPage() {
         setHeldOrdersView(null)
     }
 
-    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; existingId?: string }) => {
+    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; extraEmail?: string; existingId?: string }) => {
         let finalId = data.existingId
         try {
             if (data.existingId) {
@@ -361,7 +361,7 @@ export function POSPage() {
                     finalId = newClient.id
                 }
             }
-            setInvoiceClient({ ...data, existingId: finalId })
+            setInvoiceClient({ ...data, existingId: finalId, extraEmail: data.extraEmail })
         } catch (err) {
             console.error('Error handling invoice client:', err)
             toast.error('Error al vincular cliente')
@@ -862,22 +862,22 @@ export function POSPage() {
                     : null
                 const recipientEmail = capturedInvoiceClient.email.trim() || invoiceFull?.email || null
                 const recipientName = invoiceFull?.name ?? capturedInvoiceClient.name
+                const invoicePayload = {
+                    clientName: recipientName,
+                    businessName: config?.name ?? 'Mi Soda',
+                    saleNumber: sale.saleNumber,
+                    date: sale.date,
+                    items: saleItems.map(i => ({
+                        name: i.product.name,
+                        quantity: i.quantity,
+                        unitPrice: i.unitPrice,
+                        subtotal: i.subtotal,
+                    })),
+                    subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
+                    paymentMethod: method,
+                }
                 if (recipientEmail) {
-                    sendInvoiceReceiptEmail({
-                        to: recipientEmail,
-                        clientName: recipientName,
-                        businessName: config?.name ?? 'Mi Soda',
-                        saleNumber: sale.saleNumber,
-                        date: sale.date,
-                        items: saleItems.map(i => ({
-                            name: i.product.name,
-                            quantity: i.quantity,
-                            unitPrice: i.unitPrice,
-                            subtotal: i.subtotal,
-                        })),
-                        subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
-                        paymentMethod: method,
-                    }).then(result => {
+                    sendInvoiceReceiptEmail({ to: recipientEmail, ...invoicePayload }).then(result => {
                         if (result.success) {
                             toast.success(`Recibo enviado a ${recipientEmail}`)
                         } else if (result.isVerificationError) {
@@ -886,6 +886,10 @@ export function POSPage() {
                             toast.error(`Error al enviar recibo: ${result.error}`)
                         }
                     }).catch(() => {})
+                }
+                const ccEmail = capturedInvoiceClient.extraEmail?.trim()
+                if (ccEmail) {
+                    sendInvoiceReceiptEmail({ to: ccEmail, ...invoicePayload }).catch(() => {})
                 }
             }
         } catch (err) { console.error(err) }
