@@ -22,11 +22,11 @@ function persistSyncError(tableName: string, recordId: string, errorMsg: string)
         const id = `${tableName}:${recordId}`
         execute(`
             INSERT INTO SyncError (id, tableName, recordId, errorMsg, attempts, createdAt, lastAttemptAt)
-            VALUES (?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+            VALUES (?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
             ON CONFLICT(id) DO UPDATE SET
                 errorMsg = excluded.errorMsg,
                 attempts = SyncError.attempts + 1,
-                lastAttemptAt = datetime('now')
+                lastAttemptAt = datetime('now', 'localtime')
         `, [id, tableName, recordId, errorMsg])
     } catch {}
 }
@@ -682,6 +682,10 @@ export async function pushSync(): Promise<string[]> {
 
     // 6. Products — after Category and Subcategory
     for (const prod of pendingProducts) {
+        if (prod.id === 'credit-charge') {
+            execute(`UPDATE Product SET syncStatus = 'SYNCED' WHERE id = 'credit-charge'`, [])
+            continue
+        }
         try {
             const { error } = await supabase.from('Product').upsert({
                 id: prod.id,

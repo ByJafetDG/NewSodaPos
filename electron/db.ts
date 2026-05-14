@@ -78,9 +78,9 @@ export function initDb() {
       FOREIGN KEY (categoryId) REFERENCES Category(id)
     );
 
-    -- Ensure credit-charge system product exists
+    -- Ensure credit-charge system product exists (categoryId NULL — no FK needed)
     INSERT OR IGNORE INTO Product (id, name, categoryId, price, isActive, isInfinite, syncStatus)
-    VALUES ('credit-charge', 'Cargo a cuenta', 'system', 0, 1, 1, 'SYNCED');
+    VALUES ('credit-charge', 'Cargo a cuenta', NULL, 0, 1, 1, 'SYNCED');
 
     CREATE TABLE IF NOT EXISTS Client (
       id TEXT PRIMARY KEY,
@@ -562,6 +562,11 @@ export function initDb() {
 
   try {
     db.exec(`ALTER TABLE SaleItem ADD COLUMN notes TEXT`);
+  } catch {}
+
+  // Fix credit-charge: remove invalid categoryId='system' so it won't block category deletes or fail FK on sync
+  try {
+    db.exec(`UPDATE Product SET categoryId = NULL, syncStatus = 'SYNCED' WHERE id = 'credit-charge' AND categoryId IS NOT NULL`);
   } catch {}
 
   try {

@@ -110,6 +110,7 @@ export function SettingsPage() {
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date'>('idle')
     const [lastChecked, setLastChecked] = useState<Date | null>(null)
     const [forcePushing, setForcePushing] = useState(false)
+    const [showCloseConfirm, setShowCloseConfirm] = useState(false)
 
     type SyncError = { id: string; tableName: string; recordId: string; errorMsg: string; attempts: number; lastAttemptAt: string }
     const [syncErrors, setSyncErrors] = useState<SyncError[]>([])
@@ -879,11 +880,7 @@ export function SettingsPage() {
 
                                 {/* Close app */}
                                 <button
-                                    onClick={() => {
-                                        if (confirm('¿Cerrar el sistema POS?')) {
-                                            window.electronAPI?.closeWindow()
-                                        }
-                                    }}
+                                    onClick={() => setShowCloseConfirm(true)}
                                     className="w-full flex items-center justify-between px-4 py-4 rounded-xl bg-red-500/5 border border-red-500/20 hover:bg-red-500/10 transition-colors cursor-pointer group"
                                 >
                                     <div className="flex items-center gap-3">
@@ -922,6 +919,15 @@ export function SettingsPage() {
                 onConfirm={handleDeleteEmp}
                 title="Eliminar empleado"
                 description={`¿Eliminar a "${deletingEmp?.name}"? Esta acción no se puede deshacer.`}
+            />
+
+            <DeleteConfirmModal
+                isOpen={showCloseConfirm}
+                onClose={() => setShowCloseConfirm(false)}
+                onConfirm={() => window.electronAPI?.closeWindow()}
+                title="Cerrar aplicación"
+                description="¿Estás seguro de que deseas cerrar el sistema POS?"
+                confirmLabel="Cerrar aplicación"
             />
         </div>
     )
