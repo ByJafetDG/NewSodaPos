@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, CreditCard, Banknote, Smartphone, User, Clock, Printer } from 'lucide-react'
+import { X, CreditCard, Banknote, Smartphone, User, Clock, Printer, Receipt } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { toast } from '@/components/ui/Toast'
@@ -202,12 +202,17 @@ function SaleMeta({ sale }: { sale: any }) {
                 <span className="text-[11px] text-[#3D506A]">Cajero</span>
                 <span className="text-[12px] text-[#7A8FAA]">{cashier}</span>
             </div>
-            {sale.isCredit && clientName && (
+            {clientName && (
                 <>
                     <span className="w-px h-3 bg-[#1C2438] shrink-0" />
                     <div className="flex items-center gap-1.5">
-                        <CreditCard size={11} className="text-violet-400" />
-                        <span className="text-[12px] text-violet-400">{clientName}</span>
+                        {sale.isCredit
+                            ? <CreditCard size={11} className="text-violet-400" />
+                            : <Receipt size={11} className="text-blue-400" />
+                        }
+                        <span className={cn("text-[12px]", sale.isCredit ? "text-violet-400" : "text-blue-400")}>
+                            {sale.isCredit ? clientName : `Facturado a: ${clientName}`}
+                        </span>
                     </div>
                 </>
             )}

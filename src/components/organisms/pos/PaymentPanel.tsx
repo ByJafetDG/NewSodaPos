@@ -42,6 +42,9 @@ interface PaymentPanelProps {
     creditClientId: string | null
     onSelectCreditClient: (id: string | null) => void
     clients?: ClientOption[]
+    // Invoice name
+    invoiceClient?: { name: string; code: string; email: string; existingId?: string } | null
+    onOpenInvoiceModal?: () => void
 }
 
 export function PaymentPanel({
@@ -53,6 +56,7 @@ export function PaymentPanel({
     splitAmount, onChangeSplitAmount,
     creditAmount, onChangeCreditAmount,
     creditClientId, onSelectCreditClient, clients = [],
+    invoiceClient, onOpenInvoiceModal,
 }: PaymentPanelProps) {
     const [confirmClearDebt, setConfirmClearDebt] = useState(false)
     const [splitFocus, setSplitFocus] = useState<'sinpe' | 'cash' | 'credit'>('sinpe')
@@ -109,18 +113,33 @@ export function PaymentPanel({
                 <div className="flex items-center justify-between mb-2.5">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">Forma de pago</p>
                     {paymentMethod !== 'CREDITO' && (
-                        <button
-                            onClick={isMixed ? onOpenMixedCancel : onOpenMixedSelect}
-                            className={cn(
-                                'flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer',
-                                isMixed
-                                    ? 'bg-orange-500/12 text-orange-400 border border-orange-500/25 hover:bg-orange-500/20'
-                                    : 'text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5'
-                            )}
-                        >
-                            <SplitSquareHorizontal size={11} />
-                            {isMixed ? `Mixto: ${mixedLabel}` : 'Pago mixto'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={onOpenInvoiceModal}
+                                className={cn(
+                                    'flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer',
+                                    invoiceClient
+                                        ? 'bg-blue-500/12 text-blue-400 border border-blue-500/25 hover:bg-blue-500/20'
+                                        : 'text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5'
+                                )}
+                            >
+                                <UserCircle2 size={11} />
+                                {invoiceClient ? 'Facturar a: ' + invoiceClient.name : 'Facturar a nombre'}
+                            </button>
+
+                            <button
+                                onClick={isMixed ? onOpenMixedCancel : onOpenMixedSelect}
+                                className={cn(
+                                    'flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer',
+                                    isMixed
+                                        ? 'bg-orange-500/12 text-orange-400 border border-orange-500/25 hover:bg-orange-500/20'
+                                        : 'text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5'
+                                )}
+                            >
+                                <SplitSquareHorizontal size={11} />
+                                {isMixed ? `Mixto: ${mixedLabel}` : 'Pago mixto'}
+                            </button>
+                        </div>
                     )}
                 </div>
                 {!isMixed && <PaymentMethodPicker value={paymentMethod} onChange={onChangeMethod} />}

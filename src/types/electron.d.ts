@@ -26,6 +26,7 @@ export interface ElectronAPI {
     // Email
     sendEmail: (payload: { from: string; to: string[]; subject: string; html: string }) =>
         Promise<{ success: boolean, error?: any }>
+    getLogoBase64: () => Promise<string | null>
     // Sync
     getSyncStats: () => Promise<{ totalPending: number }>
     forcePush: () => Promise<{ totalRemaining: number; remaining: Record<string, number>; pushErrors: string[] }>

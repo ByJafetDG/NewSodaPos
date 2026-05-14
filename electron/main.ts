@@ -573,6 +573,19 @@ ipcMain.handle('update:install', () => autoUpdater.quitAndInstall())
 ipcMain.handle('update:check', () => autoUpdater.checkForUpdates())
 ipcMain.handle('devtools:open', () => mainWindow?.webContents.openDevTools())
 
+ipcMain.handle('assets:get-logo', () => {
+    try {
+        const logoPath = isDev
+            ? path.join(__dirname, '../src/assets/logo-pospelon.png')
+            : path.join(process.resourcesPath, 'assets/logo-pospelon.png')
+        if (!fs.existsSync(logoPath)) return null
+        const data = fs.readFileSync(logoPath)
+        return `data:image/png;base64,${data.toString('base64')}`
+    } catch {
+        return null
+    }
+})
+
 ipcMain.handle('sync:get-errors', () =>
     query('SELECT * FROM SyncError ORDER BY lastAttemptAt DESC LIMIT 50', [])
 )

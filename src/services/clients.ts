@@ -14,16 +14,24 @@ export async function getClients(): Promise<Client[]> {
     return (data ?? []) as unknown as Client[]
 }
 
-export async function createClient(input: ClientInput): Promise<void> {
+export async function createClient(input: ClientInput): Promise<Client> {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
+    const newClient: Client = {
+        ...input,
+        id,
+        createdAt: new Date(now),
+        updatedAt: new Date(now),
+        syncStatus: 'PENDING'
+    }
+
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
             `INSERT INTO Client (id, name, type, phone, email, notes, code, isActive, syncStatus, createdAt, updatedAt)
              VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'PENDING', ?, ?)`,
             [id, input.name, input.type, input.phone ?? null, input.email ?? null, input.notes ?? null, input.code ?? null, now, now]
         )
-        return
+        return newClient
     }
     const { error } = await supabase.from('Client').insert({
         id, name: input.name, type: input.type,
@@ -32,9 +40,10 @@ export async function createClient(input: ClientInput): Promise<void> {
         syncStatus: 'SYNCED', createdAt: now, updatedAt: now,
     })
     if (error) throw error
+    return { ...newClient, syncStatus: 'SYNCED' }
 }
 
-export async function updateClient(id: string, input: Partial<ClientInput>): Promise<void> {
+export async function updateClient(id: string, input: Partial<ClientInput>): Promise<Client> {
     const now = new Date().toISOString()
     if (window.electronAPI) {
         const fields = Object.entries(input)
@@ -44,10 +53,13 @@ export async function updateClient(id: string, input: Partial<ClientInput>): Pro
             `UPDATE Client SET ${fields}, updatedAt = ?, syncStatus = 'PENDING' WHERE id = ?`,
             [...values, now, id]
         )
-        return
+        // Note: This is partial, but for the sake of the return type:
+        const updated = await window.electronAPI.dbGet('SELECT * FROM Client WHERE id = ?', [id])
+        return updated as Client
     }
-    const { error } = await supabase.from('Client').update({ ...input, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
+    const { data, error } = await supabase.from('Client').update({ ...input, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id).select().single()
     if (error) throw error
+    return data as Client
 }
 
 export async function deleteClient(id: string): Promise<void> {

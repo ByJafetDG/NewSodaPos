@@ -10,7 +10,7 @@ import type { SplitCreditData } from '@/components/modals/CreditModal'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
-import { useClients } from '@/hooks/useClients'
+import { useClients, useCreateClient, useUpdateClient } from '@/hooks/useClients'
 import { useEmployees } from '@/hooks/useEmployees'
 import { useCreateSale } from '@/hooks/useSales'
 import { useActiveRegister } from '@/hooks/useCashRegister'
@@ -19,7 +19,7 @@ import { RuletaModal } from '@/components/modals/RuletaModal'
 import { logSorteoEntry, handleSorteoWin } from '@/services/sorteos'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBusinessConfig } from '@/hooks/useConfig'
-import { sendReceiptEmail, sendSettledEmail, sendMixedCreditEmail, sendSplitCreditEmail } from '@/services/emailReceipt'
+import { sendReceiptEmail, sendSettledEmail, sendMixedCreditEmail, sendSplitCreditEmail, sendInvoiceReceiptEmail } from '@/services/emailReceipt'
 import { MixedPaymentModal, type MixedModalView } from '@/components/modals/MixedPaymentModal'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
 import { SearchDropdown } from '@/components/molecules/SearchDropdown'
@@ -38,6 +38,7 @@ import { ScanNotFoundModal } from '@/components/modals/ScanNotFoundModal'
 import { ScanBufferModal } from '@/components/modals/ScanBufferModal'
 import { QuickStockModal } from '@/components/modals/QuickStockModal'
 import { ProductFormModal } from '@/components/modals/ProductFormModal'
+import { InvoiceNameModal } from '@/components/modals/InvoiceNameModal'
 import { Spinner } from '@/components/atoms/Spinner'
 import { cn, formatCurrency, normalizeStr, fuzzyMatch } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
@@ -55,6 +56,8 @@ export function POSPage() {
     const updateProduct = useUpdateProduct()
     const { data: activeRegister } = useActiveRegister()
     const { data: config } = useBusinessConfig()
+    const createClient = useCreateClient()
+    const updateClient = useUpdateClient()
 
     // ── Cart ────────────────────────────────────────────────────────────────
     const { items, addItem, removeItem, removeItems, updateQuantity, clearCart, loadOrder, getSubtotal, getTotal, discount } = useCartStore()
@@ -145,6 +148,8 @@ export function POSPage() {
     const [scanOutOfStock, setScanOutOfStock] = useState<Product | null>(null)
     const [showCreateProduct, setShowCreateProduct] = useState(false)
     const [createProductBarcode, setCreateProductBarcode] = useState('')
+    const [showInvoiceModal, setShowInvoiceModal] = useState(false)
+    const [invoiceClient, setInvoiceClient] = useState<{ name: string; code: string; email: string; existingId?: string } | null>(null)
 
     // ── Pending debt (from Balances page) ────────────────────────────────────
     const pendingDebt = usePendingSettleStore()
@@ -255,6 +260,7 @@ export function POSPage() {
         setMergeSnapshot(null)
         setSorteoDeclined(false)
         pendingDebt.clear()
+        setInvoiceClient(null)
     }
 
     const handleClearDebt = () => {
@@ -303,6 +309,54 @@ export function POSPage() {
         setActiveOrderId(null)
         setActiveOrderName(null)
         setHeldOrdersView(null)
+    }
+
+    const handleInvoiceClient = async (data: { name: string; code: string; email: string; existingId?: string }) => {
+        let finalId = data.existingId
+        try {
+            if (data.existingId) {
+                const existing = clients.find(c => c.id === data.existingId)
+                if (existing) {
+                    const updates: Record<string, any> = {}
+                    // Only set code if client has none — never overwrite existing code
+                    if (!existing.code && data.code) updates.code = data.code
+                    if (data.email && existing.email !== data.email) updates.email = data.email
+                    if (Object.keys(updates).length > 0) {
+                        await updateClient.mutateAsync({ id: data.existingId, input: updates })
+                    }
+                }
+            } else {
+                // Exact match first, then fuzzy (handles accent differences: "Perez" = "Pérez")
+                const existingByName = clients.find(c => normalizeStr(c.name) === normalizeStr(data.name))
+                    ?? clients.find(c => fuzzyMatch(data.name, c.name))
+                if (existingByName) {
+                    finalId = existingByName.id
+                    const updates: Record<string, any> = {}
+                    if (!existingByName.code && data.code) updates.code = data.code
+                    if (data.email && existingByName.email !== data.email) updates.email = data.email
+                    if (Object.keys(updates).length > 0) {
+                        await updateClient.mutateAsync({ id: finalId, input: updates })
+                    }
+                } else {
+                    const newClient = await createClient.mutateAsync({
+                        name: data.name,
+                        code: data.code.trim() || null,
+                        email: data.email.trim() || null,
+                        type: 'GENERAL',
+                        isActive: true,
+                        phone: null,
+                        company: null,
+                        notes: null
+                    })
+                    finalId = newClient.id
+                }
+            }
+            setInvoiceClient({ ...data, existingId: finalId })
+        } catch (err) {
+            console.error('Error handling invoice client:', err)
+            toast.error('Error al vincular cliente')
+            setInvoiceClient(data)
+        }
     }
 
     const handleNewCustomer = () => {
@@ -482,6 +536,7 @@ export function POSPage() {
             const capturedHasCuenta = capturedIsMixed && mixedMethods.includes('CUENTA')
             const capturedCreditAmt = capturedHasCuenta ? creditAmountNum : 0
             const capturedCreditClientId = capturedHasCuenta ? creditClientId : null
+            const capturedInvoiceClient = invoiceClient
 
             // Cart empty + debt only: settle original sales (no new sale, avoids empty-items record)
             if (saleItems.length === 0 && capturedDebt && !isCredit) {
@@ -562,6 +617,7 @@ export function POSPage() {
                 setActiveOrderName(null)
                 setMergeSnapshot(null)
                 setSorteoDeclined(false)
+                setInvoiceClient(null)
                 if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
 
                 const printerPort2 = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
@@ -614,7 +670,7 @@ export function POSPage() {
                 paymentMethod: mainPaymentMethod as any,
                 amountReceived: mainAmountReceived,
                 change: mainChange,
-                isCredit, clientId,
+                isCredit, clientId: clientId || capturedInvoiceClient?.existingId || null,
                 cashRegisterId: activeRegister?.id ?? null,
                 notes: `Cajero: ${saleCashier ?? 'Sin cajero'}`,
                 paymentMethod2: mainPaymentMethod2 as any,
@@ -683,6 +739,7 @@ export function POSPage() {
             setActiveOrderName(null)
             setMergeSnapshot(null)
             setSorteoDeclined(false)
+            setInvoiceClient(null)
             if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
 
             // Settle pending debt sales if navigated from Balances
@@ -718,7 +775,7 @@ export function POSPage() {
             // --- AUTOMATIC PRINTING — await before drawer to avoid COM port conflict ---
             if (printerPort && window.electronAPI?.printReceipt) {
                 const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
-                const selClient = clientId ? clients.find((c: any) => c.id === clientId) : null;
+                const selClient = capturedInvoiceClient || (clientId ? clients.find((c: any) => c.id === clientId) : null);
                 await window.electronAPI.printReceipt(printerPort, {
                     businessName: config?.name || 'Soda El Pelón',
                     address: config?.address,
@@ -782,6 +839,39 @@ export function POSPage() {
                             toast.error(`Error al enviar recibo: ${result.error}`)
                         }
                     })
+                }
+            }
+
+            if (!isCredit && capturedInvoiceClient) {
+                const invoiceFull = capturedInvoiceClient.existingId
+                    ? clients.find(c => c.id === capturedInvoiceClient.existingId)
+                    : null
+                const recipientEmail = capturedInvoiceClient.email.trim() || invoiceFull?.email || null
+                const recipientName = invoiceFull?.name ?? capturedInvoiceClient.name
+                if (recipientEmail) {
+                    sendInvoiceReceiptEmail({
+                        to: recipientEmail,
+                        clientName: recipientName,
+                        businessName: config?.name ?? 'Mi Soda',
+                        saleNumber: sale.saleNumber,
+                        date: sale.date,
+                        items: saleItems.map(i => ({
+                            name: i.product.name,
+                            quantity: i.quantity,
+                            unitPrice: i.unitPrice,
+                            subtotal: i.subtotal,
+                        })),
+                        subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
+                        paymentMethod: method,
+                    }).then(result => {
+                        if (result.success) {
+                            toast.success(`Recibo enviado a ${recipientEmail}`)
+                        } else if (result.isVerificationError) {
+                            toast.error('Dominio de correo no verificado. Configura el dominio en Resend.')
+                        } else {
+                            toast.error(`Error al enviar recibo: ${result.error}`)
+                        }
+                    }).catch(() => {})
                 }
             }
         } catch (err) { console.error(err) }
@@ -1022,6 +1112,8 @@ export function POSPage() {
                                 creditClientId={creditClientId}
                                 onSelectCreditClient={setCreditClientId}
                                 clients={clients.filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name }))}
+                                invoiceClient={invoiceClient}
+                                onOpenInvoiceModal={() => setShowInvoiceModal(true)}
                             />
                         </div>
                     </>
@@ -1102,6 +1194,8 @@ export function POSPage() {
                                     creditClientId={creditClientId}
                                     onSelectCreditClient={setCreditClientId}
                                     clients={clients.filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name }))}
+                                    invoiceClient={invoiceClient}
+                                    onOpenInvoiceModal={() => setShowInvoiceModal(true)}
                                 />
                             </div>
                         </div>
@@ -1235,6 +1329,14 @@ export function POSPage() {
                 categories={categories}
                 isPending={createProduct.isPending}
                 initialBarcode={createProductBarcode}
+            />
+
+            <InvoiceNameModal
+                isOpen={showInvoiceModal}
+                onClose={() => setShowInvoiceModal(false)}
+                onAccept={handleInvoiceClient}
+                clients={clients.filter(c => c.isActive)}
+                initialData={invoiceClient}
             />
         </div>
     )

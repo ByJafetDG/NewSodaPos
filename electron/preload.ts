@@ -27,6 +27,7 @@ const electronAPI = {
     // Email
     sendEmail: (payload: { from: string; to: string[]; subject: string; html: string }) =>
         ipcRenderer.invoke('email:send', payload),
+    getLogoBase64: (): Promise<string | null> => ipcRenderer.invoke('assets:get-logo'),
 
     // Sync
     getSyncStats: () => ipcRenderer.invoke('sync:stats'),
