@@ -559,6 +559,18 @@ export function initDb() {
   try {
     db.exec(`ALTER TABLE BusinessConfig ADD COLUMN syncStatus TEXT DEFAULT 'SYNCED'`);
   } catch {}
+
+  // ===== Performance Indexes =====
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);
+    CREATE INDEX IF NOT EXISTS idx_sale_date ON Sale(date);
+    CREATE INDEX IF NOT EXISTS idx_sale_payment_method ON Sale(paymentMethod);
+    CREATE INDEX IF NOT EXISTS idx_sale_item_sale_id ON SaleItem(saleId);
+    CREATE INDEX IF NOT EXISTS idx_sale_item_product_id ON SaleItem(productId);
+    CREATE INDEX IF NOT EXISTS idx_inventory_movement_product_id ON InventoryMovement(productId);
+    CREATE INDEX IF NOT EXISTS idx_cash_adjustment_register ON CashAdjustment(cashRegisterId);
+    CREATE INDEX IF NOT EXISTS idx_expense_register ON Expense(cashRegisterId);
+  `);
 }
 
 /**

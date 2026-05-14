@@ -34,6 +34,7 @@ const electronAPI = {
     getSyncErrors: () => ipcRenderer.invoke('sync:get-errors'),
     clearSyncError: (id: string) => ipcRenderer.invoke('sync:clear-error', id),
     clearAllSyncErrors: () => ipcRenderer.invoke('sync:clear-all-errors'),
+    triggerSyncPush: () => ipcRenderer.invoke('sync:trigger-push'),
     onBarcodeConflict: (callback: (data: { productId: string; productName: string }) => void) => {
         const sub = (_event: any, data: any) => callback(data);
         ipcRenderer.on('sync-barcode-conflict', sub);
@@ -92,6 +93,7 @@ export interface ElectronAPI {
     sendEmail: (payload: any) => Promise<any>;
     getSyncStats: () => Promise<any>;
     forcePush: () => Promise<void>;
+    triggerSyncPush: () => Promise<void>;
     onDbChanged: (callback: (data: { table: string }) => void) => () => void;
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void;
     installUpdate: () => Promise<void>;

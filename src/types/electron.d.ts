@@ -29,6 +29,7 @@ export interface ElectronAPI {
     // Sync
     getSyncStats: () => Promise<{ totalPending: number }>
     forcePush: () => Promise<{ totalRemaining: number; remaining: Record<string, number>; pushErrors: string[] }>
+    triggerSyncPush: () => Promise<void>
     getSyncErrors: () => Promise<{ id: string; tableName: string; recordId: string; errorMsg: string; attempts: number; createdAt: string; lastAttemptAt: string }[]>
     clearSyncError: (id: string) => Promise<void>
     clearAllSyncErrors: () => Promise<void>

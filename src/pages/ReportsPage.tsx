@@ -79,40 +79,20 @@ export function ReportsPage() {
     const sales = reportData?.sales ?? []
     const products = reportData?.products?.length ? reportData.products : productsStock
 
-    // Payment breakdown from real sales
-    const PAYMENT: Record<string, number> = { EFECTIVO: 0, SINPE: 0, CREDITO: 0 }
-    for (const s of sales) {
-        const pm = s.paymentMethod as string
-        if (pm in PAYMENT) PAYMENT[pm] += s.total
+    // Point 2: Use pre-calculated stats from SQL for speed
+    const effectivePayment: Record<string, number> = { EFECTIVO: 0, SINPE: 0, CREDITO: 0 }
+    if (reportData?.paymentStats) {
+        reportData.paymentStats.forEach((ps: any) => {
+            effectivePayment[ps.paymentMethod] = ps.total
+        })
     }
-
-    // Top products from real items
-    const productQty: Record<string, { name: string; qty: number; revenue: number }> = {}
-    for (const s of sales) {
-        for (const item of (s.items ?? [])) {
-            const name = item.product?.name ?? 'Desconocido'
-            if (!productQty[item.productId]) productQty[item.productId] = { name, qty: 0, revenue: 0 }
-            productQty[item.productId].qty += item.quantity
-            productQty[item.productId].revenue += item.subtotal
-        }
-    }
-    const TOP_PRODUCTS = Object.values(productQty).sort((a, b) => b.qty - a.qty).slice(0, 10)
-
-    // Hourly distribution
-    const HOURLY_REAL = Array(24).fill(0)
-    for (const s of sales) {
-        const h = new Date(s.date).getHours()
-        HOURLY_REAL[h] += s.total
-    }
+    const effectiveTop = reportData?.topProducts ?? []
+    const effectiveHourly = reportData?.hourlyStats ?? Array(24).fill(0)
 
     const totalSalesAmt = sales.reduce((sum: number, s: any) => sum + s.total, 0)
     const avgTicket = sales.length > 0 ? Math.round(totalSalesAmt / sales.length) : 0
     const inventoryValue = products.reduce((sum: any, p: any) => sum + ((p.price ?? 0) * (p.stockQty ?? 0)), 0)
     const pendingCredit = (reportData?.totalDebt ?? 0) - (reportData?.totalPaid ?? 0)
-
-    const effectivePayment = PAYMENT
-    const effectiveTop = TOP_PRODUCTS
-    const effectiveHourly = HOURLY_REAL
 
     const filteredSales = sales.filter((s: any) => {
         if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false

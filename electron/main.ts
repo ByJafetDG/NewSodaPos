@@ -166,6 +166,15 @@ ipcMain.handle('sync:force-push', async () => {
     return { totalRemaining, remaining, pushErrors };
 });
 
+ipcMain.handle('sync:trigger-push', async () => {
+    if (isDev) return;
+    try {
+        await pushSync();
+    } catch (err) {
+        console.error('[SyncTrigger] Error:', err);
+    }
+});
+
 // ===== Hardware: COM Port Printer Communication =====
 
 // Helper: run a PowerShell script from a temp file

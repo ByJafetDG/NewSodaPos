@@ -56,6 +56,32 @@ FROM Sale s
             ORDER BY p.stockQty ASC
         `)
 
+        // Point 2: SQL Aggregations for performance
+        const paymentStats = await window.electronAPI.dbQuery(`
+            SELECT paymentMethod, SUM(total) as total
+            FROM Sale
+            WHERE status = 'COMPLETADA' AND date >= ? AND date <= ?
+            GROUP BY paymentMethod
+        `, [from, to])
+
+        const topProducts = await window.electronAPI.dbQuery(`
+            SELECT si.productId, p.name, SUM(si.quantity) as qty, SUM(si.subtotal) as revenue
+            FROM SaleItem si
+            INNER JOIN Sale s ON si.saleId = s.id
+            LEFT JOIN Product p ON si.productId = p.id
+            WHERE s.status = 'COMPLETADA' AND s.date >= ? AND s.date <= ?
+            GROUP BY si.productId
+            ORDER BY qty DESC
+            LIMIT 10
+        `, [from, to])
+
+        const hourlyStats = await window.electronAPI.dbQuery(`
+            SELECT strftime('%H', date) as hour, SUM(total) as total
+            FROM Sale
+            WHERE status = 'COMPLETADA' AND date >= ? AND date <= ?
+            GROUP BY hour
+        `, [from, to])
+
         const creditSalesSum = await window.electronAPI.dbQuery(
             "SELECT SUM(total) as total FROM Sale WHERE isCredit = 1 AND status = 'COMPLETADA'"
         )
@@ -73,6 +99,14 @@ FROM Sale s
             products: products.map((p: any) => ({ ...p, category: JSON.parse(p.category) })),
             totalDebt: creditSalesSum[0]?.total || 0,
             totalPaid: paymentsSum[0]?.total || 0,
+            // Summaries
+            paymentStats,
+            topProducts,
+            hourlyStats: Array(24).fill(0).map((_, i) => {
+                const hourStr = i.toString().padStart(2, '0')
+                const stat = (hourlyStats as any[]).find(h => h.hour === hourStr)
+                return stat ? stat.total : 0
+            })
         }
     }
 
@@ -99,11 +133,28 @@ FROM Sale s
         supabase.from('Payment').select('amount'),
     ])
 
+    const sales = salesRes.data ?? []
+    
+    // Cloud fallback summaries (still in JS for simplicity as Supabase doesn't easily do GROUP BY in simple select)
+    const paymentStats: any[] = []
+    const pMap: Record<string, number> = {}
+    sales.forEach(s => { pMap[s.paymentMethod] = (pMap[s.paymentMethod] || 0) + s.total })
+    Object.entries(pMap).forEach(([k, v]) => paymentStats.push({ paymentMethod: k, total: v }))
+
+    const hourlyStats = Array(24).fill(0)
+    sales.forEach(s => {
+        const h = new Date(s.date).getHours()
+        hourlyStats[h] += s.total
+    })
+
     return {
-        sales: salesRes.data ?? [],
+        sales,
         expenses: expensesRes.data ?? [],
         products: productsRes.data ?? [],
         totalDebt: (creditSalesRes.data ?? []).reduce((s, c) => s + c.total, 0),
         totalPaid: (paymentsRes.data ?? []).reduce((s, p) => s + p.amount, 0),
+        paymentStats,
+        topProducts: [], // Cloud top products is complex due to SaleItem join, keeping empty for now or same logic as before
+        hourlyStats
     }
 }

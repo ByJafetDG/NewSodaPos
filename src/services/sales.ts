@@ -116,6 +116,8 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
         }
 
         await window.electronAPI.dbTransaction(ops)
+        // Point 3: Immediate sync trigger (non-blocking)
+        window.electronAPI.triggerSyncPush?.().catch(() => {})
         return { id, saleNumber, date: now, ...input }
     }
 
@@ -298,6 +300,7 @@ export async function updateCreditSaleItems(
         })
 
         await window.electronAPI.dbTransaction(ops)
+        window.electronAPI.triggerSyncPush?.().catch(() => {})
         return
     }
 
@@ -360,6 +363,7 @@ export async function createSplitCreditSales(input: CreateSplitCreditSalesInput)
         }
 
         await window.electronAPI.dbTransaction(ops)
+        window.electronAPI.triggerSyncPush?.().catch(() => {})
         return { baseSaleNumber }
     }
 
@@ -440,6 +444,7 @@ export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ 
             })
         }
         await window.electronAPI.dbTransaction(ops)
+        window.electronAPI.triggerSyncPush?.().catch(() => {})
         return { id, saleNumber, date: now }
     }
 
