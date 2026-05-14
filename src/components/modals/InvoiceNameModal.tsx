@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { UserCircle2, Search, Check, Lock } from 'lucide-react'
+import { UserCircle2, Search, Check } from 'lucide-react'
 import { BaseModal } from './BaseModal'
 import { Button } from '../atoms/Button'
 import { cn, normalizeStr, fuzzyMatch } from '@/lib/utils'
@@ -10,14 +10,14 @@ import type { Client } from '@/types'
 interface InvoiceNameModalProps {
     isOpen: boolean
     onClose: () => void
-    onAccept: (data: { name: string; code: string; email: string; existingId?: string }) => void
+    onAccept: (data: { name: string; cedula: string; email: string; existingId?: string }) => void
     clients: Client[]
-    initialData?: { name: string; code: string; email: string; existingId?: string } | null
+    initialData?: { name: string; cedula: string; email: string; existingId?: string } | null
 }
 
 export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialData }: InvoiceNameModalProps) {
     const [name, setName] = useState(initialData?.name ?? '')
-    const [code, setCode] = useState(initialData?.code ?? '')
+    const [cedula, setCedula] = useState(initialData?.cedula ?? '')
     const [email, setEmail] = useState(initialData?.email ?? '')
     const [selectedId, setSelectedId] = useState<string | undefined>(initialData?.existingId)
 
@@ -25,19 +25,16 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
         if (!isOpen) return
         useKeyboardStore.getState().close()
         setName(initialData?.name ?? '')
-        setCode(initialData?.code ?? '')
+        setCedula(initialData?.cedula ?? '')
         setEmail(initialData?.email ?? '')
         setSelectedId(initialData?.existingId)
     }, [isOpen])
-
-    const selectedClient = selectedId ? clients.find(c => c.id === selectedId) : undefined
-    const codeIsLocked = !!(selectedClient?.code)
 
     const nameKb = useKeyboardInput(name, (v) => {
         setName(v)
         if (selectedId) setSelectedId(undefined)
     }, { mode: 'alpha' })
-    const codeKb = useKeyboardInput(code, setCode, { mode: 'alpha' })
+    const cedulaKb = useKeyboardInput(cedula, setCedula, { mode: 'alpha' })
     const emailKb = useKeyboardInput(email, setEmail, { mode: 'alpha' })
 
     const filteredClients = useMemo(() => {
@@ -46,6 +43,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
             .filter(c =>
                 normalizeStr(c.name).includes(normalizeStr(name)) ||
                 fuzzyMatch(name, c.name) ||
+                (c.cedula && c.cedula.includes(name)) ||
                 (c.code && c.code.includes(name))
             )
             .slice(0, 15)
@@ -53,7 +51,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
 
     const handleSelectClient = (c: Client) => {
         setName(c.name)
-        setCode(c.code || '')
+        setCedula(c.cedula || '')
         setEmail(c.email || '')
         setSelectedId(c.id)
         useKeyboardStore.getState().close()
@@ -61,7 +59,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
 
     const handleClear = () => {
         setName('')
-        setCode('')
+        setCedula('')
         setEmail('')
         setSelectedId(undefined)
     }
@@ -74,13 +72,12 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
         if (!name.trim()) return
-        onAccept({ name: name.trim(), code: code.trim(), email: email.trim(), existingId: selectedId })
+        onAccept({ name: name.trim(), cedula: cedula.trim(), email: email.trim(), existingId: selectedId })
         useKeyboardStore.getState().close()
         onClose()
     }
 
     const inputClass = "w-full h-11 px-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-violet-500/40 transition-colors"
-    const lockedClass = "w-full h-11 px-4 rounded-xl bg-[#0D1117] border border-[#1A2336] text-[#5A6A80] text-[13px] cursor-not-allowed"
     const labelClass = "text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]"
 
     return (
@@ -100,20 +97,8 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
                     </div>
 
                     <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                            <label className={labelClass}>Cédula / Identificación (Opcional)</label>
-                            {codeIsLocked && (
-                                <span className="flex items-center gap-1 text-[10px] text-[#3D506A]">
-                                    <Lock size={10} />
-                                    Editar desde Clientes
-                                </span>
-                            )}
-                        </div>
-                        {codeIsLocked ? (
-                            <input type="text" value={code} readOnly className={lockedClass} />
-                        ) : (
-                            <input type="text" {...codeKb} placeholder="1-1234-5678" className={inputClass} />
-                        )}
+                        <label className={labelClass}>Cédula (Opcional)</label>
+                        <input type="text" {...cedulaKb} placeholder="1-1234-5678" className={inputClass} />
                     </div>
 
                     <div className="space-y-1.5">
@@ -171,7 +156,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, initialDa
                                             {c.name}
                                         </p>
                                         <p className="text-[10px] text-[#3D506A] truncate">
-                                            {c.code || 'Sin cédula'}
+                                            {c.cedula || c.code || 'Sin cédula'}
                                         </p>
                                     </div>
                                     {selectedId === c.id && <Check size={14} className="shrink-0 text-violet-400" />}

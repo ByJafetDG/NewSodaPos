@@ -149,7 +149,7 @@ export function POSPage() {
     const [showCreateProduct, setShowCreateProduct] = useState(false)
     const [createProductBarcode, setCreateProductBarcode] = useState('')
     const [showInvoiceModal, setShowInvoiceModal] = useState(false)
-    const [invoiceClient, setInvoiceClient] = useState<{ name: string; code: string; email: string; existingId?: string } | null>(null)
+    const [invoiceClient, setInvoiceClient] = useState<{ name: string; cedula: string; email: string; existingId?: string } | null>(null)
 
     // ── Pending debt (from Balances page) ────────────────────────────────────
     const pendingDebt = usePendingSettleStore()
@@ -311,28 +311,26 @@ export function POSPage() {
         setHeldOrdersView(null)
     }
 
-    const handleInvoiceClient = async (data: { name: string; code: string; email: string; existingId?: string }) => {
+    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; existingId?: string }) => {
         let finalId = data.existingId
         try {
             if (data.existingId) {
                 const existing = clients.find(c => c.id === data.existingId)
                 if (existing) {
                     const updates: Record<string, any> = {}
-                    // Only set code if client has none — never overwrite existing code
-                    if (!existing.code && data.code) updates.code = data.code
+                    if (data.cedula && existing.cedula !== data.cedula) updates.cedula = data.cedula
                     if (data.email && existing.email !== data.email) updates.email = data.email
                     if (Object.keys(updates).length > 0) {
                         await updateClient.mutateAsync({ id: data.existingId, input: updates })
                     }
                 }
             } else {
-                // Exact match first, then fuzzy (handles accent differences: "Perez" = "Pérez")
                 const existingByName = clients.find(c => normalizeStr(c.name) === normalizeStr(data.name))
                     ?? clients.find(c => fuzzyMatch(data.name, c.name))
                 if (existingByName) {
                     finalId = existingByName.id
                     const updates: Record<string, any> = {}
-                    if (!existingByName.code && data.code) updates.code = data.code
+                    if (data.cedula && existingByName.cedula !== data.cedula) updates.cedula = data.cedula
                     if (data.email && existingByName.email !== data.email) updates.email = data.email
                     if (Object.keys(updates).length > 0) {
                         await updateClient.mutateAsync({ id: finalId, input: updates })
@@ -340,7 +338,8 @@ export function POSPage() {
                 } else {
                     const newClient = await createClient.mutateAsync({
                         name: data.name,
-                        code: data.code.trim() || null,
+                        cedula: data.cedula.trim() || null,
+                        code: null,
                         email: data.email.trim() || null,
                         type: 'GENERAL',
                         isActive: true,
@@ -775,7 +774,9 @@ export function POSPage() {
             // --- AUTOMATIC PRINTING — await before drawer to avoid COM port conflict ---
             if (printerPort && window.electronAPI?.printReceipt) {
                 const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
-                const selClient = capturedInvoiceClient || (clientId ? clients.find((c: any) => c.id === clientId) : null);
+                const selClient = capturedInvoiceClient
+                    ? { name: capturedInvoiceClient.name, code: capturedInvoiceClient.cedula || null }
+                    : (clientId ? clients.find((c: any) => c.id === clientId) : null)
                 await window.electronAPI.printReceipt(printerPort, {
                     businessName: config?.name || 'Soda El Pelón',
                     address: config?.address,

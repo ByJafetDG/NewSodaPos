@@ -553,6 +553,10 @@ export function initDb() {
   } catch {}
 
   try {
+    db.exec(`ALTER TABLE Client ADD COLUMN cedula TEXT`);
+  } catch {}
+
+  try {
     db.exec(`ALTER TABLE SaleItem ADD COLUMN notes TEXT`);
   } catch {}
 

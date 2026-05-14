@@ -20,11 +20,11 @@ const draftKeyEdit = (id: string) => `pos_client_draft_edit_${id}`
 
 type WizardData = {
     name: string; type: ClientType; phone: string
-    email: string; code: string; notes: string; isActive: boolean
+    email: string; cedula: string; code: string; notes: string; isActive: boolean
 }
 const EMPTY: WizardData = {
     name: '', type: 'GENERAL', phone: '', email: '',
-    code: '', notes: '', isActive: true,
+    cedula: '', code: '', notes: '', isActive: true,
 }
 
 const CLIENT_TYPES: { value: ClientType; label: string; sub: string; icon: React.ElementType; color: string; bg: string }[] = [
@@ -71,7 +71,7 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending 
             const base: WizardData = {
                 name: client.name, type: client.type,
                 phone: client.phone ?? '', email: client.email ?? '',
-                code: client.code ?? '',
+                cedula: client.cedula ?? '', code: client.code ?? '',
                 notes: client.notes ?? '', isActive: client.isActive,
             }
             if (draft?.name) { setData(draft); setStep('draft-prompt') }
@@ -116,6 +116,7 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending 
             type:    data.type,
             phone:   data.phone.trim() || null,
             email:   data.email.trim() || null,
+            cedula:  data.cedula.trim() || null,
             code:    data.code.trim() || null,
             company: null,
             notes:   data.notes.trim() || null,
@@ -126,7 +127,7 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending 
     function discardDraft() {
         localStorage.removeItem(draftKey)
         const base = client
-            ? { name: client.name, type: client.type, phone: client.phone ?? '', email: client.email ?? '', code: client.code ?? '', notes: client.notes ?? '', isActive: client.isActive }
+            ? { name: client.name, type: client.type, phone: client.phone ?? '', email: client.email ?? '', cedula: client.cedula ?? '', code: client.code ?? '', notes: client.notes ?? '', isActive: client.isActive }
             : EMPTY
         setData(base)
         go('name', 1)
@@ -387,6 +388,10 @@ function ContactStep({ data, onChange, onNext }: {
                 <StepQuestion>Datos de contacto</StepQuestion>
             </div>
             <div>
+                <FieldLabel>Cédula</FieldLabel>
+                <SmallInput value={data.cedula} onChange={v => onChange({ cedula: v })} placeholder="1-1234-5678" />
+            </div>
+            <div>
                 <FieldLabel>Teléfono</FieldLabel>
                 <SmallInput value={data.phone} onChange={v => onChange({ phone: v })} placeholder="8888-0000" mode="numeric" />
             </div>
@@ -396,7 +401,7 @@ function ContactStep({ data, onChange, onNext }: {
             </div>
             {data.type === 'ASOCIACION' && (
                 <div>
-                    <FieldLabel>Código</FieldLabel>
+                    <FieldLabel>Código interno</FieldLabel>
                     <SmallInput value={data.code} onChange={v => onChange({ code: v })} placeholder="ASO-001" />
                 </div>
             )}
@@ -439,14 +444,15 @@ function RecapStep({ data, isEdit, isPending, onToggleActive, onConfirm, onEdit 
     const typeInfo = CLIENT_TYPES.find(t => t.value === data.type)
 
     const rows: { label: string; value: string; step: WizardStep }[] = [
-        { label: 'Nombre', value: data.name || '—',                step: 'name'    },
-        { label: 'Tipo',   value: typeInfo?.label ?? '—',          step: 'type'    },
-        { label: 'Teléfono', value: data.phone || 'Sin teléfono',  step: 'contact' },
-        { label: 'Correo', value: data.email || 'Sin correo',      step: 'contact' },
+        { label: 'Nombre',   value: data.name || '—',               step: 'name'    },
+        { label: 'Tipo',     value: typeInfo?.label ?? '—',         step: 'type'    },
+        { label: 'Cédula',   value: data.cedula || 'Sin cédula',    step: 'contact' },
+        { label: 'Teléfono', value: data.phone || 'Sin teléfono',   step: 'contact' },
+        { label: 'Correo',   value: data.email || 'Sin correo',     step: 'contact' },
         ...(data.type === 'ASOCIACION' ? [
-            { label: 'Código', value: data.code || 'Sin código', step: 'contact' as WizardStep },
+            { label: 'Código interno', value: data.code || 'Sin código', step: 'contact' as WizardStep },
         ] : []),
-        { label: 'Notas',  value: data.notes || 'Sin notas',       step: 'notes'   },
+        { label: 'Notas',    value: data.notes || 'Sin notas',      step: 'notes'   },
     ]
 
     return (

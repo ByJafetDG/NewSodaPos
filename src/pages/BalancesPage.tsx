@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
     Users, Search, Plus, Edit3, Trash2, UserCircle2,
     Phone, Mail, ChevronLeft, CheckCircle2, Receipt, Banknote,
-    Check, ChevronDown, CreditCard, History,
+    Check, ChevronDown, CreditCard, History, IdCard,
 } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
@@ -363,7 +363,12 @@ function ClientRow({ client, pendingTotal, pendingCount, onSelect, onEdit, onDel
                             <Mail size={10} className="text-[#3D506A]" />{client.email}
                         </div>
                     )}
-                    {!client.phone && !client.email && <span className="text-[12px] text-[#3D506A]">—</span>}
+                    {client.cedula && (
+                        <div className="flex items-center gap-1.5 text-[12px] text-[#7A8FAA]">
+                            <IdCard size={10} className="text-[#3D506A]" />{client.cedula}
+                        </div>
+                    )}
+                    {!client.phone && !client.email && !client.cedula && <span className="text-[12px] text-[#3D506A]">—</span>}
                 </div>
             </td>
             <td className="px-4 py-3">
@@ -565,7 +570,13 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                     {client.email}
                                 </div>
                             )}
-                            {!client.phone && !client.email && (
+                            {client.cedula && (
+                                <div className="flex items-center gap-1.5 text-[12px] text-[#7A8FAA]">
+                                    <IdCard size={12} className="text-[#3D506A] shrink-0" />
+                                    {client.cedula}
+                                </div>
+                            )}
+                            {!client.phone && !client.email && !client.cedula && (
                                 <span className="text-[12px] text-[#3D506A]">Sin contacto registrado</span>
                             )}
                         </div>

@@ -27,16 +27,17 @@ export async function createClient(input: ClientInput): Promise<Client> {
 
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
-            `INSERT INTO Client (id, name, type, phone, email, notes, code, isActive, syncStatus, createdAt, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'PENDING', ?, ?)`,
-            [id, input.name, input.type, input.phone ?? null, input.email ?? null, input.notes ?? null, input.code ?? null, now, now]
+            `INSERT INTO Client (id, name, type, phone, email, notes, code, cedula, isActive, syncStatus, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'PENDING', ?, ?)`,
+            [id, input.name, input.type, input.phone ?? null, input.email ?? null, input.notes ?? null, input.code ?? null, input.cedula ?? null, now, now]
         )
         return newClient
     }
     const { error } = await supabase.from('Client').insert({
         id, name: input.name, type: input.type,
         phone: input.phone ?? null, email: input.email ?? null,
-        notes: input.notes ?? null, code: input.code ?? null, isActive: true,
+        notes: input.notes ?? null, code: input.code ?? null,
+        cedula: input.cedula ?? null, isActive: true,
         syncStatus: 'SYNCED', createdAt: now, updatedAt: now,
     })
     if (error) throw error

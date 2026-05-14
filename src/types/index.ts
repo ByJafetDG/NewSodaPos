@@ -40,6 +40,7 @@ export type ClientType = 'TRABAJADOR' | 'ASOCIACION' | 'GENERAL'
 export interface Client {
     id: string; name: string; phone: string | null; email: string | null
     type: ClientType; company: string | null; notes: string | null; code: string | null
+    cedula: string | null
     isActive: boolean; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
 }
 
