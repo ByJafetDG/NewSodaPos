@@ -5,7 +5,8 @@ import {
     Receipt, Search, Clock, X, Ban, UserCircle2, Pencil, ChevronDown,
 } from 'lucide-react'
 import { useProductsStock } from '@/hooks/useInventory'
-import { useReportData } from '@/hooks/useReports'
+import { useReportData, useCashierLeaderboard } from '@/hooks/useReports'
+import { CashierPodium } from '@/components/organisms/pos/CashierPodium'
 import { useVoidSale } from '@/hooks/useSales'
 import { getSaleItemsForCart } from '@/services/sales'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
@@ -130,6 +131,11 @@ export function ReportsPage() {
     const [from, to] = getDateRange(dateFilter, customFrom, customTo, showCustom)
     const { data: reportData } = useReportData(from, to)
     const { data: productsStock = [] } = useProductsStock()
+    const { data: historicalLeaderboard = [] } = useCashierLeaderboard()
+
+    const periodLabel = showCustom
+        ? (customFrom && customTo ? `${customFrom} → ${customTo}` : 'Personalizado')
+        : dateFilter
 
     const sales = reportData?.sales ?? []
     const products = reportData?.products?.length ? reportData.products : productsStock
@@ -568,6 +574,13 @@ export function ReportsPage() {
                         )}
                     </div>
                 </div>
+
+                {/* Cashier podium */}
+                <CashierPodium
+                    filteredSales={sales}
+                    historicalRows={historicalLeaderboard}
+                    periodLabel={periodLabel}
+                />
             </div>
         </div>
     )

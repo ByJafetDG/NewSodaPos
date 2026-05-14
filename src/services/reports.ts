@@ -1,5 +1,35 @@
 import { supabase } from '@/lib/supabase'
 
+export async function getCashierHistoricalLeaderboard(): Promise<Array<{ notes: string | null; total: number; month: string }>> {
+    if (window.electronAPI) {
+        const rows = await window.electronAPI.dbQuery(`
+            SELECT notes, total, substr(date, 1, 7) as month
+            FROM Sale
+            WHERE status = 'COMPLETADA'
+              AND date < date('now', 'start of month')
+              AND date >= date('now', 'start of month', '-5 months')
+        `)
+        return rows as any[]
+    }
+    // Supabase fallback
+    const start = new Date()
+    start.setDate(1)
+    start.setHours(0, 0, 0, 0)
+    const fiveMonthsAgo = new Date(start)
+    fiveMonthsAgo.setMonth(fiveMonthsAgo.getMonth() - 5)
+    const { data } = await supabase
+        .from('Sale')
+        .select('notes, total, date')
+        .eq('status', 'COMPLETADA')
+        .lt('date', start.toISOString())
+        .gte('date', fiveMonthsAgo.toISOString())
+    return (data ?? []).map((r: any) => ({
+        notes: r.notes,
+        total: r.total,
+        month: r.date?.slice(0, 7) ?? '',
+    }))
+}
+
 export async function getReportData(from: string, to: string) {
     if (window.electronAPI) {
         const sales = await window.electronAPI.dbQuery(`
