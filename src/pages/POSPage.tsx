@@ -270,6 +270,7 @@ export function POSPage() {
         setActiveOrderId(null)
         setActiveOrderName(null)
         setMergeSnapshot(null)
+        setAutoSavedFusionId(null)
         setSorteoDeclined(false)
         pendingDebt.clear()
         setInvoiceClient(null)
@@ -434,10 +435,6 @@ export function POSPage() {
         loadOrder(validItems, order.discount)
         setActiveOrderId(order.id)
         setActiveOrderName(order.name)
-        if (order.id === autoSavedFusionId) {
-            setAutoSavedFusionId(null)
-            setMergeSnapshot(null)
-        }
         setHeldOrdersView(null)
         if (order.pendingDebt) {
             const d = order.pendingDebt
@@ -646,6 +643,7 @@ export function POSPage() {
                 setActiveOrderId(null)
                 setActiveOrderName(null)
                 setMergeSnapshot(null)
+                setAutoSavedFusionId(null)
                 setSorteoDeclined(false)
                 setInvoiceClient(null)
                 if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
@@ -770,6 +768,7 @@ export function POSPage() {
             setActiveOrderId(null)
             setActiveOrderName(null)
             setMergeSnapshot(null)
+            setAutoSavedFusionId(null)
             setSorteoDeclined(false)
             setInvoiceClient(null)
             if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
@@ -948,15 +947,17 @@ export function POSPage() {
     }
 
     const handleUndoMerge = () => {
-        if (!mergeSnapshot) return
+        if (!mergeSnapshot && !autoSavedFusionId) return
         if (autoSavedFusionId) {
             deleteHeldOrder(autoSavedFusionId)
             setAutoSavedFusionId(null)
         }
         clearCart()
         setAmountReceived('')
-        mergeSnapshot.forEach(order => saveHeldOrder(order.name, order.items, order.discount))
-        setMergeSnapshot(null)
+        if (mergeSnapshot) {
+            mergeSnapshot.forEach(order => saveHeldOrder(order.name, order.items, order.discount))
+            setMergeSnapshot(null)
+        }
         setActiveOrderId(null)
         setActiveOrderName(null)
     }
@@ -1355,7 +1356,7 @@ export function POSPage() {
                     }
                 }}
                 onMerge={handleMergeOrders}
-                hasMergeSnapshot={mergeSnapshot !== null}
+                hasMergeSnapshot={mergeSnapshot !== null || (autoSavedFusionId !== null && (activeOrderId === null || activeOrderId === autoSavedFusionId))}
                 mergeSnapshotNames={mergeSnapshot?.map(o => o.name) ?? []}
                 onUndoMerge={handleUndoMerge}
             />
