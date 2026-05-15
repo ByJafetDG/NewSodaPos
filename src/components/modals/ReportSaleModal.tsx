@@ -205,6 +205,7 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
                 showHeader: tOpts.showHeader ?? true,
                 showUnitPrice: tOpts.showUnitPrice ?? false,
                 showDecimals: tOpts.showDecimals ?? true,
+                ticketLogoUrl: config?.ticketLogoUrl || null,
                 currencySymbol: tOpts.currencySymbol ?? '₡',
             })
             toast.success('Ticket enviado a la impresora')
