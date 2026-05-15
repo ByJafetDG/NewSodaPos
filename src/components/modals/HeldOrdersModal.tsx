@@ -24,6 +24,7 @@ interface HeldOrdersModalProps {
     onDelete: (id: string) => void
     onMerge: (ids: string[]) => void
     hasMergeSnapshot?: boolean
+    mergeSnapshotNames?: string[]
     onUndoMerge?: () => void
 }
 
@@ -40,7 +41,7 @@ export function HeldOrdersModal({
     currentItems, currentDiscount,
     orders, activeOrderId, hasLinkedAccount,
     onSave, onNewCustomer, onLoad, onDelete, onMerge,
-    hasMergeSnapshot, onUndoMerge,
+    hasMergeSnapshot, mergeSnapshotNames = [], onUndoMerge,
 }: HeldOrdersModalProps) {
     const [view, setView] = useState<ModalView>(initialView)
     const [name, setName] = useState('')
@@ -169,20 +170,18 @@ export function HeldOrdersModal({
                                     <div className="space-y-3">
                                         <div className="grid grid-cols-2 gap-3">
                                             <button
-                                                onClick={() => hasLinkedAccount ? onNewCustomer() : setView('save')}
+                                                onClick={onNewCustomer}
                                                 className="flex flex-col items-center gap-3 p-5 rounded-xl bg-[#101520] border border-[#1E2A40] hover:border-orange-500/30 hover:bg-orange-500/5 transition-all duration-150 cursor-pointer text-center"
                                             >
                                                 <div className="w-11 h-11 rounded-full bg-orange-500/10 flex items-center justify-center">
                                                     <PlusSquare size={22} className="text-orange-400" />
                                                 </div>
                                                 <div>
-                                                    <p className="text-[13px] font-semibold text-[#CBD5E1] leading-tight">
-                                                        {hasLinkedAccount ? 'Nuevo cliente' : 'Crear una cuenta'}
-                                                    </p>
+                                                    <p className="text-[13px] font-semibold text-[#CBD5E1] leading-tight">Nuevo cliente</p>
                                                     <p className="text-[11px] text-[#3D506A] mt-1 leading-snug">
-                                                        {hasLinkedAccount
-                                                            ? 'Cuenta guardada · Limpiar carrito'
-                                                            : 'Guardar el carrito para cobrar después'}
+                                                        {currentItems.length > 0
+                                                            ? 'Cuenta guardada automáticamente'
+                                                            : 'Limpiar y empezar de cero'}
                                                     </p>
                                                 </div>
                                             </button>
@@ -346,9 +345,14 @@ export function HeldOrdersModal({
                                                                 </div>
                                                             ) : isConfirming ? (
                                                                 <div className="mt-2 flex items-center gap-2 border-t border-[#192030] pt-2">
-                                                                    <p className="text-[11px] text-amber-400 flex-1">¿Reemplazar carrito actual?</p>
+                                                                    <p className="text-[11px] text-amber-400 flex-1">
+                                                                        {hasMergeSnapshot && mergeSnapshotNames.length > 0
+                                                                            ? `Fusión (${mergeSnapshotNames.join(' + ')}) se guardará automáticamente. ¿Cargar esta cuenta?`
+                                                                            : 'El carrito se guardará automáticamente. ¿Cargar esta cuenta?'
+                                                                        }
+                                                                    </p>
                                                                     <button onClick={() => setConfirmLoadId(null)} className="px-2 py-1 rounded-lg text-[11px] text-[#7A8FAA] hover:bg-white/5 transition-all cursor-pointer">No</button>
-                                                                    <button onClick={() => { setConfirmLoadId(null); onLoad(order) }} className="px-2 py-1 rounded-lg text-[11px] bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/15 transition-all cursor-pointer">Cargar</button>
+                                                                    <button onClick={() => { setConfirmLoadId(null); onLoad(order) }} className="px-2 py-1 rounded-lg text-[11px] bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/15 transition-all cursor-pointer">Sí, cargar</button>
                                                                 </div>
                                                             ) : !isActive ? (
                                                                 <button

@@ -116,6 +116,7 @@ export function POSPage() {
     const [activeOrderId, setActiveOrderId] = useState<string | null>(null)
     const [activeOrderName, setActiveOrderName] = useState<string | null>(null)
     const [mergeSnapshot, setMergeSnapshot] = useState<HeldOrder[] | null>(null)
+    const [autoSavedFusionId, setAutoSavedFusionId] = useState<string | null>(null)
 
     // Autosave: cart changes → update linked held order in store
     useEffect(() => {
@@ -369,6 +370,14 @@ export function POSPage() {
     }
 
     const handleNewCustomer = () => {
+        if (items.length > 0 && !activeOrderId) {
+            const fusionId = crypto.randomUUID()
+            const saveName = mergeSnapshot && mergeSnapshot.length > 0
+                ? mergeSnapshot.map(o => o.name).join(' + ')
+                : ''
+            saveHeldOrder(saveName, items, discount, undefined, fusionId)
+            setAutoSavedFusionId(fusionId)
+        }
         setActiveOrderId(null)
         setActiveOrderName(null)
         clearCart()
@@ -378,6 +387,14 @@ export function POSPage() {
     }
 
     const handleLoadHeldOrder = (order: HeldOrder) => {
+        if (items.length > 0 && !activeOrderId) {
+            const saveName = mergeSnapshot && mergeSnapshot.length > 0
+                ? mergeSnapshot.map(o => o.name).join(' + ')
+                : ''
+            saveHeldOrder(saveName, items, discount)
+            setMergeSnapshot(null)
+        }
+
         // Validate stock against current product data before loading
         const warnings: string[] = []
         const validItems: CartItem[] = []
@@ -417,6 +434,10 @@ export function POSPage() {
         loadOrder(validItems, order.discount)
         setActiveOrderId(order.id)
         setActiveOrderName(order.name)
+        if (order.id === autoSavedFusionId) {
+            setAutoSavedFusionId(null)
+            setMergeSnapshot(null)
+        }
         setHeldOrdersView(null)
         if (order.pendingDebt) {
             const d = order.pendingDebt
@@ -928,6 +949,10 @@ export function POSPage() {
 
     const handleUndoMerge = () => {
         if (!mergeSnapshot) return
+        if (autoSavedFusionId) {
+            deleteHeldOrder(autoSavedFusionId)
+            setAutoSavedFusionId(null)
+        }
         clearCart()
         setAmountReceived('')
         mergeSnapshot.forEach(order => saveHeldOrder(order.name, order.items, order.discount))
@@ -1324,9 +1349,14 @@ export function POSPage() {
                         clearCart()
                         setAmountReceived('')
                     }
+                    if (id === autoSavedFusionId) {
+                        setAutoSavedFusionId(null)
+                        setMergeSnapshot(null)
+                    }
                 }}
                 onMerge={handleMergeOrders}
                 hasMergeSnapshot={mergeSnapshot !== null}
+                mergeSnapshotNames={mergeSnapshot?.map(o => o.name) ?? []}
                 onUndoMerge={handleUndoMerge}
             />
 
