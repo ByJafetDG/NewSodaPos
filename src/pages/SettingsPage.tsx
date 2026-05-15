@@ -370,15 +370,28 @@ export function SettingsPage() {
     async function handleTestPrint() {
         if (!window.electronAPI || !selectedPort) return
         setTestResult(null)
+        const opts = ticketOpts
         const ok = await window.electronAPI.printReceipt(selectedPort, {
             businessName: bizName || 'PRUEBA DE IMPRESION',
+            address: bizAddress || null,
+            phone: bizPhone || null,
+            header: ticketHeader || null,
             saleNumber: '0000',
             date: new Date().toISOString(),
-            items: [{ name: 'PRODUCTO DE PRUEBA', quantity: 1, subtotal: 0 }],
-            total: 0,
-            paymentMethod: 'TEST',
-            footer: 'Si ves esto, la impresora esta OK',
+            cashier: 'Cajero de prueba',
+            items: [{ name: 'PRODUCTO DE PRUEBA', quantity: 1, unitPrice: 1500, subtotal: 1500 }],
+            total: 1500,
+            paymentMethod: 'EFECTIVO',
+            amountReceived: 2000,
+            change: 500,
+            footer: ticketFooter || 'Si ves esto, la impresora esta OK',
             ticketLogoUrl: ticketLogoUrl || null,
+            showCashier: opts.showCashier,
+            showChange: opts.showChange,
+            showHeader: opts.showHeader,
+            showUnitPrice: opts.showUnitPrice,
+            showDecimals: opts.showDecimals,
+            currencySymbol: opts.currencySymbol,
         })
         setTestResult({ success: ok.success, msg: ok.success ? '¡Impresión enviada!' : (ok.error || 'Error al imprimir') })
         setTimeout(() => setTestResult(null), 3000)

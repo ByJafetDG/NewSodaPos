@@ -198,7 +198,7 @@ async function buildTicketLogoBytes(url: string): Promise<Buffer> {
     const imgBuf = await downloadBuffer(url)
     const img = nativeImage.createFromBuffer(imgBuf)
     const orig = img.getSize()
-    const targetW = 300
+    const targetW = 150
     const targetH = Math.round(orig.height * targetW / orig.width)
     const resized = img.resize({ width: targetW, height: targetH, quality: 'good' })
     const bitmap = resized.getBitmap() // BGRA
@@ -213,7 +213,11 @@ async function buildTicketLogoBytes(url: string): Promise<Buffer> {
                 const px = bx * 8 + bit
                 if (px < w) {
                     const off = (y * w + px) * 4
-                    const luma = 0.299 * bitmap[off + 2] + 0.587 * bitmap[off + 1] + 0.114 * bitmap[off]
+                    const a = bitmap[off + 3] / 255
+                    const r = a * bitmap[off + 2] + (1 - a) * 255
+                    const g = a * bitmap[off + 1] + (1 - a) * 255
+                    const b = a * bitmap[off + 0] + (1 - a) * 255
+                    const luma = 0.299 * r + 0.587 * g + 0.114 * b
                     if (luma < 128) byte |= (0x80 >> bit)
                 }
             }
