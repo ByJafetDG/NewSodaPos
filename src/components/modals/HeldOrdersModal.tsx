@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, ArrowLeft, PlusSquare, ClipboardList, Trash2, Download, Save, Merge, Check, RotateCcw } from 'lucide-react'
+import { X, ArrowLeft, PlusSquare, ClipboardList, Trash2, Download, Save, Merge, Check, RotateCcw, Pencil } from 'lucide-react'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { useKeyboardStore } from '@/store/keyboardStore'
@@ -19,7 +19,8 @@ interface HeldOrdersModalProps {
     activeOrderId: string | null
     hasLinkedAccount: boolean
     onSave: (name: string) => void
-    onNewCustomer: () => void
+    onNewCustomer: (name?: string) => void
+    onRename: (id: string, name: string) => void
     onLoad: (order: HeldOrder) => void
     onDelete: (id: string) => void
     onMerge: (ids: string[]) => void
@@ -40,23 +41,30 @@ export function HeldOrdersModal({
     isOpen, onClose, initialView,
     currentItems, currentDiscount,
     orders, activeOrderId, hasLinkedAccount,
-    onSave, onNewCustomer, onLoad, onDelete, onMerge,
+    onSave, onNewCustomer, onRename, onLoad, onDelete, onMerge,
     hasMergeSnapshot, mergeSnapshotNames = [], onUndoMerge,
 }: HeldOrdersModalProps) {
     const [view, setView] = useState<ModalView>(initialView)
     const [name, setName] = useState('')
+    const [pendingNewCustomer, setPendingNewCustomer] = useState(false)
     const [confirmLoadId, setConfirmLoadId] = useState<string | null>(null)
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
     const [selectedIds, setSelectedIds] = useState<string[]>([])
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [editingName, setEditingName] = useState('')
     const nameKb = useKeyboardInput(name, setName, { mode: 'alpha' })
+    const editingNameKb = useKeyboardInput(editingName, setEditingName, { mode: 'alpha' })
 
     useEffect(() => {
         if (isOpen) {
             setView(initialView)
             setName('')
+            setPendingNewCustomer(false)
             setConfirmLoadId(null)
             setConfirmDeleteId(null)
             setSelectedIds([])
+            setEditingId(null)
+            setEditingName('')
         }
     }, [isOpen, initialView])
 
@@ -81,7 +89,7 @@ export function HeldOrdersModal({
     const showBack = view !== 'choice' && initialView === 'choice'
     const title =
         view === 'choice' ? '¿Qué deseas hacer?' :
-        view === 'save'   ? 'Guardar cuenta' :
+        view === 'save'   ? (pendingNewCustomer ? 'Nuevo cliente' : 'Guardar cuenta') :
         view === 'load'   ? 'Cuentas pendientes' :
                             'Juntar cuentas'
 
@@ -123,7 +131,7 @@ export function HeldOrdersModal({
                                 <div className="flex items-center gap-2.5">
                                     {showBack && (
                                         <button
-                                            onClick={() => { setView('choice'); setSelectedIds([]) }}
+                                            onClick={() => { setView('choice'); setSelectedIds([]); setPendingNewCustomer(false) }}
                                             className="w-7 h-7 rounded-lg text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer"
                                         >
                                             <ArrowLeft size={14} />
@@ -170,7 +178,14 @@ export function HeldOrdersModal({
                                     <div className="space-y-3">
                                         <div className="grid grid-cols-2 gap-3">
                                             <button
-                                                onClick={onNewCustomer}
+                                                onClick={() => {
+                                                    if (currentItems.length > 0 && !hasLinkedAccount && !hasMergeSnapshot) {
+                                                        setPendingNewCustomer(true)
+                                                        setView('save')
+                                                    } else {
+                                                        onNewCustomer()
+                                                    }
+                                                }}
                                                 className="flex flex-col items-center gap-3 p-5 rounded-xl bg-[#101520] border border-[#1E2A40] hover:border-orange-500/30 hover:bg-orange-500/5 transition-all duration-150 cursor-pointer text-center"
                                             >
                                                 <div className="w-11 h-11 rounded-full bg-orange-500/10 flex items-center justify-center">
@@ -179,9 +194,11 @@ export function HeldOrdersModal({
                                                 <div>
                                                     <p className="text-[13px] font-semibold text-[#CBD5E1] leading-tight">Nuevo cliente</p>
                                                     <p className="text-[11px] text-[#3D506A] mt-1 leading-snug">
-                                                        {currentItems.length > 0
-                                                            ? 'Cuenta guardada automáticamente'
-                                                            : 'Limpiar y empezar de cero'}
+                                                        {currentItems.length > 0 && !hasLinkedAccount && !hasMergeSnapshot
+                                                            ? 'Guardar esta cuenta primero'
+                                                            : currentItems.length > 0
+                                                                ? 'Cuenta guardada automáticamente'
+                                                                : 'Limpiar y empezar de cero'}
                                                     </p>
                                                 </div>
                                             </button>
@@ -266,20 +283,28 @@ export function HeldOrdersModal({
                                                     <input
                                                         type="text"
                                                         {...nameKb}
-                                                        onKeyDown={(e) => { if (e.key === 'Enter') { useKeyboardStore.getState().close(); onSave(name) } }}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                useKeyboardStore.getState().close()
+                                                                pendingNewCustomer ? onNewCustomer(name) : onSave(name)
+                                                            }
+                                                        }}
                                                         placeholder="Ej: Juan, Mesa 3..."
                                                         className="w-full h-10 px-3 rounded-xl bg-[#0B0F1A] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
                                                     />
                                                     <p className="text-[10px] text-[#3D506A]">
-                                                        Si lo dejas vacío se guardará como "Cuenta pendiente {orders.length + 1}"
+                                                        {pendingNewCustomer
+                                                            ? 'La cuenta se guardará para no perder los productos'
+                                                            : `Si lo dejas vacío se guardará como "Cuenta pendiente ${orders.length + 1}"`
+                                                        }
                                                     </p>
                                                 </div>
                                                 <button
-                                                    onClick={() => { useKeyboardStore.getState().close(); onSave(name) }}
+                                                    onClick={() => { useKeyboardStore.getState().close(); pendingNewCustomer ? onNewCustomer(name) : onSave(name) }}
                                                     className="w-full flex items-center justify-center gap-2 h-11 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/15 font-semibold text-[13px] transition-all cursor-pointer"
                                                 >
                                                     <Save size={15} />
-                                                    Guardar cuenta
+                                                    {pendingNewCustomer ? 'Guardar y continuar' : 'Guardar cuenta'}
                                                 </button>
                                             </>
                                         ) : (
@@ -314,25 +339,64 @@ export function HeldOrdersModal({
                                                     return (
                                                         <div key={order.id} className={`border rounded-xl p-3.5 transition-colors ${isActive ? 'bg-amber-500/5 border-amber-500/25' : 'bg-[#101520] border-[#1E2A40]'}`}>
                                                             <div className="flex items-start justify-between gap-2">
-                                                                <div className="min-w-0">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <p className="text-[13px] font-semibold text-[#E4ECF7] truncate">{order.name}</p>
-                                                                        {isActive && (
-                                                                            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded-full">
-                                                                                Activa
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                    <p className="text-[11px] text-[#3D506A] mt-0.5">
-                                                                        {orderQty} prod · {formatCurrency(orderTotal)} · {timeAgo(order.savedAt)}
-                                                                    </p>
+                                                                <div className="min-w-0 flex-1">
+                                                                    {editingId === order.id ? (
+                                                                        <div className="flex items-center gap-1.5">
+                                                                            <input
+                                                                                type="text"
+                                                                                {...editingNameKb}
+                                                                                onKeyDown={e => {
+                                                                                    if (e.key === 'Enter') { useKeyboardStore.getState().close(); onRename(order.id, editingName); setEditingId(null) }
+                                                                                    if (e.key === 'Escape') { useKeyboardStore.getState().close(); setEditingId(null) }
+                                                                                }}
+                                                                                className="flex-1 h-7 px-2 rounded-lg bg-[#0B0F1A] border border-amber-500/40 text-[#E4ECF7] text-[12px] outline-none"
+                                                                                autoFocus
+                                                                            />
+                                                                            <button
+                                                                                onClick={() => { useKeyboardStore.getState().close(); onRename(order.id, editingName); setEditingId(null) }}
+                                                                                className="w-6 h-6 rounded flex items-center justify-center text-amber-400 hover:bg-amber-500/15 transition-colors cursor-pointer shrink-0"
+                                                                            >
+                                                                                <Check size={12} />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => { useKeyboardStore.getState().close(); setEditingId(null) }}
+                                                                                className="w-6 h-6 rounded flex items-center justify-center text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5 transition-colors cursor-pointer shrink-0"
+                                                                            >
+                                                                                <X size={12} />
+                                                                            </button>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <p className="text-[13px] font-semibold text-[#E4ECF7] truncate">{order.name}</p>
+                                                                            {isActive && (
+                                                                                <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded-full">
+                                                                                    Activa
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                    {editingId !== order.id && (
+                                                                        <p className="text-[11px] text-[#3D506A] mt-0.5">
+                                                                            {orderQty} prod · {formatCurrency(orderTotal)} · {timeAgo(order.savedAt)}
+                                                                        </p>
+                                                                    )}
                                                                 </div>
-                                                                <button
-                                                                    onClick={() => setConfirmDeleteId(order.id)}
-                                                                    className="w-7 h-7 rounded-lg text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 flex items-center justify-center transition-all cursor-pointer shrink-0"
-                                                                >
-                                                                    <Trash2 size={12} />
-                                                                </button>
+                                                                {editingId !== order.id && (
+                                                                    <div className="flex items-center gap-0.5 shrink-0">
+                                                                        <button
+                                                                            onClick={() => { setEditingId(order.id); setEditingName(order.name) }}
+                                                                            className="w-7 h-7 rounded-lg text-[#3D506A] hover:text-amber-400 hover:bg-amber-500/10 flex items-center justify-center transition-all cursor-pointer"
+                                                                        >
+                                                                            <Pencil size={11} />
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => setConfirmDeleteId(order.id)}
+                                                                            className="w-7 h-7 rounded-lg text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 flex items-center justify-center transition-all cursor-pointer"
+                                                                        >
+                                                                            <Trash2 size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                )}
                                                             </div>
 
                                                             {confirmDeleteId === order.id ? (

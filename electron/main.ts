@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { autoUpdater } from 'electron-updater'
@@ -174,6 +174,76 @@ ipcMain.handle('sync:trigger-push', async () => {
         console.error('[SyncTrigger] Error:', err);
     }
 });
+
+// ===== Ticket Logo: download + ESC/POS raster conversion =====
+
+const TICKET_LOGO_PATH = () => path.join(app.getPath('userData'), 'ticket-logo.bin')
+const TICKET_LOGO_URL_PATH = () => path.join(app.getPath('userData'), 'ticket-logo-url.txt')
+
+async function downloadBuffer(url: string): Promise<Buffer> {
+    const { default: https } = await import('https')
+    const { default: http } = await import('http')
+    return new Promise((resolve, reject) => {
+        const client = url.startsWith('https') ? https : http
+        client.get(url, res => {
+            const chunks: Buffer[] = []
+            res.on('data', chunk => chunks.push(chunk))
+            res.on('end', () => resolve(Buffer.concat(chunks)))
+            res.on('error', reject)
+        }).on('error', reject)
+    })
+}
+
+async function buildTicketLogoBytes(url: string): Promise<Buffer> {
+    const imgBuf = await downloadBuffer(url)
+    const img = nativeImage.createFromBuffer(imgBuf)
+    const orig = img.getSize()
+    const targetW = 300
+    const targetH = Math.round(orig.height * targetW / orig.width)
+    const resized = img.resize({ width: targetW, height: targetH, quality: 'good' })
+    const bitmap = resized.getBitmap() // BGRA
+    const w = resized.getSize().width
+    const h = resized.getSize().height
+    const xBytes = Math.ceil(w / 8)
+    const raster: number[] = []
+    for (let y = 0; y < h; y++) {
+        for (let bx = 0; bx < xBytes; bx++) {
+            let byte = 0
+            for (let bit = 0; bit < 8; bit++) {
+                const px = bx * 8 + bit
+                if (px < w) {
+                    const off = (y * w + px) * 4
+                    const luma = 0.299 * bitmap[off + 2] + 0.587 * bitmap[off + 1] + 0.114 * bitmap[off]
+                    if (luma < 128) byte |= (0x80 >> bit)
+                }
+            }
+            raster.push(byte)
+        }
+    }
+    const header = [
+        0x1D, 0x76, 0x30, 0x00,
+        xBytes & 0xFF, (xBytes >> 8) & 0xFF,
+        h & 0xFF, (h >> 8) & 0xFF,
+    ]
+    return Buffer.from([...header, ...raster])
+}
+
+ipcMain.handle('printer:cache-ticket-logo', async (_, url: string) => {
+    try {
+        const logoBytes = await buildTicketLogoBytes(url)
+        fs.writeFileSync(TICKET_LOGO_PATH(), logoBytes)
+        fs.writeFileSync(TICKET_LOGO_URL_PATH(), url, 'utf8')
+        return { success: true }
+    } catch (err: any) {
+        console.error('[TicketLogo] Cache failed:', err)
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('printer:clear-ticket-logo', async () => {
+    try { fs.unlinkSync(TICKET_LOGO_PATH()) } catch { }
+    try { fs.unlinkSync(TICKET_LOGO_URL_PATH()) } catch { }
+})
 
 // ===== Hardware: COM Port Printer Communication =====
 
@@ -366,6 +436,22 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
 
         // Center alignment
         bytes.push(ESC, 0x61, 0x01) // ESC a 1 = Center
+
+        // Ticket logo
+        const logoPath = TICKET_LOGO_PATH()
+        if (data.ticketLogoUrl && fs.existsSync(logoPath)) {
+            bytes.push(...Array.from(fs.readFileSync(logoPath)))
+            bytes.push(LF, LF)
+        } else if (data.ticketLogoUrl) {
+            try {
+                const logoBuffer = await buildTicketLogoBytes(data.ticketLogoUrl)
+                fs.writeFileSync(logoPath, logoBuffer)
+                bytes.push(...Array.from(logoBuffer))
+                bytes.push(LF, LF)
+            } catch (err) {
+                console.error('[Printer] Logo render failed:', err)
+            }
+        }
 
         // Business name (bold, double height)
         bytes.push(ESC, 0x45, 0x01) // ESC E 1 = Bold ON
@@ -583,6 +669,35 @@ ipcMain.handle('assets:get-logo', () => {
         return `data:image/png;base64,${data.toString('base64')}`
     } catch {
         return null
+    }
+})
+
+ipcMain.handle('storage:list-bucket', async (_, bucket: string) => {
+    const supabaseUrl = process.env.VITE_SUPABASE_URL
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const anonKey = process.env.VITE_SUPABASE_ANON_KEY
+    const authKey = serviceKey && serviceKey !== 'your_service_role_key_here' ? serviceKey : anonKey
+    if (!supabaseUrl || !authKey) return { data: null, error: 'Missing Supabase config' }
+    try {
+        const res = await fetch(`${supabaseUrl}/storage/v1/object/list/${bucket}`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authKey}`,
+                'Content-Type': 'application/json',
+                'apikey': authKey,
+            },
+            body: JSON.stringify({ prefix: '', limit: 100, offset: 0, sortBy: { column: 'created_at', order: 'desc' } }),
+        })
+        if (!res.ok) {
+            const err = await res.text()
+            console.error(`[Storage] list ${bucket} failed:`, err)
+            return { data: null, error: err }
+        }
+        const data = await res.json()
+        return { data, error: null }
+    } catch (err: any) {
+        console.error(`[Storage] list ${bucket} error:`, err.message)
+        return { data: null, error: err.message }
     }
 })
 

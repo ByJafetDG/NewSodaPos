@@ -6,6 +6,7 @@ interface HeldOrdersState {
     orders: HeldOrder[]
     saveOrder: (name: string, items: CartItem[], discount: number, pendingDebt?: HeldOrderDebt, id?: string) => void
     updateOrder: (id: string, items: CartItem[], discount: number, pendingDebt?: HeldOrderDebt) => void
+    renameOrder: (id: string, name: string) => void
     deleteOrder: (id: string) => void
 }
 
@@ -25,6 +26,9 @@ export const useHeldOrdersStore = create<HeldOrdersState>()(
             })),
             updateOrder: (id, items, discount, pendingDebt) => set(s => ({
                 orders: s.orders.map(o => o.id === id ? { ...o, items, discount, pendingDebt } : o)
+            })),
+            renameOrder: (id, name) => set(s => ({
+                orders: s.orders.map(o => o.id === id ? { ...o, name: name.trim() || o.name } : o)
             })),
             deleteOrder: (id) => set(s => ({ orders: s.orders.filter(o => o.id !== id) })),
         }),

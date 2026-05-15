@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
     Settings2, Store, Receipt, Printer, Users, Cloud,
     Monitor, Save, Plus, Trash2, ChevronRight, Wifi, WifiOff,
     RefreshCw, HardDrive, Zap, LogOut, Minimize2, Maximize2,
     CheckCircle2, Search, Info, Edit2, Download, AlertTriangle, X,
+    Mail, Upload,
 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/atoms/Button'
 import { toast } from '@/components/ui/Toast'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
@@ -17,7 +19,7 @@ import { useUIStore } from '@/store/uiStore'
 import { cn } from '@/lib/utils'
 import type { Employee } from '@/types'
 
-type Section = 'business' | 'ticket' | 'printer' | 'employees' | 'sync' | 'system' | 'updates'
+type Section = 'business' | 'ticket' | 'email' | 'printer' | 'employees' | 'sync' | 'system' | 'updates'
 
 function timeAgo(date: Date) {
     const diff = Date.now() - date.getTime()
@@ -33,7 +35,8 @@ const CURRENCY_OPTIONS = ['₡', '$', '€', '£', '¥']
 
 const SECTIONS: { id: Section; label: string; desc: string; icon: React.ElementType; color: string }[] = [
     { id: 'business',   label: 'Negocio',         desc: 'Nombre, teléfono, dirección',       icon: Store,    color: 'text-orange-400' },
-    { id: 'ticket',     label: 'Ticket',           desc: 'Encabezado y pie del recibo',       icon: Receipt,  color: 'text-amber-400' },
+    { id: 'ticket',     label: 'Ticket',           desc: 'Logo, encabezado y pie del recibo', icon: Receipt,  color: 'text-amber-400' },
+    { id: 'email',      label: 'Correo',           desc: 'Logo y apariencia del recibo',      icon: Mail,     color: 'text-sky-400' },
     { id: 'printer',    label: 'Impresora',        desc: 'Detección y configuración',         icon: Printer,  color: 'text-cyan-400' },
     { id: 'employees',  label: 'Empleados',        desc: 'Cajeros y personal',                icon: Users,    color: 'text-violet-400' },
     { id: 'sync',       label: 'Sincronización',   desc: 'Estado de la nube',                 icon: Cloud,    color: 'text-blue-400' },
@@ -185,6 +188,12 @@ export function SettingsPage() {
     // Ticket
     const [ticketHeader, setTicketHeader] = useState('')
     const [ticketFooter, setTicketFooter] = useState('¡Gracias por su compra!')
+    const [ticketLogoUrl, setTicketLogoUrl] = useState('')
+    const [uploadingTicket, setUploadingTicket] = useState(false)
+
+    // Email
+    const [emailLogoUrl, setEmailLogoUrl] = useState('')
+    const [uploadingEmail, setUploadingEmail] = useState(false)
     const [ticketOpts, setTicketOpts] = useState<TicketOptions>(() => {
         try { return { ...DEFAULT_TICKET_OPTIONS, ...(JSON.parse(localStorage.getItem('pos_ticket_options') ?? 'null') ?? {}) } }
         catch { return DEFAULT_TICKET_OPTIONS }
@@ -205,6 +214,8 @@ export function SettingsPage() {
             setBizAddress(config.address ?? '')
             setTicketHeader(config.ticketHeader ?? '')
             setTicketFooter(config.ticketFooter ?? '¡Gracias por su compra!')
+            setTicketLogoUrl(config.ticketLogoUrl ?? '')
+            setEmailLogoUrl(config.emailLogoUrl ?? '')
             setDrawerEnabled(config.drawerEnabled ?? true)
             setSelectedPort(config.printerPort ?? localStorage.getItem('pos_printer_port') ?? '')
         }
@@ -240,6 +251,91 @@ export function SettingsPage() {
     async function handleSaveTicket() {
         await updateConfig.mutateAsync({ ticketHeader: ticketHeader || null, ticketFooter: ticketFooter || null })
         localStorage.setItem('pos_ticket_options', JSON.stringify(ticketOpts))
+    }
+
+    async function handleUploadTicketLogo(file: File) {
+        setUploadingTicket(true)
+        try {
+            if (ticketLogoUrl) {
+                const oldPath = ticketLogoUrl.split('/object/public/ticketLogos/')[1]?.split('?')[0]
+                if (oldPath) await supabase.storage.from('ticketLogos').remove([oldPath])
+            }
+            const ext = file.name.split('.').pop() ?? 'png'
+            const fileName = `ticket-logo-${Date.now()}.${ext}`
+            const { error } = await supabase.storage.from('ticketLogos').upload(fileName, file)
+            if (error) throw error
+            const { data: { publicUrl } } = supabase.storage.from('ticketLogos').getPublicUrl(fileName)
+            await updateConfig.mutateAsync({ ticketLogoUrl: publicUrl })
+            setTicketLogoUrl(publicUrl)
+            if (window.electronAPI) {
+                const res = await window.electronAPI.cacheTicketLogo(publicUrl)
+                if (!res.success) toast.warning('Logo guardado pero falló la caché local: ' + res.error)
+            }
+            toast.success('Logo de ticket guardado')
+        } catch (err: any) {
+            toast.error('Error al subir logo: ' + err.message)
+        } finally {
+            setUploadingTicket(false)
+        }
+    }
+
+    async function handleClearTicketLogo() {
+        if (ticketLogoUrl) {
+            const oldPath = ticketLogoUrl.split('/object/public/ticketLogos/')[1]?.split('?')[0]
+            if (oldPath) await supabase.storage.from('ticketLogos').remove([oldPath])
+        }
+        await updateConfig.mutateAsync({ ticketLogoUrl: null })
+        setTicketLogoUrl('')
+        if (window.electronAPI) await window.electronAPI.clearTicketLogo()
+        toast.success('Logo de ticket eliminado')
+    }
+
+    async function handleUploadEmailLogo(file: File) {
+        setUploadingEmail(true)
+        try {
+            if (emailLogoUrl) {
+                const oldPath = emailLogoUrl.split('/object/public/emailLogos/')[1]?.split('?')[0]
+                if (oldPath) await supabase.storage.from('emailLogos').remove([oldPath])
+            }
+            const ext = file.name.split('.').pop() ?? 'png'
+            const fileName = `email-logo-${Date.now()}.${ext}`
+            const { error } = await supabase.storage.from('emailLogos').upload(fileName, file)
+            if (error) throw error
+            const { data: { publicUrl } } = supabase.storage.from('emailLogos').getPublicUrl(fileName)
+            await updateConfig.mutateAsync({ emailLogoUrl: publicUrl })
+            setEmailLogoUrl(publicUrl)
+            toast.success('Logo de correo guardado')
+        } catch (err: any) {
+            toast.error('Error al subir logo: ' + err.message)
+        } finally {
+            setUploadingEmail(false)
+        }
+    }
+
+    async function handleClearEmailLogo() {
+        if (emailLogoUrl) {
+            const oldPath = emailLogoUrl.split('/object/public/emailLogos/')[1]?.split('?')[0]
+            if (oldPath) await supabase.storage.from('emailLogos').remove([oldPath])
+        }
+        await updateConfig.mutateAsync({ emailLogoUrl: null })
+        setEmailLogoUrl('')
+        toast.success('Logo de correo eliminado')
+    }
+
+    async function handleSelectTicketLogo(url: string) {
+        await updateConfig.mutateAsync({ ticketLogoUrl: url })
+        setTicketLogoUrl(url)
+        if (window.electronAPI) {
+            const res = await window.electronAPI.cacheTicketLogo(url)
+            if (!res.success) toast.warning('Logo seleccionado pero falló la caché: ' + res.error)
+        }
+        toast.success('Logo de ticket actualizado')
+    }
+
+    async function handleSelectEmailLogo(url: string) {
+        await updateConfig.mutateAsync({ emailLogoUrl: url })
+        setEmailLogoUrl(url)
+        toast.success('Logo de correo actualizado')
     }
 
     async function handleToggleDrawer(v: boolean) {
@@ -281,7 +377,8 @@ export function SettingsPage() {
             items: [{ name: 'PRODUCTO DE PRUEBA', quantity: 1, subtotal: 0 }],
             total: 0,
             paymentMethod: 'TEST',
-            footer: 'Si ves esto, la impresora esta OK'
+            footer: 'Si ves esto, la impresora esta OK',
+            ticketLogoUrl: ticketLogoUrl || null,
         })
         setTestResult({ success: ok.success, msg: ok.success ? '¡Impresión enviada!' : (ok.error || 'Error al imprimir') })
         setTimeout(() => setTestResult(null), 3000)
@@ -381,6 +478,27 @@ export function SettingsPage() {
                         >
                             <div className="space-y-4">
                                 <div>
+                                    <FieldLabel>Logo del ticket</FieldLabel>
+                                    <div className="flex gap-3 items-start">
+                                        <div className="flex-1 min-w-0">
+                                            <LogoUploadField
+                                                logoUrl={ticketLogoUrl}
+                                                uploading={uploadingTicket}
+                                                onUpload={handleUploadTicketLogo}
+                                                onClear={handleClearTicketLogo}
+                                                accentColor="amber"
+                                                hint="Se imprimirá centrado a 300px de ancho"
+                                            />
+                                        </div>
+                                        <BucketPickerPanel
+                                            bucket="ticketLogos"
+                                            currentUrl={ticketLogoUrl}
+                                            onSelect={handleSelectTicketLogo}
+                                            accentColor="amber"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
                                     <FieldLabel>Encabezado del ticket</FieldLabel>
                                     <TextAreaInput value={ticketHeader} onChange={setTicketHeader} placeholder="Texto que aparece al inicio del ticket..." />
                                 </div>
@@ -458,14 +576,93 @@ export function SettingsPage() {
                                             ticketHeader={ticketHeader}
                                             ticketFooter={ticketFooter}
                                             opts={ticketOpts}
+                                            ticketLogoUrl={ticketLogoUrl || undefined}
                                         />
                                     </div>
                                 </div>
 
-                                <Button variant="primary" size="md" onClick={handleSaveTicket} loading={updateConfig.isPending} className="gap-1.5">
-                                    <Save size={14} />
-                                    Guardar cambios
-                                </Button>
+                                <div className="flex gap-2">
+                                    <Button variant="primary" size="md" onClick={handleSaveTicket} loading={updateConfig.isPending} className="gap-1.5">
+                                        <Save size={14} />
+                                        Guardar cambios
+                                    </Button>
+                                    <Button
+                                        variant="secondary" size="md"
+                                        onClick={handleTestPrint}
+                                        disabled={!selectedPort}
+                                        title={!selectedPort ? 'Configura una impresora primero' : undefined}
+                                        className="gap-1.5"
+                                    >
+                                        <Receipt size={14} />
+                                        Imprimir prueba
+                                    </Button>
+                                </div>
+                            </div>
+                        </SectionContent>
+                    )}
+
+                    {section === 'email' && (
+                        <SectionContent
+                            icon={Mail} color="text-sky-400" iconBg="bg-sky-500/10"
+                            title="Recibo por Correo" desc="Apariencia del correo que se envía al cliente"
+                        >
+                            <div className="space-y-5">
+                                <div>
+                                    <FieldLabel>Logo del correo</FieldLabel>
+                                    <div className="flex gap-3 items-start">
+                                        <div className="flex-1 min-w-0">
+                                            <LogoUploadField
+                                                logoUrl={emailLogoUrl}
+                                                uploading={uploadingEmail}
+                                                onUpload={handleUploadEmailLogo}
+                                                onClear={handleClearEmailLogo}
+                                                accentColor="sky"
+                                                hint="Se muestra en la esquina superior del recibo de correo"
+                                            />
+                                        </div>
+                                        <BucketPickerPanel
+                                            bucket="emailLogos"
+                                            currentUrl={emailLogoUrl}
+                                            onSelect={handleSelectEmailLogo}
+                                            accentColor="sky"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="border-t border-[#192030] pt-4">
+                                    <FieldLabel>Vista previa del encabezado</FieldLabel>
+                                    <div className="mt-2 rounded-xl border border-[#1E2A40] overflow-hidden bg-[#0D1117]">
+                                        <div className="bg-[#13192A] px-5 py-4 flex items-center gap-4 border-b border-[#1E2A40]">
+                                            {emailLogoUrl ? (
+                                                <img
+                                                    src={emailLogoUrl}
+                                                    alt="Logo"
+                                                    className="w-14 h-14 rounded-2xl object-cover shrink-0 border border-[#1E2A40]"
+                                                />
+                                            ) : (
+                                                <div className="w-14 h-14 rounded-2xl bg-sky-500/20 flex items-center justify-center shrink-0">
+                                                    <span className="text-sky-400 font-bold text-xl">
+                                                        {(bizName || 'S').charAt(0).toUpperCase()}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            <div>
+                                                <p className="text-[13px] font-semibold text-[#E4ECF7]">{bizName || 'Mi Soda'}</p>
+                                                <p className="text-[11px] text-[#3D506A]">Recibo de compra · #{new Date().getFullYear()}001</p>
+                                            </div>
+                                        </div>
+                                        <div className="px-5 py-3">
+                                            <p className="text-[11px] text-[#3D506A]">Contenido del recibo...</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {!emailLogoUrl && (
+                                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#101520] border border-[#1E2A40]">
+                                        <Info size={12} className="text-[#3D506A] shrink-0" />
+                                        <span className="text-[11px] text-[#3D506A]">Sin logo, el correo mostrará la inicial del nombre del negocio.</span>
+                                    </div>
+                                )}
                             </div>
                         </SectionContent>
                     )}
@@ -935,6 +1132,178 @@ export function SettingsPage() {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
+function BucketPickerPanel({ bucket, currentUrl, onSelect, accentColor }: {
+    bucket: string
+    currentUrl: string
+    onSelect: (url: string) => Promise<void>
+    accentColor: 'amber' | 'sky'
+}) {
+    const [files, setFiles] = useState<{ name: string; url: string }[]>([])
+    const [loading, setLoading] = useState(false)
+    const [errorMsg, setErrorMsg] = useState<string | null>(null)
+    const isAmber = accentColor === 'amber'
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
+
+    const load = async () => {
+        setLoading(true)
+        setErrorMsg(null)
+        try {
+            let rawFiles: any[] = []
+
+            if (window.electronAPI) {
+                const result = await window.electronAPI.listBucket(bucket)
+                if (result.error) throw new Error(result.error)
+                rawFiles = result.data ?? []
+            } else {
+                const { data, error } = await supabase.storage.from(bucket).list('', { limit: 100 })
+                if (error) throw new Error(error.message)
+                rawFiles = data ?? []
+            }
+
+            setFiles(
+                rawFiles
+                    .filter((f: any) => f.name && !f.name.startsWith('.') && f.id)
+                    .map((f: any) => ({
+                        name: f.name,
+                        url: `${supabaseUrl}/storage/v1/object/public/${bucket}/${f.name}`,
+                    }))
+            )
+        } catch (err: any) {
+            setErrorMsg(err.message ?? 'Error al listar bucket')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    useEffect(() => { load() }, [bucket])
+
+    const selectedBorder = isAmber ? 'border-amber-500' : 'border-sky-500'
+    const hoverBorder = isAmber ? 'hover:border-amber-500/40' : 'hover:border-sky-500/40'
+    const refreshColor = isAmber ? 'hover:text-amber-400' : 'hover:text-sky-400'
+
+    return (
+        <div className="flex flex-col gap-1.5 shrink-0">
+            <div className="flex items-center justify-between w-[140px]">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[#3D506A]">Del bucket</p>
+                <button
+                    onClick={load}
+                    title="Recargar"
+                    className={cn('text-[#3D506A] transition-colors cursor-pointer', refreshColor)}
+                >
+                    <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
+                </button>
+            </div>
+            <div className="w-[140px] h-[108px] rounded-xl bg-[#101520] border border-[#1E2A40] overflow-y-auto p-1.5">
+                {loading ? (
+                    <div className="flex items-center justify-center h-full">
+                        <RefreshCw size={14} className="animate-spin text-[#3D506A]" />
+                    </div>
+                ) : errorMsg ? (
+                    <div className="flex items-center justify-center h-full px-2">
+                        <p className="text-[10px] text-red-400/70 text-center leading-snug">{errorMsg}</p>
+                    </div>
+                ) : files.length === 0 ? (
+                    <div className="flex items-center justify-center h-full px-2">
+                        <p className="text-[10px] text-[#3D506A] text-center leading-snug">Sin imágenes en el bucket</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-3 gap-1">
+                        {files.map(f => (
+                            <button
+                                key={f.name}
+                                onClick={() => onSelect(f.url)}
+                                title={f.name}
+                                className={cn(
+                                    'aspect-square rounded-lg overflow-hidden border-2 transition-all cursor-pointer',
+                                    currentUrl === f.url ? selectedBorder : cn('border-transparent', hoverBorder)
+                                )}
+                            >
+                                <img src={f.url} alt={f.name} className="w-full h-full object-cover" />
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
+function LogoUploadField({ logoUrl, uploading, onUpload, onClear, accentColor, hint }: {
+    logoUrl: string
+    uploading: boolean
+    onUpload: (file: File) => void
+    onClear: () => void
+    accentColor: 'amber' | 'sky'
+    hint?: string
+}) {
+    const fileRef = useRef<HTMLInputElement>(null)
+    const accent = accentColor === 'amber'
+        ? { border: 'border-amber-500/30', bg: 'bg-amber-500/8', text: 'text-amber-400', hover: 'hover:bg-amber-500/15' }
+        : { border: 'border-sky-500/30', bg: 'bg-sky-500/8', text: 'text-sky-400', hover: 'hover:bg-sky-500/15' }
+
+    return (
+        <div className="space-y-2">
+            {logoUrl ? (
+                <div className={cn('flex items-center gap-3 p-3 rounded-xl border', accent.bg, accent.border)}>
+                    <img src={logoUrl} alt="Logo" className="w-14 h-14 rounded-xl object-cover shrink-0 border border-[#1E2A40]" />
+                    <div className="flex-1 min-w-0">
+                        <p className={cn('text-[12px] font-semibold', accent.text)}>Logo configurado</p>
+                        {hint && <p className="text-[10px] text-[#3D506A] mt-0.5 truncate">{hint}</p>}
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                        <button
+                            onClick={() => fileRef.current?.click()}
+                            disabled={uploading}
+                            className={cn('flex items-center gap-1 px-3 h-8 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50', accent.text, accent.hover)}
+                        >
+                            <Upload size={11} />
+                            Cambiar
+                        </button>
+                        <button
+                            onClick={onClear}
+                            disabled={uploading}
+                            className="flex items-center justify-center w-8 h-8 rounded-lg text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                            <Trash2 size={13} />
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <button
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading}
+                    className={cn(
+                        'w-full flex items-center justify-center gap-2 h-20 rounded-xl border border-dashed transition-all cursor-pointer disabled:opacity-50',
+                        'bg-[#101520] border-[#1E2A40] text-[#3D506A]',
+                        accent.hover, `hover:${accent.border}`, `hover:${accent.text}`
+                    )}
+                >
+                    {uploading ? (
+                        <RefreshCw size={16} className="animate-spin" />
+                    ) : (
+                        <>
+                            <Upload size={16} />
+                            <span className="text-[12px] font-medium">Subir imagen</span>
+                        </>
+                    )}
+                </button>
+            )}
+            {hint && !logoUrl && <p className="text-[10px] text-[#3D506A]">{hint}</p>}
+            <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={e => {
+                    const file = e.target.files?.[0]
+                    if (file) { onUpload(file); e.target.value = '' }
+                }}
+            />
+        </div>
+    )
+}
+
 function SectionContent({ icon: Icon, color, iconBg, title, desc, children }: {
     icon: React.ElementType; color: string; iconBg: string
     title: string; desc: string; children: React.ReactNode
@@ -955,10 +1324,11 @@ function SectionContent({ icon: Icon, color, iconBg, title, desc, children }: {
     )
 }
 
-function TicketPreview({ bizName, bizAddress, bizPhone, ticketHeader, ticketFooter, opts }: {
+function TicketPreview({ bizName, bizAddress, bizPhone, ticketHeader, ticketFooter, opts, ticketLogoUrl }: {
     bizName: string; bizAddress: string; bizPhone: string
     ticketHeader: string; ticketFooter: string
     opts: TicketOptions
+    ticketLogoUrl?: string
 }) {
     const sep = <div className="border-t border-dashed border-gray-300 my-1.5" />
     const sym = opts.currencySymbol === '₡' ? '¢' : (opts.currencySymbol || '₡')
@@ -969,6 +1339,11 @@ function TicketPreview({ bizName, bizAddress, bizPhone, ticketHeader, ticketFoot
 
     return (
         <div className="bg-white text-black font-mono p-4 rounded-lg shadow-xl text-[11px] leading-relaxed border-2 border-gray-100 w-[240px] select-none">
+            {ticketLogoUrl && (
+                <div className="flex justify-center mb-1.5">
+                    <img src={ticketLogoUrl} alt="Logo" className="max-w-[120px] max-h-[60px] object-contain" style={{ imageRendering: 'pixelated' }} />
+                </div>
+            )}
             <div className="text-center font-bold text-[13px]">{bizName || 'Mi Soda'}</div>
             {bizAddress && <div className="text-center text-[10px]">{bizAddress}</div>}
             {bizPhone && <div className="text-center text-[10px]">Tel: {bizPhone}</div>}

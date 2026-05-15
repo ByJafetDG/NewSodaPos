@@ -17,6 +17,7 @@ interface SendReceiptInput {
     subtotal: number
     discount: number
     total: number
+    logoUrl?: string | null
 }
 
 interface SettledSaleInfo {
@@ -33,6 +34,7 @@ interface SendSettledInput {
     clientName: string
     businessName: string
     sales: SettledSaleInfo[]
+    logoUrl?: string | null
 }
 
 export interface MixedPaymentInfo {
@@ -53,6 +55,7 @@ interface SendMixedCreditInput {
     discount: number
     fullTotal: number
     payment: MixedPaymentInfo
+    logoUrl?: string | null
 }
 
 export interface SplitCreditProductInfo {
@@ -70,6 +73,7 @@ interface SendSplitCreditInput {
     products: SplitCreditProductInfo[]
     allClientNames: string[]
     totalCharged: number
+    logoUrl?: string | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -90,12 +94,15 @@ function randomMsg() {
     return MESSAGES[Math.floor(Math.random() * MESSAGES.length)]
 }
 
-function logoCell(initial: string, bg: string, border: string, iconColor: string): string {
+function logoCell(initial: string, bg: string, border: string, iconColor: string, logoUrl?: string | null): string {
+    const inner = logoUrl
+        ? `<img src="${logoUrl}" width="72" height="72" style="display:block;border-radius:16px;object-fit:cover;" alt="Logo" />`
+        : `<span style="font-size:28px;font-weight:800;color:${iconColor};letter-spacing:-1px;">${initial}</span>`
     return `
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 20px;">
         <tr>
-          <td width="72" height="72" bgcolor="${bg}" style="width:72px;height:72px;background:${bg};border:1px solid ${border};border-radius:16px;text-align:center;vertical-align:middle;padding:0;">
-            <span style="font-size:28px;font-weight:800;color:${iconColor};letter-spacing:-1px;">${initial}</span>
+          <td width="72" height="72" bgcolor="${bg}" style="width:72px;height:72px;background:${bg};border:1px solid ${border};border-radius:16px;text-align:center;vertical-align:middle;padding:0;overflow:hidden;">
+            ${inner}
           </td>
         </tr>
       </table>`
@@ -204,6 +211,7 @@ interface SendInvoiceReceiptInput {
     discount: number
     total: number
     paymentMethod: string
+    logoUrl?: string | null
 }
 
 function fmtMethod(method: string): string {
@@ -212,7 +220,7 @@ function fmtMethod(method: string): string {
     return method
 }
 
-function buildInvoiceReceiptHTML(input: SendInvoiceReceiptInput): string {
+function buildInvoiceReceiptHTML(input: SendInvoiceReceiptInput, logoUrl?: string | null): string {
     const initial = input.businessName.charAt(0).toUpperCase()
     const dateStr = new Date(input.date).toLocaleDateString('es-CR', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -225,7 +233,7 @@ function buildInvoiceReceiptHTML(input: SendInvoiceReceiptInput): string {
   <!-- Header -->
   <tr>
     <td bgcolor="#0f172a" style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
-      ${logoCell(initial, '#082f49', '#0284c755', '#38bdf8')}
+      ${logoCell(initial, '#082f49', '#0284c755', '#38bdf8', logoUrl)}
       <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
       <p style="margin:0 0 18px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:2.5px;">Recibo de venta</p>
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
@@ -316,7 +324,7 @@ function buildInvoiceReceiptHTML(input: SendInvoiceReceiptInput): string {
 
 // ─── Template: Credit receipt ────────────────────────────────────────────────
 
-function buildHTML(input: SendReceiptInput): string {
+function buildHTML(input: SendReceiptInput, logoUrl?: string | null): string {
     const initial = input.businessName.charAt(0).toUpperCase()
     const dateStr = new Date(input.date).toLocaleDateString('es-CR', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -329,7 +337,7 @@ function buildHTML(input: SendReceiptInput): string {
   <!-- Header -->
   <tr>
     <td bgcolor="#0f172a" style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
-      ${logoCell(initial, '#1e1b4b', '#7c3aed55', '#a78bfa')}
+      ${logoCell(initial, '#1e1b4b', '#7c3aed55', '#a78bfa', logoUrl)}
       <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
       <p style="margin:0 0 18px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:2.5px;">Recibo de crédito</p>
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
@@ -420,7 +428,7 @@ function buildHTML(input: SendReceiptInput): string {
 
 // ─── Template: Settled / paid ─────────────────────────────────────────────────
 
-function buildSettledHTML(input: SendSettledInput): string {
+function buildSettledHTML(input: SendSettledInput, logoUrl?: string | null): string {
     const initial = input.businessName.charAt(0).toUpperCase()
     const isSingle = input.sales.length === 1
     const grandTotal = input.sales.reduce((s, sale) => s + sale.total, 0)
@@ -485,7 +493,7 @@ function buildSettledHTML(input: SendSettledInput): string {
   <!-- Header -->
   <tr>
     <td bgcolor="#0f172a" style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
-      ${logoCell(initial, '#052e16', '#10b98155', '#34d399')}
+      ${logoCell(initial, '#052e16', '#10b98155', '#34d399', logoUrl)}
       <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
       <p style="margin:0 0 18px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:2.5px;">${isSingle ? 'Confirmación de pago' : 'Resumen de pagos'}</p>
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
@@ -572,7 +580,7 @@ function buildSettledHTML(input: SendSettledInput): string {
 
 // ─── Template: Mixed payment ──────────────────────────────────────────────────
 
-function buildMixedCreditHTML(input: SendMixedCreditInput): string {
+function buildMixedCreditHTML(input: SendMixedCreditInput, logoUrl?: string | null): string {
     const initial = input.businessName.charAt(0).toUpperCase()
     const dateStr = new Date(input.date).toLocaleDateString('es-CR', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -599,7 +607,7 @@ function buildMixedCreditHTML(input: SendMixedCreditInput): string {
   <!-- Header -->
   <tr>
     <td bgcolor="#0f172a" style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
-      ${logoCell(initial, '#1c0a00', '#f9731655', '#fb923c')}
+      ${logoCell(initial, '#1c0a00', '#f9731655', '#fb923c', logoUrl)}
       <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
       <p style="margin:0 0 18px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:2.5px;">Pago mixto</p>
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
@@ -689,7 +697,7 @@ function buildMixedCreditHTML(input: SendMixedCreditInput): string {
 
 // ─── Template: Split credit ───────────────────────────────────────────────────
 
-function buildSplitCreditHTML(input: SendSplitCreditInput): string {
+function buildSplitCreditHTML(input: SendSplitCreditInput, logoUrl?: string | null): string {
     const initial = input.businessName.charAt(0).toUpperCase()
     const dateStr = new Date(input.date).toLocaleDateString('es-CR', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -713,7 +721,7 @@ function buildSplitCreditHTML(input: SendSplitCreditInput): string {
   <!-- Header -->
   <tr>
     <td bgcolor="#0f172a" style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
-      ${logoCell(initial, '#1c0a00', '#f9731655', '#fb923c')}
+      ${logoCell(initial, '#1c0a00', '#f9731655', '#fb923c', logoUrl)}
       <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
       <p style="margin:0 0 18px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:2.5px;">Crédito dividido</p>
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
@@ -803,7 +811,7 @@ function buildSplitCreditHTML(input: SendSplitCreditInput): string {
 
 export async function sendReceiptEmail(input: SendReceiptInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
     try {
-        const html = buildHTML(input)
+        const html = buildHTML(input, input.logoUrl)
         if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
         const result = await window.electronAPI.sendEmail({
             from: `${input.businessName} <noreply@jafetduarte.dev>`,
@@ -824,7 +832,7 @@ export async function sendReceiptEmail(input: SendReceiptInput): Promise<{ succe
 
 export async function sendSettledEmail(input: SendSettledInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
     try {
-        const html = buildSettledHTML(input)
+        const html = buildSettledHTML(input, input.logoUrl)
         if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
         const isSingle = input.sales.length === 1
         const grandTotal = input.sales.reduce((s, sale) => s + sale.total, 0)
@@ -850,7 +858,7 @@ export async function sendSettledEmail(input: SendSettledInput): Promise<{ succe
 
 export async function sendMixedCreditEmail(input: SendMixedCreditInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
     try {
-        const html = buildMixedCreditHTML(input)
+        const html = buildMixedCreditHTML(input, input.logoUrl)
         if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
         const result = await window.electronAPI.sendEmail({
             from: `${input.businessName.trim() || 'Recibos'} <noreply@jafetduarte.dev>`,
@@ -871,7 +879,7 @@ export async function sendMixedCreditEmail(input: SendMixedCreditInput): Promise
 
 export async function sendInvoiceReceiptEmail(input: SendInvoiceReceiptInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
     try {
-        const html = buildInvoiceReceiptHTML(input)
+        const html = buildInvoiceReceiptHTML(input, input.logoUrl)
         if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
         const result = await window.electronAPI.sendEmail({
             from: `${input.businessName} <noreply@jafetduarte.dev>`,
@@ -892,7 +900,7 @@ export async function sendInvoiceReceiptEmail(input: SendInvoiceReceiptInput): P
 
 export async function sendSplitCreditEmail(input: SendSplitCreditInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
     try {
-        const html = buildSplitCreditHTML(input)
+        const html = buildSplitCreditHTML(input, input.logoUrl)
         if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
         const result = await window.electronAPI.sendEmail({
             from: `${input.businessName.trim() || 'Recibos'} <noreply@jafetduarte.dev>`,

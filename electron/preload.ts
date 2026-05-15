@@ -23,6 +23,8 @@ const electronAPI = {
     getPrinters: () => ipcRenderer.invoke('printer:get-printers'),
     printReceipt: (printerName: string, data: any) => ipcRenderer.invoke('printer:print', printerName, data),
     openDrawer: (printerName: string) => ipcRenderer.invoke('printer:open-drawer', printerName),
+    cacheTicketLogo: (url: string) => ipcRenderer.invoke('printer:cache-ticket-logo', url),
+    clearTicketLogo: () => ipcRenderer.invoke('printer:clear-ticket-logo'),
 
     // Email
     sendEmail: (payload: { from: string; to: string[]; subject: string; html: string }) =>
@@ -30,6 +32,9 @@ const electronAPI = {
     getLogoBase64: (): Promise<string | null> => ipcRenderer.invoke('assets:get-logo'),
 
     // Sync
+    // Storage
+    listBucket: (bucket: string) => ipcRenderer.invoke('storage:list-bucket', bucket),
+
     getSyncStats: () => ipcRenderer.invoke('sync:stats'),
     forcePush: () => ipcRenderer.invoke('sync:force-push'),
     getSyncErrors: () => ipcRenderer.invoke('sync:get-errors'),
@@ -91,7 +96,10 @@ export interface ElectronAPI {
     getPrinters: () => Promise<any[]>;
     printReceipt: (printerName: string, data: any) => Promise<any>;
     openDrawer: (printerName: string) => Promise<any>;
+    cacheTicketLogo: (url: string) => Promise<{ success: boolean; error?: string }>;
+    clearTicketLogo: () => Promise<void>;
     sendEmail: (payload: any) => Promise<any>;
+    listBucket: (bucket: string) => Promise<{ data: any[] | null; error: string | null }>;
     getSyncStats: () => Promise<any>;
     forcePush: () => Promise<void>;
     triggerSyncPush: () => Promise<void>;

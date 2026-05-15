@@ -6,6 +6,8 @@ export interface UpdateConfigInput {
     phone?: string | null
     ticketHeader?: string | null
     ticketFooter?: string | null
+    ticketLogoUrl?: string | null
+    emailLogoUrl?: string | null
     printerPort?: string | null
     printerModel?: string | null
     drawerEnabled?: boolean

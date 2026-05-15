@@ -62,7 +62,7 @@ export function POSPage() {
 
     // ── Cart ────────────────────────────────────────────────────────────────
     const { items, addItem, removeItem, removeItems, updateQuantity, clearCart, loadOrder, getSubtotal, getTotal, discount } = useCartStore()
-    const { orders: heldOrders, saveOrder: saveHeldOrder, updateOrder: updateHeldOrder, deleteOrder: deleteHeldOrder } = useHeldOrdersStore()
+    const { orders: heldOrders, saveOrder: saveHeldOrder, updateOrder: updateHeldOrder, renameOrder: renameHeldOrder, deleteOrder: deleteHeldOrder } = useHeldOrdersStore()
     const subtotal = getSubtotal()
     const total = getTotal()
     const itemCount = items.reduce((s, i) => s + i.quantity, 0)
@@ -370,14 +370,16 @@ export function POSPage() {
         }
     }
 
-    const handleNewCustomer = () => {
+    const handleNewCustomer = (name?: string) => {
         if (items.length > 0 && !activeOrderId) {
-            const fusionId = crypto.randomUUID()
-            const saveName = mergeSnapshot && mergeSnapshot.length > 0
-                ? mergeSnapshot.map(o => o.name).join(' + ')
-                : ''
-            saveHeldOrder(saveName, items, discount, undefined, fusionId)
-            setAutoSavedFusionId(fusionId)
+            if (mergeSnapshot) {
+                const fusionId = crypto.randomUUID()
+                const saveName = mergeSnapshot.map(o => o.name).join(' + ')
+                saveHeldOrder(saveName, items, discount, undefined, fusionId)
+                setAutoSavedFusionId(fusionId)
+            } else {
+                saveHeldOrder(name || '', items, discount)
+            }
         }
         setActiveOrderId(null)
         setActiveOrderName(null)
@@ -516,6 +518,7 @@ export function POSPage() {
                     to: client.email,
                     clientName: client.name,
                     businessName: config?.name ?? '',
+                    logoUrl: config?.emailLogoUrl,
                     saleNumber: (sales?.baseSaleNumber ?? 0) + idx,
                     date: now,
                     products: assignment.products.map(p => {
@@ -608,6 +611,7 @@ export function POSPage() {
                         to: settledClient.email,
                         clientName: settledClient.name,
                         businessName: config?.name ?? '',
+                        logoUrl: config?.emailLogoUrl,
                         sales: capturedDebt.sales.map((s: any) => ({
                             saleNumber: s.saleNumber,
                             date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
@@ -724,6 +728,7 @@ export function POSPage() {
                         to: creditClient.email,
                         clientName: creditClient.name,
                         businessName: config?.name ?? '',
+                        logoUrl: config?.emailLogoUrl,
                         saleNumber: sale.saleNumber,
                         creditNoteNumber: sale.saleNumber + 1,
                         date: sale.date,
@@ -854,6 +859,7 @@ export function POSPage() {
                         to: client.email,
                         clientName: client.name,
                         businessName: config?.name ?? 'Mi Soda',
+                        logoUrl: config?.emailLogoUrl,
                         saleNumber: sale.saleNumber,
                         date: sale.date,
                         items: saleItems.map(i => ({
@@ -894,6 +900,7 @@ export function POSPage() {
                     })),
                     subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
                     paymentMethod: method,
+                    logoUrl: config?.emailLogoUrl,
                 }
                 if (recipientEmail) {
                     sendInvoiceReceiptEmail({ to: recipientEmail, ...invoicePayload }).then(result => {
@@ -1355,6 +1362,7 @@ export function POSPage() {
                         setMergeSnapshot(null)
                     }
                 }}
+                onRename={renameHeldOrder}
                 onMerge={handleMergeOrders}
                 hasMergeSnapshot={mergeSnapshot !== null || (autoSavedFusionId !== null && (activeOrderId === null || activeOrderId === autoSavedFusionId))}
                 mergeSnapshotNames={mergeSnapshot?.map(o => o.name) ?? []}

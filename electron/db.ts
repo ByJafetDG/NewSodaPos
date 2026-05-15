@@ -577,6 +577,14 @@ export function initDb() {
     db.exec(`ALTER TABLE Category ADD COLUMN isDeleted INTEGER DEFAULT 0`);
   } catch {}
 
+  try {
+    db.exec(`ALTER TABLE BusinessConfig ADD COLUMN emailLogoUrl TEXT`);
+  } catch {}
+
+  try {
+    db.exec(`ALTER TABLE BusinessConfig ADD COLUMN ticketLogoUrl TEXT`);
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);
