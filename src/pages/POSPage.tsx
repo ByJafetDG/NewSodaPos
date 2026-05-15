@@ -496,10 +496,12 @@ export function POSPage() {
                     total: splitTotal,
                     paymentMethod: 'CREDITO DIVIDIDO',
                     footer: config?.ticketFooter || '¡Gracias por su compra!',
+                    ticketLogoUrl: config?.ticketLogoUrl || null,
                     showCashier: tOpts.showCashier ?? true,
                     showChange: false,
                     showHeader: tOpts.showHeader ?? true,
                     showUnitPrice: tOpts.showUnitPrice ?? false,
+                    showDecimals: tOpts.showDecimals ?? true,
                     currencySymbol: tOpts.currencySymbol ?? '₡',
                     splitClients: data.clientAssignments.map(a => ({
                         name: a.clientName,
@@ -671,6 +673,7 @@ export function POSPage() {
                         amountReceived: method === 'EFECTIVO' ? saleReceived : null,
                         change: changeGiven,
                         footer: config?.ticketFooter || '¡Gracias por su compra!',
+                        ticketLogoUrl: config?.ticketLogoUrl || null,
                         showCashier: tOpts2.showCashier ?? true,
                         showChange: tOpts2.showChange ?? true,
                         showHeader: tOpts2.showHeader ?? true,
@@ -848,6 +851,7 @@ export function POSPage() {
                     showHeader: tOpts.showHeader ?? true,
                     showUnitPrice: tOpts.showUnitPrice ?? false,
                     showDecimals: tOpts.showDecimals ?? true,
+                    ticketLogoUrl: config?.ticketLogoUrl || null,
                     currencySymbol: tOpts.currencySymbol ?? '₡',
                 }).catch(err => console.error('[POS] Auto-print error:', err))
             }
