@@ -23,6 +23,10 @@ export interface ElectronAPI {
     getPrinters: () => Promise<any[]>
     printReceipt: (printerName: string, data: any) => Promise<{ success: boolean, error?: string }>
     openDrawer: (printerName: string) => Promise<{ success: boolean, error?: string }>
+    cacheTicketLogo: (url: string) => Promise<{ success: boolean; error?: string }>
+    clearTicketLogo: () => Promise<void>
+    // Storage
+    listBucket: (bucket: string) => Promise<{ data: any[] | null; error: string | null }>
     // Email
     sendEmail: (payload: { from: string; to: string[]; subject: string; html: string }) =>
         Promise<{ success: boolean, error?: any }>
