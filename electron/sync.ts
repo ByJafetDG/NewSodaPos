@@ -221,20 +221,22 @@ async function pullSync() {
             transaction(() => {
                 for (const client of clients) {
                     execute(`
-            INSERT INTO Client (id, name, phone, email, type, company, notes, code, isActive, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+            INSERT INTO Client (id, name, phone, email, type, company, cedula, code, companyId, notes, isActive, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
-              name =    CASE WHEN Client.syncStatus = 'PENDING' THEN Client.name    ELSE excluded.name    END,
-              phone =   CASE WHEN Client.syncStatus = 'PENDING' THEN Client.phone   ELSE excluded.phone   END,
-              email =   CASE WHEN Client.syncStatus = 'PENDING' THEN Client.email   ELSE excluded.email   END,
-              type =    CASE WHEN Client.syncStatus = 'PENDING' THEN Client.type    ELSE excluded.type    END,
-              company = CASE WHEN Client.syncStatus = 'PENDING' THEN Client.company ELSE excluded.company END,
-              notes =   CASE WHEN Client.syncStatus = 'PENDING' THEN Client.notes   ELSE excluded.notes   END,
-              code =    CASE WHEN Client.syncStatus = 'PENDING' THEN Client.code    ELSE excluded.code    END,
-              isActive= CASE WHEN Client.syncStatus = 'PENDING' THEN Client.isActive ELSE excluded.isActive END,
+              name =      CASE WHEN Client.syncStatus = 'PENDING' THEN Client.name      ELSE excluded.name      END,
+              phone =     CASE WHEN Client.syncStatus = 'PENDING' THEN Client.phone     ELSE excluded.phone     END,
+              email =     CASE WHEN Client.syncStatus = 'PENDING' THEN Client.email     ELSE excluded.email     END,
+              type =      CASE WHEN Client.syncStatus = 'PENDING' THEN Client.type      ELSE excluded.type      END,
+              company =   CASE WHEN Client.syncStatus = 'PENDING' THEN Client.company   ELSE excluded.company   END,
+              cedula =    CASE WHEN Client.syncStatus = 'PENDING' THEN Client.cedula    ELSE excluded.cedula    END,
+              code =      CASE WHEN Client.syncStatus = 'PENDING' THEN Client.code      ELSE excluded.code      END,
+              companyId = CASE WHEN Client.syncStatus = 'PENDING' THEN Client.companyId ELSE excluded.companyId END,
+              notes =     CASE WHEN Client.syncStatus = 'PENDING' THEN Client.notes     ELSE excluded.notes     END,
+              isActive =  CASE WHEN Client.syncStatus = 'PENDING' THEN Client.isActive  ELSE excluded.isActive  END,
               syncStatus = CASE WHEN Client.syncStatus = 'PENDING' THEN 'PENDING' ELSE 'SYNCED' END,
               updatedAt =  CASE WHEN Client.syncStatus = 'PENDING' THEN Client.updatedAt ELSE excluded.updatedAt END
-          `, [client.id, client.name, client.phone, client.email, client.type, client.company, client.notes, client.code ?? null, client.isActive ? 1 : 0, client.updatedAt]);
+          `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, client.updatedAt]);
                 }
             });
         }
@@ -595,6 +597,9 @@ export async function pushSync(): Promise<string[]> {
                 email: client.email,
                 type: client.type,
                 company: client.company,
+                cedula: client.cedula,
+                code: client.code,
+                companyId: client.companyId,
                 notes: client.notes,
                 isActive: !!client.isActive,
                 syncStatus: 'SYNCED',
@@ -937,19 +942,22 @@ function setupRealtimeSubscriptions() {
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
                 execute(`
-          INSERT INTO Client (id, name, phone, email, type, company, notes, isActive, syncStatus, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+          INSERT INTO Client (id, name, phone, email, type, company, cedula, code, companyId, notes, isActive, syncStatus, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             phone = excluded.phone,
             email = excluded.email,
             type = excluded.type,
             company = excluded.company,
+            cedula = excluded.cedula,
+            code = excluded.code,
+            companyId = excluded.companyId,
             notes = excluded.notes,
             isActive = excluded.isActive,
             syncStatus = 'SYNCED',
             updatedAt = excluded.updatedAt
-        `, [client.id, client.name, client.phone, client.email, client.type, client.company, client.notes, client.isActive ? 1 : 0, client.updatedAt]);
+        `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, client.updatedAt]);
                 notifyUI('Client');
             }
         })
