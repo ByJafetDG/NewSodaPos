@@ -1,5 +1,6 @@
-import { useState, Fragment } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { Search, Plus, Settings2, Edit3, Trash2, Package, Infinity, Eye } from 'lucide-react'
+import { useUIStore } from '@/store/uiStore'
 import { Badge } from '@/components/atoms/Badge'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
@@ -52,11 +53,16 @@ export function ProductsTable({
     onManageCategories,
     onSearchEnter,
 }: ProductsTableProps) {
-    const [search, setSearch] = useState('')
+    const { inventorySearch, setInventorySearch } = useUIStore()
+    const [search, setSearch] = useState(inventorySearch)
     const [selectedCat, setSelectedCat] = useState<string | null>(null)
     const [selectedSub, setSelectedSub] = useState<string | null>(null)
     const [previewOpen, setPreviewOpen] = useState(false)
     const searchKb = useKeyboardInput(search, setSearch, { mode: 'alpha' })
+
+    useEffect(() => {
+        if (inventorySearch) setInventorySearch('')
+    }, [])
 
     const catSubcategories = selectedCat
         ? subcategories.filter(s => s.categoryId === selectedCat && s.isActive)

@@ -595,8 +595,83 @@ ipcMain.handle('printer:open-drawer', async (_, portOrName: string) => {
     }
 })
 
+// Groq AI chat
+ipcMain.handle('ai:groq-chat', async (_, payload: {
+    messages: any[]
+    tools: any[]
+    apiKey: string
+}) => {
+    async function callGroq(): Promise<{ success: boolean; data?: any; error?: string }> {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${payload.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                messages: payload.messages,
+                tools: payload.tools,
+                tool_choice: 'auto',
+                max_tokens: 1500,
+                temperature: 0.2,
+            }),
+        })
+        if (!res.ok) {
+            const errText = await res.text()
+            try {
+                const errJson = JSON.parse(errText)
+                // Recover from malformed tool call syntax
+                if (errJson.error?.code === 'tool_use_failed' && errJson.error?.failed_generation) {
+                    const fg: string = errJson.error.failed_generation
+                    const match = fg.match(/<function=(\w+)(\{[\s\S]*?\})<\/function>/)
+                    if (match) {
+                        return {
+                            success: true, data: {
+                                choices: [{
+                                    message: {
+                                        role: 'assistant', content: null,
+                                        tool_calls: [{
+                                            id: `call_recovered_${Date.now()}`,
+                                            type: 'function',
+                                            function: { name: match[1], arguments: match[2] },
+                                        }],
+                                    },
+                                    finish_reason: 'tool_calls',
+                                }],
+                            }
+                        }
+                    }
+                }
+                // Return rate limit info for retry logic
+                if (errJson.error?.code === 'rate_limit_exceeded') {
+                    return { success: false, error: errText, data: { isRateLimit: true, raw: errJson } }
+                }
+            } catch {}
+            return { success: false, error: errText }
+        }
+        const data = await res.json()
+        return { success: true, data }
+    }
+
+    try {
+        const first = await callGroq()
+        if (!first.success && first.data?.isRateLimit) {
+            // Parse wait time from Groq error and retry once
+            const msg: string = first.data.raw?.error?.message ?? ''
+            const waitMatch = msg.match(/try again in (\d+\.?\d*)s/)
+            const waitMs = waitMatch ? Math.ceil(parseFloat(waitMatch[1]) + 1.5) * 1000 : 22000
+            await new Promise(r => setTimeout(r, Math.min(waitMs, 35000)))
+            return await callGroq()
+        }
+        return first
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+
 // Email (Resend) with Queuing
-ipcMain.handle('email:send', async (_, payload: { from: string; to: string[]; subject: string; html: string }) => {
+ipcMain.handle('email:send', async (_, payload: { from: string; to: string[]; subject: string; html: string; attachments?: { filename: string; content: string }[] }) => {
     const apiKey = process.env.RESEND_API_KEY
     console.log('[Email] Sending email to:', payload.to, 'Key present:', !!apiKey)
 

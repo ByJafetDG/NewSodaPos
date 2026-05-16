@@ -7,6 +7,7 @@ export type AppPage =
     | 'sorteos'
     | 'returns'
     | 'settings'
+    | 'ai-assistant'
 
 export interface SyncInfo {
     isOnline: boolean
@@ -36,15 +37,21 @@ export interface Product {
     isDeleted?: boolean; imageUrl: string | null; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
 }
 
+export interface Company {
+    id: string; name: string; billingEmail: string | null; phone: string | null
+    notes: string | null; isActive: boolean; syncStatus: SyncStatus
+    createdAt: Date; updatedAt: Date
+}
+
 export type ClientType = 'TRABAJADOR' | 'ASOCIACION' | 'GENERAL'
 export interface Client {
     id: string; name: string; phone: string | null; email: string | null
-    type: ClientType; company: string | null; notes: string | null; code: string | null
-    cedula: string | null
+    type: ClientType; company: string | null; companyId: string | null
+    notes: string | null; code: string | null; cedula: string | null
     isActive: boolean; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
 }
 
-export type PaymentMethod = 'EFECTIVO' | 'TARJETA' | 'SINPE' | 'TRANSFERENCIA' | 'CREDITO'
+export type PaymentMethod = 'EFECTIVO' | 'TARJETA' | 'SINPE' | 'TRANSFERENCIA' | 'CREDITO' | 'DEPOSITO'
 export type SaleStatus = 'COMPLETADA' | 'ANULADA'
 export interface SaleItem {
     id: string; saleId: string; productId: string; product?: Product

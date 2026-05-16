@@ -1,8 +1,84 @@
 import { supabase } from '@/lib/supabase'
 import { updateProductStock } from './products'
-import type { Client } from '@/types'
+import type { Client, Company } from '@/types'
 
 type ClientInput = Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>
+type CompanyInput = Omit<Company, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>
+
+// ─── Company CRUD ─────────────────────────────────────────────────────────────
+
+export async function getCompanies(): Promise<Company[]> {
+    if (window.electronAPI) {
+        const data = await window.electronAPI.dbQuery('SELECT * FROM Company ORDER BY name ASC')
+        return data.map((c: any) => ({ ...c, isActive: !!c.isActive })) as unknown as Company[]
+    }
+    const { data, error } = await supabase.from('Company').select('*').order('name')
+    if (error) throw error
+    return (data ?? []) as unknown as Company[]
+}
+
+export async function createCompany(input: CompanyInput): Promise<Company> {
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const newCompany: Company = { ...input, id, createdAt: new Date(now), updatedAt: new Date(now), syncStatus: 'PENDING' }
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            `INSERT INTO Company (id, name, billingEmail, phone, notes, isActive, syncStatus, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, 1, 'PENDING', ?, ?)`,
+            [id, input.name, input.billingEmail ?? null, input.phone ?? null, input.notes ?? null, now, now]
+        )
+        return newCompany
+    }
+    const { error } = await supabase.from('Company').insert({ id, ...input, isActive: true, syncStatus: 'SYNCED', createdAt: now, updatedAt: now })
+    if (error) throw error
+    return { ...newCompany, syncStatus: 'SYNCED' }
+}
+
+export async function updateCompany(id: string, input: Partial<CompanyInput>): Promise<Company> {
+    const now = new Date().toISOString()
+    if (window.electronAPI) {
+        const fields = Object.entries(input).map(([k]) => `${k} = ?`).join(', ')
+        const values = Object.values(input).map(v => typeof v === 'boolean' ? (v ? 1 : 0) : v)
+        await window.electronAPI.dbExecute(
+            `UPDATE Company SET ${fields}, updatedAt = ?, syncStatus = 'PENDING' WHERE id = ?`,
+            [...values, now, id]
+        )
+        const updated = await window.electronAPI.dbGet('SELECT * FROM Company WHERE id = ?', [id])
+        return updated as Company
+    }
+    const { data, error } = await supabase.from('Company').update({ ...input, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id).select().single()
+    if (error) throw error
+    return data as Company
+}
+
+export async function deleteCompany(id: string): Promise<void> {
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute("UPDATE Client SET companyId = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE companyId = ?", [new Date().toISOString(), id])
+        await window.electronAPI.dbExecute("DELETE FROM Company WHERE id = ?", [id])
+        return
+    }
+    await supabase.from('Client').update({ companyId: null }).eq('companyId', id)
+    const { error } = await supabase.from('Company').delete().eq('id', id)
+    if (error) throw error
+}
+
+export async function settleClientSalesWithMethod(clientId: string, method: string): Promise<void> {
+    const now = new Date().toISOString()
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            `UPDATE Sale SET isCredit = 0, paidAt = ?, paymentMethod = ?, syncStatus = 'PENDING', updatedAt = ?
+             WHERE clientId = ? AND isCredit = 1 AND status = 'COMPLETADA'`,
+            [now, method, now, clientId]
+        )
+        return
+    }
+    const { error } = await supabase.from('Sale')
+        .update({ isCredit: false, paidAt: now, paymentMethod: method, updatedAt: now, syncStatus: 'SYNCED' })
+        .eq('clientId', clientId).eq('isCredit', true).eq('status', 'COMPLETADA')
+    if (error) throw error
+}
+
+// ─── Clients ──────────────────────────────────────────────────────────────────
 
 export async function getClients(): Promise<Client[]> {
     if (window.electronAPI) {
@@ -27,9 +103,9 @@ export async function createClient(input: ClientInput): Promise<Client> {
 
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
-            `INSERT INTO Client (id, name, type, phone, email, notes, code, cedula, isActive, syncStatus, createdAt, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'PENDING', ?, ?)`,
-            [id, input.name, input.type, input.phone ?? null, input.email ?? null, input.notes ?? null, input.code ?? null, input.cedula ?? null, now, now]
+            `INSERT INTO Client (id, name, type, phone, email, notes, code, cedula, companyId, isActive, syncStatus, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'PENDING', ?, ?)`,
+            [id, input.name, input.type, input.phone ?? null, input.email ?? null, input.notes ?? null, input.code ?? null, input.cedula ?? null, input.companyId ?? null, now, now]
         )
         return newClient
     }
@@ -37,8 +113,8 @@ export async function createClient(input: ClientInput): Promise<Client> {
         id, name: input.name, type: input.type,
         phone: input.phone ?? null, email: input.email ?? null,
         notes: input.notes ?? null, code: input.code ?? null,
-        cedula: input.cedula ?? null, isActive: true,
-        syncStatus: 'SYNCED', createdAt: now, updatedAt: now,
+        cedula: input.cedula ?? null, companyId: input.companyId ?? null,
+        isActive: true, syncStatus: 'SYNCED', createdAt: now, updatedAt: now,
     })
     if (error) throw error
     return { ...newClient, syncStatus: 'SYNCED' }

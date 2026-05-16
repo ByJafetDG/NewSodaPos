@@ -26,8 +26,12 @@ const electronAPI = {
     cacheTicketLogo: (url: string) => ipcRenderer.invoke('printer:cache-ticket-logo', url),
     clearTicketLogo: () => ipcRenderer.invoke('printer:clear-ticket-logo'),
 
+    // AI
+    groqChat: (payload: { messages: any[]; tools: any[]; apiKey: string }) =>
+        ipcRenderer.invoke('ai:groq-chat', payload),
+
     // Email
-    sendEmail: (payload: { from: string; to: string[]; subject: string; html: string }) =>
+    sendEmail: (payload: { from: string; to: string[]; subject: string; html: string; attachments?: { filename: string; content: string }[] }) =>
         ipcRenderer.invoke('email:send', payload),
     getLogoBase64: (): Promise<string | null> => ipcRenderer.invoke('assets:get-logo'),
 
@@ -98,6 +102,7 @@ export interface ElectronAPI {
     openDrawer: (printerName: string) => Promise<any>;
     cacheTicketLogo: (url: string) => Promise<{ success: boolean; error?: string }>;
     clearTicketLogo: () => Promise<void>;
+    groqChat: (payload: { messages: any[]; tools: any[]; apiKey: string }) => Promise<{ success: boolean; data?: any; error?: string }>;
     sendEmail: (payload: any) => Promise<any>;
     listBucket: (bucket: string) => Promise<{ data: any[] | null; error: string | null }>;
     getSyncStats: () => Promise<any>;

@@ -9,6 +9,7 @@ import { CashRegisterPage } from '@/pages/CashRegisterPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { SorteosPage } from '@/pages/SorteosPage'
 import { ReturnsPage } from '@/pages/ReturnsPage'
+import { AIAssistantPage } from '@/pages/AIAssistantPage'
 import { StartupCajaModal } from '@/components/modals/StartupCajaModal'
 import { SplashScreen } from '@/components/layout/SplashScreen'
 import { UpdateModal } from '@/components/modals/UpdateModal'
@@ -24,6 +25,7 @@ function PageRenderer() {
         case 'sorteos':       return <SorteosPage />
         case 'returns':       return <ReturnsPage />
         case 'settings':      return <SettingsPage />
+        case 'ai-assistant':  return <AIAssistantPage />
         default:              return <POSPage />
     }
 }

@@ -11,7 +11,7 @@ import type { SplitCreditData } from '@/components/modals/CreditModal'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
-import { useClients, useCreateClient, useUpdateClient } from '@/hooks/useClients'
+import { useClients, useCreateClient, useUpdateClient, useCompanies } from '@/hooks/useClients'
 import { useEmployees } from '@/hooks/useEmployees'
 import { useCreateSale } from '@/hooks/useSales'
 import { useActiveRegister } from '@/hooks/useCashRegister'
@@ -51,6 +51,7 @@ export function POSPage() {
     const { data: categories = [] } = useCategories()
     const { data: subcategories = [] } = useSubcategories()
     const { data: clients = [] } = useClients()
+    const { data: companies = [] } = useCompanies()
     const { data: employees = [] } = useEmployees()
     const createSale = useCreateSale()
     const createProduct = useCreateProduct()
@@ -151,7 +152,7 @@ export function POSPage() {
     const [showCreateProduct, setShowCreateProduct] = useState(false)
     const [createProductBarcode, setCreateProductBarcode] = useState('')
     const [showInvoiceModal, setShowInvoiceModal] = useState(false)
-    const [invoiceClient, setInvoiceClient] = useState<{ name: string; cedula: string; email: string; extraEmail?: string; existingId?: string } | null>(null)
+    const [invoiceClient, setInvoiceClient] = useState<{ name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string } | null>(null)
 
     // ── Pending sale load (from Reports page modify flow) ────────────────────
     const pendingSaleLoad = usePendingSaleLoadStore()
@@ -324,7 +325,7 @@ export function POSPage() {
         setHeldOrdersView(null)
     }
 
-    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; extraEmail?: string; existingId?: string }) => {
+    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string }) => {
         let finalId = data.existingId
         try {
             if (data.existingId) {
@@ -357,12 +358,13 @@ export function POSPage() {
                         isActive: true,
                         phone: null,
                         company: null,
+                        companyId: null,
                         notes: null
                     })
                     finalId = newClient.id
                 }
             }
-            setInvoiceClient({ ...data, existingId: finalId, extraEmail: data.extraEmail })
+            setInvoiceClient({ ...data, existingId: finalId, ccEmails: data.ccEmails })
         } catch (err) {
             console.error('Error handling invoice client:', err)
             toast.error('Error al vincular cliente')
@@ -917,9 +919,9 @@ export function POSPage() {
                         }
                     }).catch(() => {})
                 }
-                const ccEmail = capturedInvoiceClient.extraEmail?.trim()
-                if (ccEmail) {
-                    sendInvoiceReceiptEmail({ to: ccEmail, ...invoicePayload }).catch(() => {})
+                for (const ccAddr of capturedInvoiceClient.ccEmails ?? []) {
+                    const trimmed = ccAddr.trim()
+                    if (trimmed) sendInvoiceReceiptEmail({ to: trimmed, ...invoicePayload }).catch(() => {})
                 }
             }
         } catch (err) { console.error(err) }
@@ -1298,6 +1300,7 @@ export function POSPage() {
                 discount={discount}
                 itemCount={itemCount}
                 clients={clients}
+                companies={companies}
                 cartItems={items}
                 selectedClientId={selectedClientId}
                 onSelectClient={setSelectedClientId}
@@ -1417,6 +1420,7 @@ export function POSPage() {
                 onClose={() => setShowInvoiceModal(false)}
                 onAccept={handleInvoiceClient}
                 clients={clients.filter(c => c.isActive)}
+                companies={companies}
                 initialData={invoiceClient}
             />
         </div>

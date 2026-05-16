@@ -898,6 +898,244 @@ export async function sendInvoiceReceiptEmail(input: SendInvoiceReceiptInput): P
     }
 }
 
+// ─── Template: Company billing ────────────────────────────────────────────────
+
+interface CompanyEmployeeDebt {
+    employeeName: string
+    pendingTotal: number
+}
+
+interface SendCompanyBillingInput {
+    to: string
+    companyName: string
+    businessName: string
+    employees: CompanyEmployeeDebt[]
+    logoUrl?: string | null
+}
+
+function buildCompanyBillingHTML(input: SendCompanyBillingInput): string {
+    const grandTotal = input.employees.reduce((s, e) => s + e.pendingTotal, 0)
+    const initial = input.businessName.charAt(0).toUpperCase()
+    const dateStr = new Date().toLocaleDateString('es-CR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+
+    const employeeRows = input.employees.map(e => `
+    <tr>
+      <td bgcolor="#0f172a" style="padding:14px 0;border-bottom:1px solid #1e293b;background:#0f172a;">
+        <span style="font-size:14px;color:#e2e8f0;font-weight:600;">${e.employeeName}</span>
+      </td>
+      <td bgcolor="#0f172a" style="padding:14px 0;border-bottom:1px solid #1e293b;text-align:right;background:#0f172a;white-space:nowrap;">
+        <span style="font-size:14px;color:#fb923c;font-weight:700;font-family:'Courier New',Courier,monospace;">${fmt(e.pendingTotal)}</span>
+      </td>
+    </tr>`).join('')
+
+    const inner = `
+  ${accentTop('#ea580c', '#f97316')}
+  <tr>
+    <td bgcolor="#0f172a" style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
+      ${logoCell(initial, '#1c0a00', '#f9731655', '#fb923c', input.logoUrl)}
+      <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
+      <p style="margin:0 0 18px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:2.5px;">Estado de cuenta empresarial</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+        <tr>
+          <td bgcolor="#1c0a00" style="padding:5px 18px;background:#1c0a00;border:1px solid #f9731644;border-radius:99px;">
+            <span style="font-size:10px;font-weight:700;color:#fb923c;text-transform:uppercase;letter-spacing:2px;">${dateStr}</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td bgcolor="#0f172a" style="background:#0f172a;padding:0 36px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td bgcolor="#0f172a" style="padding:22px 0 18px;border-bottom:1px dashed #1e293b;background:#0f172a;">
+            <p style="margin:0 0 3px;font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;">Empresa</p>
+            <p style="margin:0;font-size:22px;font-weight:800;color:#f1f5f9;">${input.companyName}</p>
+            <p style="margin:4px 0 0;font-size:12px;color:#475569;">${input.employees.length} colaborador${input.employees.length !== 1 ? 'es' : ''} con saldo pendiente</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td bgcolor="#0f172a" style="background:#0f172a;padding:0 36px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td bgcolor="#0f172a" style="padding:16px 0 8px;background:#0f172a;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;">Colaborador</td>
+                <td style="font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;text-align:right;">Saldo pendiente</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${employeeRows}</table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#0f172a" height="20" style="height:20px;background:#0f172a;">&nbsp;</td></tr></table>
+    </td>
+  </tr>
+  <tr>
+    <td bgcolor="#1c0e00" style="background:#1c0e00;padding:28px 36px;text-align:center;border-left:1px solid #f9731644;border-right:1px solid #f9731644;border-top:1px solid #f9731633;" class="email-pad">
+      <p style="margin:0 0 6px;font-size:10px;color:#78350f;text-transform:uppercase;letter-spacing:2.5px;">Total adeudado</p>
+      <p style="margin:0 0 12px;font-size:48px;font-weight:800;color:#fb923c;font-family:'Courier New',Courier,monospace;letter-spacing:-2px;line-height:1;">${fmt(grandTotal)}</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+        <tr>
+          <td bgcolor="#1c0a00" style="padding:5px 16px;background:#1c0a00;border:1px solid #f9731640;border-radius:99px;">
+            <span style="font-size:11px;color:#fb923c;font-weight:600;">Pendiente de pago</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  ${footerRow(input.businessName)}
+  ${accentBottom('#f97316')}`
+
+    return emailWrapper(inner, `Cobro empresarial — ${input.companyName}`)
+}
+
+export async function sendCompanyBillingEmail(input: SendCompanyBillingInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
+    try {
+        const html = buildCompanyBillingHTML(input)
+        if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
+        const grandTotal = input.employees.reduce((s, e) => s + e.pendingTotal, 0)
+        const result = await window.electronAPI.sendEmail({
+            from: `${input.businessName.trim() || 'Recibos'} <noreply@jafetduarte.dev>`,
+            to: [input.to],
+            subject: `Estado de cuenta — ${input.companyName} — ${fmt(grandTotal)} pendiente | ${input.businessName}`,
+            html,
+        })
+        if (!result.success) {
+            const isVerificationError = result.error?.statusCode === 403 ||
+                String(result.error?.message ?? '').includes('verify a domain')
+            return { success: false, error: result.error?.message ?? 'Error desconocido', isVerificationError }
+        }
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+}
+
+function buildCompanyStatementPDFEmailHTML(input: {
+    companyName: string
+    businessName: string
+    totalDebt: number
+    employeeCount: number
+    logoUrl?: string | null
+}): string {
+    const initial = input.businessName.charAt(0).toUpperCase()
+    const dateStr = new Date().toLocaleDateString('es-CR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+
+    const inner = `
+  ${accentTop('#7c3aed', '#8b5cf6')}
+
+  <!-- Header -->
+  <tr>
+    <td bgcolor="#0f172a" style="background:#0f172a;padding:36px 36px 28px;text-align:center;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
+      ${logoCell(initial, '#1e1b4b', '#7c3aed55', '#a78bfa', input.logoUrl)}
+      <h1 style="margin:0 0 4px;font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.4px;">${input.businessName}</h1>
+      <p style="margin:0 0 18px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:2.5px;">Estado de cuenta · PDF adjunto</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+        <tr>
+          <td bgcolor="#1e1b4b" style="padding:5px 18px;background:#1e1b4b;border:1px solid #7c3aed44;border-radius:99px;">
+            <span style="font-size:10px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:2px;">${dateStr}</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Company info -->
+  <tr>
+    <td bgcolor="#0f172a" style="background:#0f172a;padding:0 36px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td bgcolor="#0f172a" style="padding:24px 0 20px;border-bottom:1px dashed #1e293b;background:#0f172a;">
+            <p style="margin:0 0 4px;font-size:10px;color:#334155;text-transform:uppercase;letter-spacing:1.5px;">Empresa</p>
+            <p style="margin:0 0 6px;font-size:24px;font-weight:800;color:#f1f5f9;letter-spacing:-0.5px;">${input.companyName}</p>
+            <p style="margin:0;font-size:12px;color:#475569;">${input.employeeCount} colaborador${input.employeeCount !== 1 ? 'es' : ''} con saldo pendiente</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Stats -->
+  <tr>
+    <td bgcolor="#0f172a" style="background:#0f172a;padding:0 36px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;" class="email-pad">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
+        <tr>
+          <td bgcolor="#13102b" style="background:#13102b;padding:16px 20px;border:1px solid #7c3aed33;border-radius:12px;text-align:center;vertical-align:middle;">
+            <p style="margin:0 0 4px;font-size:10px;color:#6d28d9;text-transform:uppercase;letter-spacing:2px;font-weight:700;">Total adeudado</p>
+            <p style="margin:0;font-size:38px;font-weight:800;color:#c4b5fd;font-family:'Courier New',Courier,monospace;letter-spacing:-1.5px;line-height:1.1;">${fmt(input.totalDebt)}</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- PDF notice -->
+  <tr>
+    <td bgcolor="#0d0b1f" style="background:#0d0b1f;padding:20px 36px;border-left:1px solid #7c3aed33;border-right:1px solid #7c3aed33;border-top:1px solid #7c3aed22;" class="email-pad">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="36" style="vertical-align:top;padding-right:12px;">
+            <div style="width:36px;height:36px;background:#1e1b4b;border:1px solid #7c3aed44;border-radius:10px;text-align:center;line-height:36px;font-size:18px;">📄</div>
+          </td>
+          <td style="vertical-align:middle;">
+            <p style="margin:0 0 3px;font-size:13px;font-weight:700;color:#e2e8f0;">Estado de cuenta adjunto</p>
+            <p style="margin:0;font-size:12px;color:#475569;line-height:1.5;">Encontrará el detalle completo en el archivo PDF adjunto a este correo. Incluye el desglose de cuentas por colaborador.</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  ${footerRow(input.businessName)}
+  ${accentBottom('#7c3aed')}`
+
+    return emailWrapper(inner, `Estado de cuenta — ${input.companyName}`)
+}
+
+export async function sendCompanyStatementPDFEmail(input: {
+    to: string
+    companyName: string
+    businessName: string
+    pdfBase64: string
+    logoUrl?: string | null
+    employeeCount?: number
+    totalDebt?: number
+}): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
+    try {
+        if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
+        const html = buildCompanyStatementPDFEmailHTML({
+            companyName: input.companyName,
+            businessName: input.businessName,
+            totalDebt: input.totalDebt ?? 0,
+            employeeCount: input.employeeCount ?? 0,
+            logoUrl: input.logoUrl,
+        })
+        const result = await window.electronAPI.sendEmail({
+            from: `${input.businessName.trim() || 'Recibos'} <noreply@jafetduarte.dev>`,
+            to: [input.to],
+            subject: `Estado de cuenta — ${input.companyName} | ${input.businessName}`,
+            html,
+            attachments: [{
+                filename: `estado-cuenta-${input.companyName.toLowerCase().replace(/\s+/g, '-')}.pdf`,
+                content: input.pdfBase64,
+            }],
+        })
+        if (!result.success) {
+            const isVerificationError = result.error?.statusCode === 403 ||
+                String(result.error?.message ?? '').includes('verify a domain')
+            return { success: false, error: result.error?.message ?? 'Error desconocido', isVerificationError }
+        }
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+}
+
 export async function sendSplitCreditEmail(input: SendSplitCreditInput): Promise<{ success: boolean; error?: string; isVerificationError?: boolean }> {
     try {
         const html = buildSplitCreditHTML(input, input.logoUrl)

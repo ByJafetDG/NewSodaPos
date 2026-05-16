@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-    X, ArrowLeft, Check, ChevronRight,
+    X, ArrowLeft, Check, ChevronRight, ChevronDown,
     User, Briefcase, Building2, Phone, FileText, Tag,
 } from 'lucide-react'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { cn } from '@/lib/utils'
-import type { Client, ClientType } from '@/types'
+import type { Client, ClientType, Company } from '@/types'
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
@@ -21,10 +21,11 @@ const draftKeyEdit = (id: string) => `pos_client_draft_edit_${id}`
 type WizardData = {
     name: string; type: ClientType; phone: string
     email: string; cedula: string; code: string; notes: string; isActive: boolean
+    companyId: string
 }
 const EMPTY: WizardData = {
     name: '', type: 'GENERAL', phone: '', email: '',
-    cedula: '', code: '', notes: '', isActive: true,
+    cedula: '', code: '', notes: '', isActive: true, companyId: '',
 }
 
 const CLIENT_TYPES: { value: ClientType; label: string; sub: string; icon: React.ElementType; color: string; bg: string }[] = [
@@ -46,12 +47,14 @@ interface ClientFormModalProps {
     onClose: () => void
     onConfirm: (data: Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>) => void
     client?: Client | null
+    companies?: Company[]
+    defaultCompanyId?: string
     isPending?: boolean
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending }: ClientFormModalProps) {
+export function ClientFormModal({ isOpen, onClose, onConfirm, client, companies = [], defaultCompanyId, isPending }: ClientFormModalProps) {
     const [step, setStep] = useState<WizardStep>('name')
     const [dir, setDir]   = useState(1)
     const [data, setData] = useState<WizardData>(EMPTY)
@@ -73,12 +76,14 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending 
                 phone: client.phone ?? '', email: client.email ?? '',
                 cedula: client.cedula ?? '', code: client.code ?? '',
                 notes: client.notes ?? '', isActive: client.isActive,
+                companyId: client.companyId ?? '',
             }
             if (draft?.name) { setData(draft); setStep('draft-prompt') }
             else             { setData(base);  setStep('name') }
         } else {
+            const base = defaultCompanyId ? { ...EMPTY, companyId: defaultCompanyId } : EMPTY
             if (draft?.name) { setData(draft); setStep('draft-prompt') }
-            else             { setData(EMPTY); setStep('name') }
+            else             { setData(base); setStep('name') }
         }
         setDir(1)
     }, [isOpen])
@@ -112,22 +117,23 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending 
         if (isPending) return
         localStorage.removeItem(draftKey)
         onConfirm({
-            name:    data.name.trim(),
-            type:    data.type,
-            phone:   data.phone.trim() || null,
-            email:   data.email.trim() || null,
-            cedula:  data.cedula.trim() || null,
-            code:    data.code.trim() || null,
-            company: null,
-            notes:   data.notes.trim() || null,
-            isActive: data.isActive,
+            name:      data.name.trim(),
+            type:      data.type,
+            phone:     data.phone.trim() || null,
+            email:     data.email.trim() || null,
+            cedula:    data.cedula.trim() || null,
+            code:      data.code.trim() || null,
+            company:   null,
+            companyId: data.companyId || null,
+            notes:     data.notes.trim() || null,
+            isActive:  data.isActive,
         })
     }
 
     function discardDraft() {
         localStorage.removeItem(draftKey)
         const base = client
-            ? { name: client.name, type: client.type, phone: client.phone ?? '', email: client.email ?? '', cedula: client.cedula ?? '', code: client.code ?? '', notes: client.notes ?? '', isActive: client.isActive }
+            ? { name: client.name, type: client.type, phone: client.phone ?? '', email: client.email ?? '', cedula: client.cedula ?? '', code: client.code ?? '', notes: client.notes ?? '', isActive: client.isActive, companyId: client.companyId ?? '' }
             : EMPTY
         setData(base)
         go('name', 1)
@@ -214,13 +220,13 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending 
                                             <TypeStep value={data.type} onSelect={t => { setData(d => ({ ...d, type: t })); advance('contact') }} />
                                         )}
                                         {step === 'contact' && (
-                                            <ContactStep data={data} onChange={patch => setData(d => ({ ...d, ...patch }))} onNext={() => advance('notes')} />
+                                            <ContactStep data={data} companies={companies} onChange={patch => setData(d => ({ ...d, ...patch }))} onNext={() => advance('notes')} />
                                         )}
                                         {step === 'notes' && (
                                             <NotesStep value={data.notes} onChange={v => setData(d => ({ ...d, notes: v }))} onNext={() => advance('recap')} onSkip={() => { setData(d => ({ ...d, notes: '' })); advance('recap') }} />
                                         )}
                                         {step === 'recap' && (
-                                            <RecapStep data={data} isEdit={!!client} isPending={isPending} onToggleActive={() => setData(d => ({ ...d, isActive: !d.isActive }))} onConfirm={handleConfirm} onEdit={goToStep} />
+                                            <RecapStep data={data} companies={companies} isEdit={!!client} isPending={isPending} onToggleActive={() => setData(d => ({ ...d, isActive: !d.isActive }))} onConfirm={handleConfirm} onEdit={goToStep} />
                                         )}
                                     </motion.div>
                                 </AnimatePresence>
@@ -372,13 +378,84 @@ function TypeStep({ value, onSelect }: { value: ClientType; onSelect: (t: Client
     )
 }
 
+// ── Company dropdown ──────────────────────────────────────────────────────────
+
+function CompanySelect({ value, companies, onChange }: {
+    value: string
+    companies: Company[]
+    onChange: (id: string) => void
+}) {
+    const [open, setOpen] = useState(false)
+    const selected = companies.find(c => c.id === value)
+
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                onClick={() => setOpen(o => !o)}
+                className="w-full h-10 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[13px] hover:border-[#283A56] transition-colors cursor-pointer flex items-center justify-between gap-2 focus:border-violet-500/40 outline-none"
+            >
+                <div className="flex items-center gap-2 min-w-0">
+                    {selected && <Building2 size={13} className="text-orange-400 shrink-0" />}
+                    <span className={cn('truncate', selected ? 'text-[#E4ECF7]' : 'text-[#3D506A]')}>
+                        {selected ? selected.name : 'Sin empresa'}
+                    </span>
+                </div>
+                <ChevronDown size={12} className={cn('text-[#3D506A] shrink-0 transition-transform', open ? 'rotate-180' : '')} />
+            </button>
+            {open && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+                    <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-[#0D1320] border border-[#1E2A40] rounded-xl shadow-2xl overflow-hidden">
+                        <button
+                            type="button"
+                            onClick={() => { onChange(''); setOpen(false) }}
+                            className={cn(
+                                'w-full px-3 py-2.5 text-left text-[13px] transition-colors cursor-pointer flex items-center gap-2',
+                                !value ? 'text-[#E4ECF7] bg-[#1C2438]' : 'text-[#7A8FAA] hover:bg-[#1C2438]'
+                            )}
+                        >
+                            <span className="w-5 flex items-center justify-center">
+                                {!value && <Check size={12} className="text-violet-400" />}
+                            </span>
+                            Sin empresa
+                        </button>
+                        <div className="border-t border-[#192030]" />
+                        {companies.map(c => (
+                            <button
+                                type="button"
+                                key={c.id}
+                                onClick={() => { onChange(c.id); setOpen(false) }}
+                                className={cn(
+                                    'w-full px-3 py-2.5 text-left text-[13px] transition-colors cursor-pointer flex items-center gap-2',
+                                    value === c.id ? 'text-orange-400 bg-orange-500/8' : 'text-[#7A8FAA] hover:bg-[#1C2438]'
+                                )}
+                            >
+                                <span className="w-5 flex items-center justify-center">
+                                    {value === c.id
+                                        ? <Check size={12} className="text-orange-400" />
+                                        : <Building2 size={12} className="text-[#3D506A]" />
+                                    }
+                                </span>
+                                {c.name}
+                            </button>
+                        ))}
+                    </div>
+                </>
+            )}
+        </div>
+    )
+}
+
 // ── Step: Contact ─────────────────────────────────────────────────────────────
 
-function ContactStep({ data, onChange, onNext }: {
+function ContactStep({ data, companies, onChange, onNext }: {
     data: WizardData
+    companies: Company[]
     onChange: (p: Partial<WizardData>) => void
     onNext: () => void
 }) {
+    const activeCompanies = companies.filter(c => c.isActive)
     return (
         <div className="space-y-3">
             <div className="flex items-center gap-2 mb-1">
@@ -403,6 +480,16 @@ function ContactStep({ data, onChange, onNext }: {
                 <div>
                     <FieldLabel>Código interno</FieldLabel>
                     <SmallInput value={data.code} onChange={v => onChange({ code: v })} placeholder="ASO-001" />
+                </div>
+            )}
+            {activeCompanies.length > 0 && (
+                <div>
+                    <FieldLabel>Empresa (opcional)</FieldLabel>
+                    <CompanySelect
+                        value={data.companyId}
+                        companies={activeCompanies}
+                        onChange={id => onChange({ companyId: id })}
+                    />
                 </div>
             )}
             <NextBtn onClick={onNext} label="Continuar" />
@@ -437,11 +524,12 @@ function NotesStep({ value, onChange, onNext, onSkip }: {
 
 // ── Step: Recap ───────────────────────────────────────────────────────────────
 
-function RecapStep({ data, isEdit, isPending, onToggleActive, onConfirm, onEdit }: {
-    data: WizardData; isEdit: boolean; isPending?: boolean
+function RecapStep({ data, companies, isEdit, isPending, onToggleActive, onConfirm, onEdit }: {
+    data: WizardData; companies: Company[]; isEdit: boolean; isPending?: boolean
     onToggleActive: () => void; onConfirm: () => void; onEdit: (s: WizardStep) => void
 }) {
     const typeInfo = CLIENT_TYPES.find(t => t.value === data.type)
+    const companyName = data.companyId ? (companies.find(c => c.id === data.companyId)?.name ?? '—') : null
 
     const rows: { label: string; value: string; step: WizardStep }[] = [
         { label: 'Nombre',   value: data.name || '—',               step: 'name'    },
@@ -452,6 +540,7 @@ function RecapStep({ data, isEdit, isPending, onToggleActive, onConfirm, onEdit 
         ...(data.type === 'ASOCIACION' ? [
             { label: 'Código interno', value: data.code || 'Sin código', step: 'contact' as WizardStep },
         ] : []),
+        ...(companyName ? [{ label: 'Empresa', value: companyName, step: 'contact' as WizardStep }] : []),
         { label: 'Notas',    value: data.notes || 'Sin notas',      step: 'notes'   },
     ]
 

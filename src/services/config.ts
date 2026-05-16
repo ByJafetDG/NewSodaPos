@@ -11,6 +11,7 @@ export interface UpdateConfigInput {
     printerPort?: string | null
     printerModel?: string | null
     drawerEnabled?: boolean
+    groqApiKey?: string | null
 }
 
 export async function getBusinessConfig() {

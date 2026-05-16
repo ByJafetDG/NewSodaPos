@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
-import { Search, UserCircle2, Check, X } from 'lucide-react'
+import { Search, UserCircle2, Check, X, Building2, ChevronLeft } from 'lucide-react'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { BaseModal } from './BaseModal'
 import { Button } from '@/components/atoms/Button'
 import { TotalsPanel } from '@/components/molecules/TotalsPanel'
 import { cn, formatCurrency, normalizeStr, fuzzyMatch } from '@/lib/utils'
-import type { Client, CartItem } from '@/types'
+import type { Client, CartItem, Company } from '@/types'
 
-type CreditMode = 'single' | 'split'
+type CreditMode = 'single' | 'company' | 'split'
 type SplitType = 'total' | 'per-product'
 
 export interface SplitCreditData {
@@ -32,6 +32,7 @@ interface CreditModalProps {
     discount: number
     itemCount: number
     clients: Client[]
+    companies?: Company[]
     cartItems: CartItem[]
     selectedClientId: string | null
     onSelectClient: (id: string) => void
@@ -42,11 +43,16 @@ interface CreditModalProps {
 
 export function CreditModal({
     isOpen, onClose, total, subtotal, discount, itemCount,
-    clients, cartItems, selectedClientId, onSelectClient, onConfirm, onSplitConfirm, isPending
+    clients, companies = [], cartItems, selectedClientId, onSelectClient, onConfirm, onSplitConfirm, isPending
 }: CreditModalProps) {
     // Single mode
     const [search, setSearch] = useState('')
     const searchKb = useKeyboardInput(search, setSearch)
+
+    // Company mode
+    const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
+    const [companySearch, setCompanySearch] = useState('')
+    const companySearchKb = useKeyboardInput(companySearch, setCompanySearch)
 
     // Split mode
     const [mode, setMode] = useState<CreditMode>('single')
@@ -62,6 +68,8 @@ export function CreditModal({
         if (!isOpen) {
             setMode('single')
             setSearch('')
+            setSelectedCompanyId(null)
+            setCompanySearch('')
             setSplitType('per-product')
             setSelectedProductIds(new Set())
             setSplitClients([])
@@ -76,6 +84,17 @@ export function CreditModal({
         c.isActive && (!search || normalizeStr(c.name).includes(normalizeStr(search)) || fuzzyMatch(search, c.name))
     )
     const selected = clients.find(c => c.id === selectedClientId)
+
+    // Company mode derived
+    const companiesWithEmployees = companies.filter(co =>
+        co.isActive && clients.some(cl => cl.companyId === co.id && cl.isActive)
+    )
+    const showCompanyTab = companiesWithEmployees.length > 0
+    const selectedCompany = companiesWithEmployees.find(co => co.id === selectedCompanyId) ?? null
+    const companyEmployees = selectedCompanyId
+        ? clients.filter(cl => cl.companyId === selectedCompanyId && cl.isActive &&
+            (!companySearch || normalizeStr(cl.name).includes(normalizeStr(companySearch)) || fuzzyMatch(companySearch, cl.name)))
+        : []
 
     // Split mode derived
     const selectedProducts = cartItems.filter(i => selectedProductIds.has(i.id))
@@ -190,12 +209,15 @@ export function CreditModal({
 
     const showSplitTypeToggle = selectedProducts.length > 1
 
+    const modalTitle = mode === 'split' ? 'Crédito dividido' : mode === 'company' ? 'Crédito empresa' : 'Venta a crédito'
+    const modalDesc = mode === 'split' ? 'Divide productos entre varias cuentas' : mode === 'company' ? 'Selecciona empresa y empleado' : 'Selecciona el cliente'
+
     return (
         <BaseModal
             isOpen={isOpen}
             onClose={onClose}
-            title={mode === 'split' ? 'Crédito dividido' : 'Venta a crédito'}
-            description={mode === 'split' ? 'Divide productos entre varias cuentas' : 'Selecciona el cliente'}
+            title={modalTitle}
+            description={modalDesc}
             width={mode === 'split' ? 'max-w-2xl' : 'max-w-lg'}
         >
             {/* Mode tabs */}
@@ -209,6 +231,17 @@ export function CreditModal({
                 >
                     Cuenta única
                 </button>
+                {showCompanyTab && (
+                    <button
+                        onClick={() => { setMode('company'); setSelectedCompanyId(null); setCompanySearch('') }}
+                        className={cn(
+                            'flex-1 py-2 rounded-lg text-[12px] font-semibold transition-all cursor-pointer',
+                            mode === 'company' ? 'bg-[#1E2A40] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        Empresas
+                    </button>
+                )}
                 <button
                     onClick={() => setMode('split')}
                     disabled={cartItems.length === 0}
@@ -217,7 +250,7 @@ export function CreditModal({
                         mode === 'split' ? 'bg-[#1E2A40] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]'
                     )}
                 >
-                    Dividir entre cuentas
+                    Dividir
                 </button>
             </div>
 
@@ -252,7 +285,15 @@ export function CreditModal({
                                     <UserCircle2 size={16} className={isSelected ? 'text-violet-400' : 'text-[#3D506A]'} />
                                     <div className="flex-1 min-w-0">
                                         <p className={cn('text-[13px] font-medium truncate', isSelected ? 'text-[#E4ECF7]' : 'text-[#7A8FAA]')}>{client.name}</p>
-                                        <p className="text-[11px] text-[#3D506A]">{TYPE_LABEL[client.type]}{client.notes ? ` · ${client.notes}` : ''}</p>
+                                        <p className="text-[11px] text-[#3D506A]">
+                                            {TYPE_LABEL[client.type]}
+                                            {client.companyId && companies.find(co => co.id === client.companyId) && (
+                                                <span className="ml-1.5 px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 text-[10px] font-medium">
+                                                    {companies.find(co => co.id === client.companyId)!.name}
+                                                </span>
+                                            )}
+                                            {client.notes ? ` · ${client.notes}` : ''}
+                                        </p>
                                     </div>
                                     {isSelected && <Check size={14} className="text-violet-400 shrink-0" />}
                                 </button>
@@ -273,6 +314,103 @@ export function CreditModal({
                         onClick={onConfirm}
                     >
                         {selected ? `Cargar a ${selected.name} — ${formatCurrency(total)}` : 'Selecciona un cliente'}
+                    </Button>
+                </div>
+            )}
+
+            {/* ── COMPANY MODE ────────────────────────────────────────── */}
+            {mode === 'company' && (
+                <div className="space-y-4">
+                    {!selectedCompanyId ? (
+                        <>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">Selecciona empresa</p>
+                            <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                                {companiesWithEmployees.map(co => {
+                                    const empCount = clients.filter(cl => cl.companyId === co.id && cl.isActive).length
+                                    return (
+                                        <button
+                                            key={co.id}
+                                            onClick={() => { setSelectedCompanyId(co.id); setCompanySearch('') }}
+                                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border bg-[#101520] border-[#192030] hover:bg-[#161D2E] transition-all cursor-pointer text-left"
+                                        >
+                                            <div className="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center shrink-0">
+                                                <Building2 size={15} className="text-orange-400" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-[13px] font-semibold text-[#E4ECF7] truncate">{co.name}</p>
+                                                <p className="text-[11px] text-[#3D506A]">{empCount} colaborador{empCount !== 1 ? 'es' : ''}</p>
+                                            </div>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="flex items-center gap-2 mb-1">
+                                <button
+                                    onClick={() => { setSelectedCompanyId(null); setCompanySearch('') }}
+                                    className="w-7 h-7 rounded-lg text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer"
+                                >
+                                    <ChevronLeft size={14} />
+                                </button>
+                                <div className="flex items-center gap-2">
+                                    <Building2 size={13} className="text-orange-400" />
+                                    <p className="text-[13px] font-semibold text-orange-400">{selectedCompany?.name}</p>
+                                </div>
+                            </div>
+                            <div className="relative">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A]" />
+                                <input
+                                    type="text"
+                                    placeholder="Buscar colaborador..."
+                                    {...companySearchKb}
+                                    className="w-full h-10 pl-9 pr-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/50"
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                                {companyEmployees.map(cl => {
+                                    const isSelected = selectedClientId === cl.id
+                                    return (
+                                        <button
+                                            key={cl.id}
+                                            onClick={() => { useKeyboardStore.getState().close(); onSelectClient(cl.id) }}
+                                            className={cn(
+                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer text-left',
+                                                isSelected ? 'bg-orange-500/10 border-orange-500/30' : 'bg-[#101520] border-[#192030] hover:bg-[#161D2E]'
+                                            )}
+                                        >
+                                            <UserCircle2 size={16} className={isSelected ? 'text-orange-400' : 'text-[#3D506A]'} />
+                                            <p className={cn('text-[13px] font-medium flex-1 truncate', isSelected ? 'text-[#E4ECF7]' : 'text-[#7A8FAA]')}>{cl.name}</p>
+                                            {isSelected && <Check size={14} className="text-orange-400 shrink-0" />}
+                                        </button>
+                                    )
+                                })}
+                                {companyEmployees.length === 0 && (
+                                    <p className="text-center text-[12px] text-[#3D506A] py-4">Sin resultados</p>
+                                )}
+                            </div>
+                        </>
+                    )}
+
+                    <div className="bg-[#101520] rounded-xl border border-[#192030] p-4">
+                        <TotalsPanel itemCount={itemCount} subtotal={subtotal} discount={discount} total={total} />
+                    </div>
+
+                    <Button
+                        variant="primary"
+                        size="lg"
+                        className="w-full"
+                        disabled={!selectedClientId || !selectedCompanyId || isPending}
+                        loading={isPending}
+                        onClick={onConfirm}
+                        style={{ '--btn-color': '#f97316', '--btn-hover': '#ea580c' } as any}
+                    >
+                        {selectedClientId && selectedCompanyId
+                            ? `Cargar a ${clients.find(c => c.id === selectedClientId)?.name} — ${formatCurrency(total)}`
+                            : 'Selecciona colaborador'
+                        }
                     </Button>
                 </div>
             )}

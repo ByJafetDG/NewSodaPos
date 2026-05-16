@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
     ShoppingCart, Package, Users, Wallet,
     BarChart3, Settings2, Ticket, RotateCcw,
-    Wifi, WifiOff, RefreshCw, CloudOff,
+    Wifi, WifiOff, RefreshCw, CloudOff, Sparkles,
 } from 'lucide-react'
 import { useUIStore } from '@/store/uiStore'
 import { cn, formatTime } from '@/lib/utils'
@@ -83,6 +83,15 @@ const NAV_ITEMS: NavItem[] = [
         color: 'text-rose-400',
         activeBg: 'bg-rose-500/10',
         activeBar: 'bg-rose-400',
+    },
+    {
+        id: 'ai-assistant',
+        label: 'Asistente IA',
+        description: 'Agente inteligente del sistema',
+        icon: Sparkles,
+        color: 'text-indigo-400',
+        activeBg: 'bg-indigo-500/10',
+        activeBar: 'bg-indigo-400',
     },
 ]
 

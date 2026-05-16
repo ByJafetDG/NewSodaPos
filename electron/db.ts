@@ -82,6 +82,18 @@ export function initDb() {
     INSERT OR IGNORE INTO Product (id, name, categoryId, price, isActive, isInfinite, syncStatus)
     VALUES ('credit-charge', 'Cargo a cuenta', NULL, 0, 1, 1, 'SYNCED');
 
+    CREATE TABLE IF NOT EXISTS Company (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      billingEmail TEXT,
+      phone TEXT,
+      notes TEXT,
+      isActive INTEGER DEFAULT 1,
+      syncStatus TEXT DEFAULT 'PENDING',
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS Client (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -89,12 +101,14 @@ export function initDb() {
       email TEXT,
       type TEXT DEFAULT 'TRABAJADOR',
       company TEXT,
+      companyId TEXT,
       notes TEXT,
       code TEXT,
       isActive INTEGER DEFAULT 1,
       syncStatus TEXT DEFAULT 'PENDING',
       createdAt TEXT DEFAULT (datetime('now')),
-      updatedAt TEXT DEFAULT (datetime('now'))
+      updatedAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (companyId) REFERENCES Company(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS CashRegister (
@@ -583,6 +597,25 @@ export function initDb() {
 
   try {
     db.exec(`ALTER TABLE BusinessConfig ADD COLUMN ticketLogoUrl TEXT`);
+  } catch {}
+
+  try {
+    db.exec(`ALTER TABLE BusinessConfig ADD COLUMN groqApiKey TEXT`);
+  } catch {}
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS AiConversation (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      messages TEXT NOT NULL DEFAULT '[]',
+      groqHistory TEXT NOT NULL DEFAULT '[]',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+
+  try {
+    db.exec(`ALTER TABLE Client ADD COLUMN companyId TEXT REFERENCES Company(id) ON DELETE SET NULL`);
   } catch {}
 
   // ===== Performance Indexes =====
