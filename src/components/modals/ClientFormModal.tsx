@@ -479,7 +479,7 @@ function ContactStep({ data, companies, onChange, onNext }: {
             {data.type === 'ASOCIACION' && (
                 <div>
                     <FieldLabel>Código interno</FieldLabel>
-                    <SmallInput value={data.code} onChange={v => onChange({ code: v })} placeholder="ASO-001" />
+                    <SmallInput value={data.code} onChange={v => onChange({ code: v })} placeholder="ASO-001" mode="numeric" />
                 </div>
             )}
             {activeCompanies.length > 0 && (
