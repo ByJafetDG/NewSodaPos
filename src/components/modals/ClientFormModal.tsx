@@ -78,11 +78,11 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, companies 
                 notes: client.notes ?? '', isActive: client.isActive,
                 companyId: client.companyId ?? '',
             }
-            if (draft?.name) { setData(draft); setStep('draft-prompt') }
+            if (draft?.name) { setData({ ...base, ...draft }); setStep('draft-prompt') }
             else             { setData(base);  setStep('name') }
         } else {
             const base = defaultCompanyId ? { ...EMPTY, companyId: defaultCompanyId } : EMPTY
-            if (draft?.name) { setData(draft); setStep('draft-prompt') }
+            if (draft?.name) { setData({ ...base, ...draft }); setStep('draft-prompt') }
             else             { setData(base); setStep('name') }
         }
         setDir(1)
