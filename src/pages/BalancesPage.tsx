@@ -660,41 +660,6 @@ function CompanyDetailView({ company, employees, allCreditSales, config, onBack,
     const flowPageItems = flowFiltered.slice(flowPage * FLOW_PAGE_SIZE, (flowPage + 1) * FLOW_PAGE_SIZE)
     const flowSelectedTotal = employeesWithDebt.filter(e => flowSelectedIds.has(e.id)).reduce((s, e) => s + employeePendingTotal(e.id), 0)
 
-    async function handleSendPDF() {
-        const addr = pdfEmailAddress.trim()
-        if (!addr || pdfSelectedIds.size === 0) return
-        setSendingPdf(true)
-        try {
-            const selectedEmps = employeesWithDebt.filter(e => pdfSelectedIds.has(e.id))
-            const selectedDebt = selectedEmps.reduce((s, e) => s + employeePendingTotal(e.id), 0)
-            const pdfBase64 = generateCompanyStatementPDF({
-                companyName: company.name,
-                businessName: config?.name ?? 'Mi Soda',
-                employees: selectedEmps.map(e => ({
-                    name: e.name,
-                    phone: e.phone,
-                    pendingTotal: employeePendingTotal(e.id),
-                    pendingCount: employeePendingSales(e.id).length,
-                })),
-                totalDebt: selectedDebt,
-            })
-            const result = await sendCompanyStatementPDFEmail({
-                to: addr,
-                companyName: company.name,
-                businessName: config?.name ?? 'Mi Soda',
-                pdfBase64,
-                logoUrl: config?.emailLogoUrl,
-                employeeCount: selectedEmps.length,
-                totalDebt: selectedDebt,
-            })
-            if (result.success) toast.success('PDF enviado a ' + addr)
-            else toast.error(result.error ?? 'Error al enviar PDF')
-        } finally {
-            setSendingPdf(false)
-            setPdfEmailOpen(false)
-        }
-    }
-
     return (
         <div className="flex flex-col h-full">
             {/* Header */}

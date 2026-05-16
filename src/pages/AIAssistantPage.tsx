@@ -204,13 +204,13 @@ function expirePending(msgs: DisplayMessage[]): DisplayMessage[] {
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
 async function dbLoadConversations(): Promise<ConvSummary[]> {
-    return window.electronAPI.dbQuery(
+    return window.electronAPI!.dbQuery(
         'SELECT id, title, updatedAt FROM AiConversation ORDER BY updatedAt DESC LIMIT 50'
     )
 }
 
 async function dbLoadConversation(id: string): Promise<{ messages: DisplayMessage[]; groqHistory: any[] } | null> {
-    const row = await window.electronAPI.dbGet(
+    const row = await window.electronAPI!.dbGet(
         'SELECT messages, groqHistory FROM AiConversation WHERE id = ?', [id]
     )
     if (!row) return null
@@ -226,7 +226,7 @@ async function dbSaveConversation(
     id: string, title: string, messages: DisplayMessage[], groqHistory: any[]
 ): Promise<void> {
     const now = new Date().toISOString()
-    await window.electronAPI.dbExecute(
+    await window.electronAPI!.dbExecute(
         `INSERT INTO AiConversation (id, title, messages, groqHistory, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET title=excluded.title, messages=excluded.messages, groqHistory=excluded.groqHistory, updatedAt=excluded.updatedAt`,
         [id, title, JSON.stringify(messages), JSON.stringify(groqHistory.slice(-40)), now, now]
@@ -234,7 +234,7 @@ async function dbSaveConversation(
 }
 
 async function dbDeleteConversation(id: string): Promise<void> {
-    await window.electronAPI.dbExecute('DELETE FROM AiConversation WHERE id = ?', [id])
+    await window.electronAPI!.dbExecute('DELETE FROM AiConversation WHERE id = ?', [id])
 }
 
 // ─── Data result renderers ────────────────────────────────────────────────────
@@ -675,7 +675,7 @@ function ChatInterface({ apiKey, businessName }: { apiKey: string; businessName:
         async function init() {
             try {
                 // Load real DB schema from sqlite_master
-                const tables = await window.electronAPI.dbQuery(
+                const tables = await window.electronAPI!.dbQuery(
                     "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
                 )
                 dbSchemaRef.current = tables
@@ -767,7 +767,7 @@ function ChatInterface({ apiKey, businessName }: { apiKey: string; businessName:
                 iterations++
 
                 const MAX_HISTORY = 14
-                const result = await window.electronAPI.groqChat({
+                const result = await window.electronAPI!.groqChat({
                     messages: [
                         { role: 'system', content: buildSystemPrompt(dbSchemaRef.current) },
                         ...groqHistoryRef.current.slice(-MAX_HISTORY),
@@ -801,7 +801,7 @@ function ChatInterface({ apiKey, businessName }: { apiKey: string; businessName:
                         let rows: any[] = []
                         let toolResult = ''
                         try {
-                            rows = await window.electronAPI.dbQuery(args.sql, args.params ?? [])
+                            rows = await window.electronAPI!.dbQuery(args.sql, args.params ?? [])
                             const dtype = detectDataType(rows)
                             if (rows.length > 0) {
                                 addMsg({ role: 'assistant', content: '', dataResults: rows, dataType: dtype })
@@ -830,7 +830,7 @@ function ChatInterface({ apiKey, businessName }: { apiKey: string; businessName:
 
                         if (confirmed) {
                             try {
-                                await window.electronAPI.dbExecute(args.sql, args.params ?? [])
+                                await window.electronAPI!.dbExecute(args.sql, args.params ?? [])
                                 groqHistoryRef.current.push({ role: 'tool', tool_call_id: tc.id, content: 'Ejecutado exitosamente.' })
                             } catch (err: any) {
                                 groqHistoryRef.current.push({ role: 'tool', tool_call_id: tc.id, content: `ERROR: ${err.message}` })
@@ -1036,7 +1036,14 @@ function ChatInterface({ apiKey, businessName }: { apiKey: string; businessName:
                 <div className="flex items-end gap-3">
                     <div className="flex-1 relative">
                         <textarea
-                            {...inputKb}
+                            value={inputKb.value}
+                            onChange={(e) => { inputKb.onChange(e as any) }}
+                            onFocus={inputKb.onFocus}
+                            onSelect={(e) => { inputKb.onSelect(e as any) }}
+                            ref={inputKb.ref as unknown as React.RefObject<HTMLTextAreaElement>}
+                            autoComplete={inputKb.autoComplete}
+                            autoCorrect={inputKb.autoCorrect}
+                            spellCheck={inputKb.spellCheck}
                             onKeyDown={handleKeyDown}
                             placeholder="Escribe lo que necesitas... (Enter para enviar)"
                             rows={1}

@@ -28,8 +28,10 @@ export interface ElectronAPI {
     // Storage
     listBucket: (bucket: string) => Promise<{ data: any[] | null; error: string | null }>
     // Email
-    sendEmail: (payload: { from: string; to: string[]; subject: string; html: string }) =>
+    sendEmail: (payload: { from: string; to: string[]; subject: string; html: string; attachments?: { filename: string; content: string }[] }) =>
         Promise<{ success: boolean, error?: any }>
+    groqChat: (payload: { messages: any[]; tools: any[]; apiKey: string }) =>
+        Promise<{ success: boolean; data?: any; error?: string }>
     getLogoBase64: () => Promise<string | null>
     // Sync
     getSyncStats: () => Promise<{ totalPending: number }>
