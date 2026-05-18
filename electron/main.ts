@@ -22,7 +22,7 @@ if (isDev) {
 }
 
 import { initDb, query, execute, get, executeMany } from './db'
-import { startSyncEngine, pushSync } from './sync'
+import { startSyncEngine, pushSync, pullSinpeMessages } from './sync'
 
 // Disable GPU acceleration for better compatibility on some systems
 app.disableHardwareAcceleration()
@@ -1011,6 +1011,10 @@ async function startSinpeServer(port: number, senderFilter: string) {
 ipcMain.handle('sinpe:get-messages', () =>
     query('SELECT * FROM SinpeMessage WHERE deletedAt IS NULL ORDER BY receivedAt DESC LIMIT 200', [])
 )
+ipcMain.handle('sinpe:refresh', async () => {
+    await pullSinpeMessages()
+    return query('SELECT * FROM SinpeMessage WHERE deletedAt IS NULL ORDER BY receivedAt DESC LIMIT 200', [])
+})
 ipcMain.handle('sinpe:get-unread-count', () => {
     const row = get('SELECT COUNT(*) as count FROM SinpeMessage WHERE isRead = 0 AND deletedAt IS NULL', []) as any
     return row?.count ?? 0

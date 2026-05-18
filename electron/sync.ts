@@ -501,14 +501,26 @@ async function pullSync() {
         }
 
         // 14. Sync SinpeMessages — baja mensajes capturados por Edge Function mientras PC estuvo apagada
-        const { data: sinpeMessages } = await supabase
+        await pullSinpeMessages();
+
+        console.log('[SyncEngine] Pull items success.');
+    } catch (err) {
+        console.error('[SyncEngine] Pull failed:', err);
+    } finally {
+        execute('PRAGMA foreign_keys = ON');
+    }
+}
+
+export async function pullSinpeMessages(): Promise<void> {
+    try {
+        const { data } = await supabase
             .from('SinpeMessage')
             .select('*')
             .order('receivedAt', { ascending: false })
             .limit(500);
-        if (sinpeMessages) {
+        if (data) {
             transaction(() => {
-                for (const msg of sinpeMessages) {
+                for (const msg of data) {
                     execute(`
                         INSERT INTO SinpeMessage (id, sender, body, receivedAt, isRead, deletedAt, syncStatus)
                         VALUES (?, ?, ?, ?, ?, ?, 'SYNCED')
@@ -517,12 +529,8 @@ async function pullSync() {
                 }
             });
         }
-
-        console.log('[SyncEngine] Pull items success.');
     } catch (err) {
-        console.error('[SyncEngine] Pull failed:', err);
-    } finally {
-        execute('PRAGMA foreign_keys = ON');
+        console.error('[SyncEngine] pullSinpeMessages failed:', err);
     }
 }
 

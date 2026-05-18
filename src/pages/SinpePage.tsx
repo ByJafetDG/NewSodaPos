@@ -50,8 +50,9 @@ export function SinpePage() {
     const kbFilter = useKeyboardInput(filter, setFilter, { mode: 'alpha' })
 
     const fetchMessages = useCallback(async () => {
-        if (!window.electronAPI?.getSinpeMessages) return
-        const msgs = await window.electronAPI.getSinpeMessages()
+        if (!window.electronAPI) return
+        const fn = window.electronAPI.refreshSinpeMessages ?? window.electronAPI.getSinpeMessages
+        const msgs = await fn()
         setMessages(msgs as SinpeMsg[])
         setLoading(false)
     }, [])

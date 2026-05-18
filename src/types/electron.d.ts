@@ -51,6 +51,7 @@ export interface ElectronAPI {
     openDevTools: () => Promise<void>
     // SINPE
     getSinpeMessages: () => Promise<any[]>
+    refreshSinpeMessages: () => Promise<any[]>
     getSinpeUnreadCount: () => Promise<number>
     markSinpeRead: (id: string) => Promise<void>
     markAllSinpeRead: () => Promise<void>

@@ -78,6 +78,7 @@ const electronAPI = {
 
     // SINPE
     getSinpeMessages: (): Promise<any[]> => ipcRenderer.invoke('sinpe:get-messages'),
+    refreshSinpeMessages: (): Promise<any[]> => ipcRenderer.invoke('sinpe:refresh'),
     getSinpeUnreadCount: (): Promise<number> => ipcRenderer.invoke('sinpe:get-unread-count'),
     markSinpeRead: (id: string): Promise<void> => ipcRenderer.invoke('sinpe:mark-read', id),
     markAllSinpeRead: (): Promise<void> => ipcRenderer.invoke('sinpe:mark-all-read'),
