@@ -76,6 +76,27 @@ const electronAPI = {
     checkForUpdate: () => ipcRenderer.invoke('update:check'),
     openDevTools: () => ipcRenderer.invoke('devtools:open'),
 
+    // SINPE
+    getSinpeMessages: (): Promise<any[]> => ipcRenderer.invoke('sinpe:get-messages'),
+    getSinpeUnreadCount: (): Promise<number> => ipcRenderer.invoke('sinpe:get-unread-count'),
+    markSinpeRead: (id: string): Promise<void> => ipcRenderer.invoke('sinpe:mark-read', id),
+    markAllSinpeRead: (): Promise<void> => ipcRenderer.invoke('sinpe:mark-all-read'),
+    deleteSinpeMessage: (id: string): Promise<void> => ipcRenderer.invoke('sinpe:delete-one', id),
+    clearSinpeMessages: (): Promise<void> => ipcRenderer.invoke('sinpe:clear-all'),
+    getSinpeConfig: (): Promise<{ port: number; senderFilter: string }> => ipcRenderer.invoke('sinpe:get-config'),
+    saveSinpeConfig: (cfg: { port: number; senderFilter: string }): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('sinpe:save-config', cfg),
+    getSinpeLocalIp: (): Promise<string> => ipcRenderer.invoke('sinpe:get-local-ip'),
+    getSinpeServerPort: (): Promise<number> => ipcRenderer.invoke('sinpe:get-server-port'),
+    getSinpeDeleted: (): Promise<any[]> => ipcRenderer.invoke('sinpe:get-deleted'),
+    restoreSinpeMessage: (id: string): Promise<void> => ipcRenderer.invoke('sinpe:restore', id),
+    hardDeleteSinpeMessage: (id: string): Promise<void> => ipcRenderer.invoke('sinpe:hard-delete-one', id),
+    clearSinpeTrash: (): Promise<void> => ipcRenderer.invoke('sinpe:clear-trash'),
+    onSinpeNewMessage: (callback: (msg: any) => void) => {
+        const sub = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('sinpe:new-message', sub)
+        return () => ipcRenderer.removeListener('sinpe:new-message', sub)
+    },
+
     // Platform detection
     platform: process.platform,
     isElectron: true,

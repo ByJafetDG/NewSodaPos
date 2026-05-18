@@ -84,6 +84,8 @@ app.whenReady().then(async () => {
         autoUpdater.checkForUpdates()
         setInterval(() => autoUpdater.checkForUpdates(), 30 * 60 * 1000)
     }
+    const sinpeCfg = readSinpeConfig()
+    await startSinpeServer(sinpeCfg.port, sinpeCfg.senderFilter)
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
@@ -926,3 +928,126 @@ ipcMain.handle('sync:clear-error', (_: any, id: string) =>
 ipcMain.handle('sync:clear-all-errors', () =>
     execute('DELETE FROM SyncError', [])
 )
+
+// ===== SINPE Message Receiver =====
+let sinpeServerInstance: any = null
+const SINPE_CONFIG_PATH = () => path.join(app.getPath('userData'), 'sinpe-config.json')
+
+function readSinpeConfig(): { port: number; senderFilter: string } {
+    try {
+        const raw = fs.readFileSync(SINPE_CONFIG_PATH(), 'utf8')
+        return { port: 3971, senderFilter: 'QBien', ...JSON.parse(raw) }
+    } catch {
+        return { port: 3971, senderFilter: 'QBien' }
+    }
+}
+
+async function getLocalIp(): Promise<string> {
+    const { networkInterfaces } = await import('os')
+    const nets = networkInterfaces()
+    for (const name of Object.keys(nets)) {
+        for (const net of (nets[name] ?? [])) {
+            if (net.family === 'IPv4' && !net.internal) return net.address
+        }
+    }
+    return '127.0.0.1'
+}
+
+async function startSinpeServer(port: number, senderFilter: string) {
+    if (sinpeServerInstance) {
+        try { sinpeServerInstance.close() } catch {}
+        sinpeServerInstance = null
+    }
+    const { createServer } = await import('http')
+    const server = createServer((req: any, res: any) => {
+        if (req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'text/plain' })
+            res.end('Soda POS SINPE Receiver OK')
+            return
+        }
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
+
+        let body = ''
+        req.on('data', (chunk: Buffer) => { body += chunk.toString() })
+        req.on('end', () => {
+            try {
+                let parsed: Record<string, any> = {}
+                const ct = (req.headers['content-type'] as string) ?? ''
+                if (ct.includes('application/json')) {
+                    parsed = JSON.parse(body)
+                } else {
+                    const params = new URLSearchParams(body)
+                    params.forEach((v, k) => { parsed[k] = v })
+                }
+                const sender = String(parsed.from ?? parsed.sender ?? parsed.originator ?? '')
+                const message = String(parsed.message ?? parsed.body ?? parsed.text ?? parsed.smsBody ?? '')
+                const rawTs = parsed.timestamp ?? parsed.sentTimestamp ?? parsed.sentStamp ?? Date.now()
+                const tsNum = Number(rawTs)
+                const receivedAt = new Date(tsNum > 0 && tsNum < 1e12 ? tsNum * 1000 : tsNum).toISOString()
+
+                const filter = senderFilter.toLowerCase().trim()
+                if (filter && !sender.toLowerCase().includes(filter) && !message.toLowerCase().includes(filter)) {
+                    res.writeHead(200); res.end('filtered'); return
+                }
+
+                const id = `sinpe_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+                execute('INSERT INTO SinpeMessage (id, sender, body, receivedAt, isRead) VALUES (?, ?, ?, ?, 0)', [id, sender, message, receivedAt])
+                const msg = { id, sender, body: message, receivedAt, isRead: 0 }
+                mainWindow?.webContents.send('sinpe:new-message', msg)
+
+                res.writeHead(200, { 'Content-Type': 'text/plain' })
+                res.end('ok')
+            } catch (err) {
+                console.error('[SINPE] Error processing message:', err)
+                res.writeHead(500); res.end('error')
+            }
+        })
+    })
+    server.on('error', (err: any) => console.error('[SINPE] Server error:', err.message))
+    server.listen(port, '0.0.0.0', () => console.log(`[SINPE] Listening on port ${port}`))
+    sinpeServerInstance = server
+}
+
+ipcMain.handle('sinpe:get-messages', () =>
+    query('SELECT * FROM SinpeMessage WHERE deletedAt IS NULL ORDER BY receivedAt DESC LIMIT 200', [])
+)
+ipcMain.handle('sinpe:get-unread-count', () => {
+    const row = get('SELECT COUNT(*) as count FROM SinpeMessage WHERE isRead = 0 AND deletedAt IS NULL', []) as any
+    return row?.count ?? 0
+})
+ipcMain.handle('sinpe:mark-read', (_: any, id: string) =>
+    execute('UPDATE SinpeMessage SET isRead = 1 WHERE id = ?', [id])
+)
+ipcMain.handle('sinpe:mark-all-read', () =>
+    execute('UPDATE SinpeMessage SET isRead = 1 WHERE deletedAt IS NULL', [])
+)
+ipcMain.handle('sinpe:delete-one', (_: any, id: string) =>
+    execute("UPDATE SinpeMessage SET deletedAt = ?, syncStatus = 'PENDING' WHERE id = ?", [new Date().toISOString(), id])
+)
+ipcMain.handle('sinpe:clear-all', () =>
+    execute("UPDATE SinpeMessage SET deletedAt = ?, syncStatus = 'PENDING' WHERE deletedAt IS NULL", [new Date().toISOString()])
+)
+ipcMain.handle('sinpe:get-deleted', () =>
+    query('SELECT * FROM SinpeMessage WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC LIMIT 200', [])
+)
+ipcMain.handle('sinpe:restore', (_: any, id: string) =>
+    execute('UPDATE SinpeMessage SET deletedAt = NULL WHERE id = ?', [id])
+)
+ipcMain.handle('sinpe:hard-delete-one', (_: any, id: string) =>
+    execute('DELETE FROM SinpeMessage WHERE id = ?', [id])
+)
+ipcMain.handle('sinpe:clear-trash', () =>
+    execute('DELETE FROM SinpeMessage WHERE deletedAt IS NOT NULL', [])
+)
+ipcMain.handle('sinpe:get-config', () => readSinpeConfig())
+ipcMain.handle('sinpe:save-config', async (_: any, cfg: { port: number; senderFilter: string }) => {
+    try {
+        fs.writeFileSync(SINPE_CONFIG_PATH(), JSON.stringify(cfg, null, 2), 'utf8')
+        await startSinpeServer(cfg.port, cfg.senderFilter)
+        return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+})
+ipcMain.handle('sinpe:get-local-ip', getLocalIp)
+ipcMain.handle('sinpe:get-server-port', () => readSinpeConfig().port)

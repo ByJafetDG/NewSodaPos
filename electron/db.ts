@@ -634,6 +634,24 @@ export function initDb() {
     db.exec(`ALTER TABLE Sale ADD COLUMN physicalInvoiceNumber TEXT`);
   } catch {}
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS SinpeMessage (
+      id TEXT PRIMARY KEY,
+      sender TEXT NOT NULL,
+      body TEXT NOT NULL,
+      receivedAt TEXT NOT NULL,
+      isRead INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
+  try {
+    db.exec(`ALTER TABLE SinpeMessage ADD COLUMN deletedAt TEXT`);
+  } catch {}
+
+  try {
+    db.exec(`ALTER TABLE SinpeMessage ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'PENDING'`);
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);

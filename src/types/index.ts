@@ -8,6 +8,7 @@ export type AppPage =
     | 'returns'
     | 'settings'
     | 'ai-assistant'
+    | 'sinpe'
 
 export interface SyncInfo {
     isOnline: boolean

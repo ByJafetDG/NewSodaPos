@@ -5,7 +5,7 @@ import {
     Monitor, Save, Plus, Trash2, ChevronRight, Wifi, WifiOff,
     RefreshCw, HardDrive, Zap, LogOut, Minimize2, Maximize2,
     CheckCircle2, Search, Info, Edit2, Download, AlertTriangle, X,
-    Mail, Upload, RotateCcw, Package,
+    Mail, Upload, RotateCcw, Package, MessageSquare, Server, Copy,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getDeletedClients, restoreClient, hardDeleteClient } from '@/services/clients'
@@ -23,7 +23,7 @@ import { useUIStore } from '@/store/uiStore'
 import { cn } from '@/lib/utils'
 import type { Employee } from '@/types'
 
-type Section = 'business' | 'ticket' | 'email' | 'printer' | 'employees' | 'sync' | 'system' | 'updates' | 'trash'
+type Section = 'business' | 'ticket' | 'email' | 'printer' | 'employees' | 'sync' | 'system' | 'updates' | 'trash' | 'sinpe'
 
 function timeAgo(date: Date) {
     const diff = Date.now() - date.getTime()
@@ -46,7 +46,8 @@ const SECTIONS: { id: Section; label: string; desc: string; icon: React.ElementT
     { id: 'sync',       label: 'Sincronización',   desc: 'Estado de la nube',                 icon: Cloud,    color: 'text-blue-400' },
     { id: 'system',     label: 'Sistema',          desc: 'Control de ventana y app',          icon: Monitor,  color: 'text-slate-400' },
     { id: 'updates',    label: 'Actualizaciones',  desc: 'Versión y actualizaciones del app',  icon: Download, color: 'text-emerald-400' },
-    { id: 'trash',      label: 'Papelera',         desc: 'Eliminados y ventas anuladas',       icon: Trash2,   color: 'text-red-400' },
+    { id: 'trash',      label: 'Papelera',         desc: 'Eliminados y ventas anuladas',       icon: Trash2,      color: 'text-red-400' },
+    { id: 'sinpe',      label: 'SINPE',            desc: 'Servidor y configuración de SINPE',  icon: MessageSquare, color: 'text-green-400' },
 ]
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -1071,6 +1072,8 @@ export function SettingsPage() {
 
                     {section === 'trash' && <TrashSection />}
 
+                    {section === 'sinpe' && <SinpeSettingsSection />}
+
                     {section === 'system' && (
                         <SectionContent
                             icon={Monitor} color="text-slate-400" iconBg="bg-slate-500/10"
@@ -1325,11 +1328,16 @@ function LogoUploadField({ logoUrl, uploading, onUpload, onClear, accentColor, h
 }
 
 function TrashSection() {
-    const [tab, setTab] = useState<'clients' | 'products' | 'sales'>('clients')
+    const [tab, setTab] = useState<'clients' | 'products' | 'sales' | 'sinpe'>('clients')
     const [confirmHard, setConfirmHard] = useState<{ type: 'client' | 'product'; id: string; name: string } | null>(null)
     const [confirmRestore, setConfirmRestore] = useState<{ type: 'client' | 'product'; id: string; name: string } | null>(null)
     const [isActing, setIsActing] = useState(false)
     const qc = useQueryClient()
+
+    // SINPE trash state
+    const [sinpeDeleted, setSinpeDeleted] = useState<any[]>([])
+    const [loadingSinpe, setLoadingSinpe] = useState(false)
+    const [pendingClearSinpeTrash, setPendingClearSinpeTrash] = useState(false)
 
     const { data: deletedClients = [], isLoading: loadingClients } = useQuery({
         queryKey: ['trash-clients'],
@@ -1343,6 +1351,38 @@ function TrashSection() {
         queryKey: ['trash-sales'],
         queryFn: getVoidedSales,
     })
+
+    useEffect(() => {
+        if (tab !== 'sinpe') return
+        setLoadingSinpe(true)
+        window.electronAPI?.getSinpeDeleted?.().then((msgs: any[]) => {
+            setSinpeDeleted(msgs)
+            setLoadingSinpe(false)
+        })
+    }, [tab])
+
+    async function handleSinpeRestore(id: string) {
+        await window.electronAPI?.restoreSinpeMessage?.(id)
+        setSinpeDeleted(prev => prev.filter(m => m.id !== id))
+        toast.success('Mensaje restaurado')
+    }
+
+    async function handleSinpeHardDelete(id: string) {
+        await window.electronAPI?.hardDeleteSinpeMessage?.(id)
+        setSinpeDeleted(prev => prev.filter(m => m.id !== id))
+    }
+
+    async function handleSinpeClearTrash() {
+        await window.electronAPI?.clearSinpeTrash?.()
+        setSinpeDeleted([])
+        setPendingClearSinpeTrash(false)
+        toast.success('Papelera SINPE vaciada')
+    }
+
+    function fmtSinpeDate(iso: string) {
+        try { return new Date(iso).toLocaleString('es-CR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Costa_Rica' }) }
+        catch { return iso }
+    }
 
     async function handleRestoreConfirmed() {
         if (!confirmRestore) return
@@ -1397,6 +1437,7 @@ function TrashSection() {
         { id: 'clients' as const, label: 'Clientes', count: (deletedClients as any[]).length },
         { id: 'products' as const, label: 'Productos', count: (deletedProducts as any[]).length },
         { id: 'sales' as const, label: 'Ventas anuladas', count: (voidedSales as any[]).length },
+        { id: 'sinpe' as const, label: 'SINPE', count: sinpeDeleted.length },
     ]
 
     return (
@@ -1496,6 +1537,47 @@ function TrashSection() {
                             <div className="text-right">
                                 <p className="text-[13px] font-semibold text-[#E4ECF7]">₡{(s.total ?? 0).toLocaleString('es-CR')}</p>
                                 <p className="text-[10px] text-[#3D506A]">{s.paymentMethod}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {tab === 'sinpe' && (
+                <div className="space-y-2">
+                    {sinpeDeleted.length > 0 && (
+                        <div className="flex justify-end mb-1">
+                            {pendingClearSinpeTrash ? (
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px] text-[#7A8FAA]">¿Vaciar papelera SINPE?</span>
+                                    <button onClick={handleSinpeClearTrash} className="h-7 px-3 rounded-lg bg-red-500/20 border border-red-500/30 text-red-400 text-[11px] font-semibold active:bg-red-500/30 cursor-pointer">Confirmar</button>
+                                    <button onClick={() => setPendingClearSinpeTrash(false)} className="h-7 px-3 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#7A8FAA] text-[11px] cursor-pointer">Cancelar</button>
+                                </div>
+                            ) : (
+                                <button onClick={() => setPendingClearSinpeTrash(true)} className="flex items-center gap-1 h-7 px-3 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#7A8FAA] text-[11px] active:text-red-400 cursor-pointer">
+                                    <Trash2 size={11} /> Vaciar papelera
+                                </button>
+                            )}
+                        </div>
+                    )}
+                    {loadingSinpe ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">Cargando...</p>
+                    ) : sinpeDeleted.length === 0 ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">No hay mensajes SINPE eliminados</p>
+                    ) : sinpeDeleted.map((m: any) => (
+                        <div key={m.id} className="flex items-start justify-between gap-3 px-4 py-3 rounded-xl bg-[#0B0E19] border border-[#192030]">
+                            <div className="min-w-0 flex-1">
+                                <p className="text-[12px] font-semibold text-green-400 truncate">{m.sender || 'Sin remitente'}</p>
+                                <p className="text-[11px] text-[#7A8FAA] line-clamp-2 mt-0.5">{m.body}</p>
+                                <p className="text-[10px] text-[#3D506A] mt-1">{fmtSinpeDate(m.receivedAt)}</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0 mt-0.5">
+                                <button onClick={() => handleSinpeRestore(m.id)} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] active:bg-emerald-500/20 cursor-pointer">
+                                    <RotateCcw size={11} /> Restaurar
+                                </button>
+                                <button onClick={() => handleSinpeHardDelete(m.id)} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] active:bg-red-500/20 cursor-pointer">
+                                    <Trash2 size={11} /> Borrar
+                                </button>
                             </div>
                         </div>
                     ))}
@@ -1615,5 +1697,200 @@ function SystemActionCard({ icon, iconBg, label, desc, onClick }: {
                 <p className="text-[11px] text-[#3D506A]">{desc}</p>
             </div>
         </button>
+    )
+}
+
+function SinpeSettingsSection() {
+    const [localIp, setLocalIp] = useState('...')
+    const [port, setPort] = useState(3971)
+    const [configPort, setConfigPort] = useState('3971')
+    const [configFilter, setConfigFilter] = useState('QBien')
+    const [savingConfig, setSavingConfig] = useState(false)
+    const [showGuide, setShowGuide] = useState(false)
+
+    const kbPort = useKeyboardInput(configPort, setConfigPort, { mode: 'numeric' })
+    const kbFilter = useKeyboardInput(configFilter, setConfigFilter, { mode: 'alpha' })
+
+    useEffect(() => {
+        window.electronAPI?.getSinpeLocalIp?.().then((ip: string) => setLocalIp(ip))
+        window.electronAPI?.getSinpeConfig?.().then((cfg: { port: number; senderFilter: string }) => {
+            setPort(cfg.port)
+            setConfigPort(String(cfg.port))
+            setConfigFilter(cfg.senderFilter)
+        })
+    }, [])
+
+    async function handleSave() {
+        const p = parseInt(configPort)
+        if (isNaN(p) || p < 1024 || p > 65535) {
+            toast.error('Puerto inválido (1024–65535)')
+            return
+        }
+        setSavingConfig(true)
+        const res = await window.electronAPI?.saveSinpeConfig?.({ port: p, senderFilter: configFilter.trim() })
+        setSavingConfig(false)
+        if (res?.success) {
+            setPort(p)
+            toast.success('Configuración guardada — servidor reiniciado')
+        } else {
+            toast.error(res?.error ?? 'Error al guardar')
+        }
+    }
+
+    function copyText(text: string) {
+        navigator.clipboard.writeText(text).then(() => toast.success('Copiado'))
+    }
+
+    const localUrl = `http://${localIp}:${port}/sms`
+
+    return (
+        <SectionContent
+            icon={MessageSquare} color="text-green-400" iconBg="bg-green-500/10"
+            title="SINPE Móvil" desc="Servidor HTTP y configuración de reenvío de mensajes"
+        >
+            {/* Server status */}
+            <div className="rounded-2xl bg-[#101520] border border-[#1E2A40] p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                    <Server size={13} className="text-green-400" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Estado del servidor</span>
+                    <span className="ml-auto flex items-center gap-1 text-[10px] text-green-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                        Activo
+                    </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2.5 rounded-xl bg-[#080B14] border border-[#192030]">
+                        <p className="text-[10px] text-[#3D506A] mb-0.5">Puerto local</p>
+                        <p className="text-[13px] font-mono text-[#E4ECF7]">{port}</p>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-[#080B14] border border-[#192030]">
+                        <p className="text-[10px] text-[#3D506A] mb-0.5">IP local</p>
+                        <p className="text-[13px] font-mono text-[#E4ECF7]">{localIp}</p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#080B14] border border-[#192030]">
+                    <Wifi size={11} className="text-[#3D506A] shrink-0" />
+                    <span className="text-[11px] font-mono text-[#7A8FAA] truncate flex-1">{localUrl}</span>
+                    <button
+                        onClick={() => copyText(localUrl)}
+                        className="shrink-0 text-[#3D506A] active:text-green-400 transition-colors cursor-pointer"
+                    >
+                        <Copy size={11} />
+                    </button>
+                </div>
+                <p className="text-[10px] text-[#3D506A]">
+                    URL para mismo WiFi. Para usar desde cualquier red, configura Cloudflare Tunnel en la guía de abajo.
+                </p>
+            </div>
+
+            {/* Config */}
+            <div className="rounded-2xl bg-[#101520] border border-[#1E2A40] p-4 space-y-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] flex items-center gap-2">
+                    <Settings2 size={12} />
+                    Configuración
+                </p>
+                <div className="space-y-1.5">
+                    <FieldLabel>Puerto del servidor</FieldLabel>
+                    <input {...kbPort} className="w-full h-9 px-3 rounded-xl bg-[#080B14] border border-[#1E2A40] text-[#E4ECF7] text-[13px] outline-none focus:border-green-500/40 font-mono" />
+                </div>
+                <div className="space-y-1.5">
+                    <FieldLabel>Filtro de remitente</FieldLabel>
+                    <input {...kbFilter} placeholder="QBien" className="w-full h-9 px-3 rounded-xl bg-[#080B14] border border-[#1E2A40] text-[#E4ECF7] text-[13px] outline-none focus:border-green-500/40" />
+                    <p className="text-[10px] text-[#3D506A]">Solo guarda mensajes que contengan este texto en el remitente o cuerpo. Dejar vacío para guardar todos.</p>
+                </div>
+                <button
+                    onClick={handleSave}
+                    disabled={savingConfig}
+                    className="w-full h-9 rounded-xl bg-green-500/10 border border-green-500/30 text-green-400 text-[12px] font-semibold active:bg-green-500/20 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                    {savingConfig ? 'Guardando...' : 'Guardar y reiniciar servidor'}
+                </button>
+            </div>
+
+            {/* Setup guide */}
+            <div className="rounded-2xl bg-[#101520] border border-[#1E2A40] overflow-hidden">
+                <button
+                    onClick={() => setShowGuide(v => !v)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] active:text-[#7A8FAA] transition-colors cursor-pointer"
+                >
+                    <div className="flex items-center gap-2">
+                        <Info size={12} />
+                        Guía de configuración completa
+                    </div>
+                    <ChevronRight size={12} className={cn('transition-transform', showGuide && 'rotate-90')} />
+                </button>
+                {showGuide && (
+                    <div className="px-4 pb-4 space-y-4 border-t border-[#192030] pt-4">
+                        <SinpeStepBlock n={1} title="Instalar MacroDroid en el celular">
+                            <p className="text-[#7A8FAA] text-[12px]">Descarga <span className="text-[#E4ECF7] font-semibold">MacroDroid</span> (gratis) de ArloSoft en Play Store. Permite automatizar el reenvío de notificaciones al servidor.</p>
+                        </SinpeStepBlock>
+
+                        <SinpeStepBlock n={2} title="Instalar Cloudflare Tunnel en la PC">
+                            <p className="text-[#7A8FAA] text-[12px] mb-2">Descarga <span className="text-[#E4ECF7]">cloudflared.exe</span> desde:</p>
+                            <SinpeCodeBlock text="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" onCopy={copyText} />
+                            <p className="text-[#7A8FAA] text-[12px] mt-2">Mueve el archivo a una carpeta fija, ej: <span className="font-mono text-[#E4ECF7]">C:\cloudflared\</span></p>
+                        </SinpeStepBlock>
+
+                        <SinpeStepBlock n={3} title="Iniciar el túnel">
+                            <p className="text-[#7A8FAA] text-[12px] mb-2">Abre PowerShell y ejecuta:</p>
+                            <SinpeCodeBlock text={`C:\\cloudflared\\cloudflared.exe tunnel --url http://localhost:${port}`} onCopy={copyText} />
+                            <p className="text-[#7A8FAA] text-[12px] mt-2">Verás una URL pública así:</p>
+                            <SinpeCodeBlock text="https://xxxx-xxxx.trycloudflare.com/sms" onCopy={copyText} />
+                            <p className="text-[#7A8FAA] text-[12px] mt-1">Copia esa URL — la necesitas en el paso 4.</p>
+                        </SinpeStepBlock>
+
+                        <SinpeStepBlock n={4} title="Crear macro en MacroDroid">
+                            <div className="space-y-2 text-[12px] text-[#7A8FAA]">
+                                <p>En MacroDroid, toca <span className="text-[#E4ECF7]">+ Agregar macro</span> y configura:</p>
+                                <div className="space-y-1.5 pl-1">
+                                    <p><span className="text-green-400 font-semibold">Trigger:</span> <span className="text-[#E4ECF7]">Notificación recibida</span> → App de Mensajes</p>
+                                    <p><span className="text-green-400 font-semibold">Acción:</span> <span className="text-[#E4ECF7]">Solicitud HTTP</span></p>
+                                </div>
+                                <p className="pt-1">En la acción HTTP pon:</p>
+                                <div className="space-y-1.5 p-2.5 rounded-xl bg-[#080B14] border border-[#192030]">
+                                    <div className="flex gap-2"><span className="text-[#3D506A] shrink-0 w-16">URL:</span><span className="text-[#E4ECF7] font-mono text-[10px] break-all">{localUrl}</span></div>
+                                    <div className="flex gap-2"><span className="text-[#3D506A] shrink-0 w-16">Método:</span><span className="text-[#E4ECF7]">POST</span></div>
+                                    <div className="flex gap-2 items-start"><span className="text-[#3D506A] shrink-0 w-16">Cuerpo:</span><span className="text-[#E4ECF7] font-mono text-[10px] break-all">{`{"from":"{titulo de notificacion}","message":"{texto de notificacion}"}`}</span></div>
+                                    <div className="flex gap-2"><span className="text-[#3D506A] shrink-0 w-16">Header:</span><span className="text-[#E4ECF7] font-mono text-[10px]">Content-Type: application/json</span></div>
+                                </div>
+                                <p className="text-[10px] text-[#3D506A] pt-1">Cuando instales Cloudflare Tunnel, cambia la URL por la pública <span className="text-[#7A8FAA]">https://xxxx.trycloudflare.com/sms</span>.</p>
+                            </div>
+                        </SinpeStepBlock>
+
+                        <SinpeStepBlock n={5} title="Inicio automático del túnel (opcional)">
+                            <p className="text-[#7A8FAA] text-[12px]">Para que el túnel inicie con Windows, abre Ejecutar (<span className="text-[#E4ECF7]">Win+R</span>) y escribe:</p>
+                            <SinpeCodeBlock text="shell:startup" onCopy={copyText} />
+                            <p className="text-[#7A8FAA] text-[12px] mt-1.5">Crea un acceso directo del comando cloudflared en esa carpeta.</p>
+                            <p className="text-[#7A8FAA] text-[10px] mt-1.5">Nota: la URL cambia al reiniciar el túnel. Para URL fija permanente, crea cuenta gratuita en <span className="text-[#E4ECF7]">dash.cloudflare.com</span></p>
+                        </SinpeStepBlock>
+                    </div>
+                )}
+            </div>
+        </SectionContent>
+    )
+}
+
+function SinpeStepBlock({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+    return (
+        <div className="space-y-2">
+            <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-green-500/15 text-green-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                    {n}
+                </span>
+                <span className="text-[12px] font-semibold text-[#E4ECF7]">{title}</span>
+            </div>
+            <div className="ml-7">{children}</div>
+        </div>
+    )
+}
+
+function SinpeCodeBlock({ text, onCopy }: { text: string; onCopy: (t: string) => void }) {
+    return (
+        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-[#060810] border border-[#192030]">
+            <span className="font-mono text-[10px] text-green-300 break-all flex-1 leading-relaxed">{text}</span>
+            <button onClick={() => onCopy(text)} className="shrink-0 text-[#3D506A] active:text-green-400 transition-colors cursor-pointer mt-0.5">
+                <Copy size={11} />
+            </button>
+        </div>
     )
 }

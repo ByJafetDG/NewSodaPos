@@ -32,7 +32,7 @@ function persistSyncError(tableName: string, recordId: string, errorMsg: string)
 }
 
 function clearResolvedSyncErrors() {
-    const syncedTables = ['CashRegister','Employee','Client','Category','Subcategory','Product','Sale','Expense','InventoryMovement','Payment']
+    const syncedTables = ['CashRegister','Employee','Client','Category','Subcategory','Product','Sale','Expense','InventoryMovement','Payment','SinpeMessage']
     for (const t of syncedTables) {
         try {
             execute(`DELETE FROM SyncError WHERE tableName = ? AND recordId IN (SELECT id FROM ${t} WHERE syncStatus = 'SYNCED')`, [t])
@@ -500,6 +500,24 @@ async function pullSync() {
             });
         }
 
+        // 14. Sync SinpeMessages — baja mensajes capturados por Edge Function mientras PC estuvo apagada
+        const { data: sinpeMessages } = await supabase
+            .from('SinpeMessage')
+            .select('*')
+            .order('receivedAt', { ascending: false })
+            .limit(500);
+        if (sinpeMessages) {
+            transaction(() => {
+                for (const msg of sinpeMessages) {
+                    execute(`
+                        INSERT INTO SinpeMessage (id, sender, body, receivedAt, isRead, deletedAt, syncStatus)
+                        VALUES (?, ?, ?, ?, ?, ?, 'SYNCED')
+                        ON CONFLICT(id) DO NOTHING
+                    `, [msg.id, msg.sender, msg.body, msg.receivedAt, msg.isRead ? 1 : 0, msg.deletedAt ?? null]);
+                }
+            });
+        }
+
         console.log('[SyncEngine] Pull items success.');
     } catch (err) {
         console.error('[SyncEngine] Pull failed:', err);
@@ -524,11 +542,12 @@ export async function pushSync(): Promise<string[]> {
     const pendingCategories = query(`SELECT * FROM Category WHERE syncStatus = 'PENDING'`) as any[];
     const pendingSubcategories = query(`SELECT * FROM Subcategory WHERE syncStatus = 'PENDING'`) as any[];
     const pendingConfig = query(`SELECT * FROM BusinessConfig WHERE syncStatus = 'PENDING'`) as any[];
+    const pendingSinpe = query(`SELECT * FROM SinpeMessage WHERE syncStatus = 'PENDING'`) as any[];
 
     const totalPending = pendingSales.length + pendingExpenses.length + pendingMovements.length +
         pendingRegisters.length + pendingPayments.length + pendingEmployees.length +
         pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length +
-        pendingConfig.length;
+        pendingConfig.length + pendingSinpe.length;
 
     if (totalPending === 0) return [];
 
@@ -882,6 +901,27 @@ export async function pushSync(): Promise<string[]> {
         }
     }
 
+    // 11. SinpeMessages — independent, append-only backup
+    for (const msg of pendingSinpe) {
+        try {
+            const { error } = await supabase.from('SinpeMessage').upsert({
+                id: msg.id,
+                sender: msg.sender,
+                body: msg.body,
+                receivedAt: msg.receivedAt,
+                isRead: !!msg.isRead,
+                deletedAt: msg.deletedAt ?? null,
+            });
+            if (error) throw error;
+            execute(`UPDATE SinpeMessage SET syncStatus = 'SYNCED' WHERE id = ?`, [msg.id]);
+        } catch (err: any) {
+            const m = `SinpeMessage ${msg.id}: ${err?.message ?? err}`;
+            logError(m);
+            errors.push(m);
+            persistSyncError('SinpeMessage', msg.id, m);
+        }
+    }
+
     clearResolvedSyncErrors();
     console.log('[SyncEngine] Push cycle complete.');
     return errors;
@@ -1009,6 +1049,22 @@ function setupRealtimeSubscriptions() {
                     execute('DELETE FROM ProductSubcategory WHERE productId = ? AND subcategoryId = ?', [ps.productId, ps.subcategoryId]);
                 } catch {}
                 notifyUI('Product');
+            }
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'SinpeMessage' }, (payload) => {
+            const msg = payload.new as any;
+            if (!msg?.id) return;
+            try {
+                execute(`
+                    INSERT INTO SinpeMessage (id, sender, body, receivedAt, isRead, deletedAt, syncStatus)
+                    VALUES (?, ?, ?, ?, 0, ?, 'SYNCED')
+                    ON CONFLICT(id) DO NOTHING
+                `, [msg.id, msg.sender, msg.body, msg.receivedAt, msg.deletedAt ?? null]);
+            } catch {}
+            if (windowRef && !windowRef.isDestroyed()) {
+                windowRef.webContents.send('sinpe:new-message', {
+                    id: msg.id, sender: msg.sender, body: msg.body, receivedAt: msg.receivedAt, isRead: 0
+                });
             }
         })
         .subscribe();

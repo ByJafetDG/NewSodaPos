@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
     ShoppingCart, Package, Users, Wallet,
     BarChart3, Settings2, Ticket, RotateCcw,
-    Wifi, WifiOff, RefreshCw, CloudOff, Sparkles,
+    Wifi, WifiOff, RefreshCw, CloudOff, Sparkles, MessageSquare,
 } from 'lucide-react'
 import { useUIStore } from '@/store/uiStore'
 import { cn, formatTime } from '@/lib/utils'
@@ -93,6 +93,15 @@ const NAV_ITEMS: NavItem[] = [
         activeBg: 'bg-indigo-500/10',
         activeBar: 'bg-indigo-400',
     },
+    {
+        id: 'sinpe',
+        label: 'SINPE',
+        description: 'Mensajes de pago SINPE Móvil',
+        icon: MessageSquare,
+        color: 'text-green-400',
+        activeBg: 'bg-green-500/10',
+        activeBar: 'bg-green-400',
+    },
 ]
 
 const SETTINGS_ITEM: NavItem = {
@@ -105,10 +114,11 @@ const SETTINGS_ITEM: NavItem = {
     activeBar: 'bg-slate-400',
 }
 
-function NavButton({ item, isActive, onClick }: {
+function NavButton({ item, isActive, onClick, badge }: {
     item: NavItem
     isActive: boolean
     onClick: () => void
+    badge?: number
 }) {
     const Icon = item.icon
     const [showTip, setShowTip] = useState(false)
@@ -141,13 +151,18 @@ function NavButton({ item, isActive, onClick }: {
 
                 {/* Icon */}
                 <div className={cn(
-                    'flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0',
+                    'relative flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0',
                     'transition-colors duration-200',
                     isActive
                         ? cn(item.color, item.activeBg)
                         : 'text-[#3D506A] group-hover:text-[#7A8FAA]',
                 )}>
                     <Icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
+                    {badge != null && badge > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-green-500 text-[9px] font-bold text-white flex items-center justify-center leading-none">
+                            {badge > 99 ? '99+' : badge}
+                        </span>
+                    )}
                 </div>
 
                 {/* Label */}
@@ -182,7 +197,7 @@ function NavButton({ item, isActive, onClick }: {
 }
 
 export function Sidebar() {
-    const { currentPage, setCurrentPage, syncInfo } = useUIStore()
+    const { currentPage, setCurrentPage, syncInfo, sinpeUnread } = useUIStore()
     const [time, setTime] = useState(new Date())
 
     useEffect(() => {
@@ -220,6 +235,7 @@ export function Sidebar() {
                         item={item}
                         isActive={currentPage === item.id}
                         onClick={() => setCurrentPage(item.id)}
+                        badge={item.id === 'sinpe' ? sinpeUnread : undefined}
                     />
                 ))}
             </div>
