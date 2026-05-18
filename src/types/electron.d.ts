@@ -49,6 +49,22 @@ export interface ElectronAPI {
     installUpdate: () => Promise<void>
     checkForUpdate: () => Promise<void>
     openDevTools: () => Promise<void>
+    // SINPE
+    getSinpeMessages: () => Promise<any[]>
+    getSinpeUnreadCount: () => Promise<number>
+    markSinpeRead: (id: string) => Promise<void>
+    markAllSinpeRead: () => Promise<void>
+    deleteSinpeMessage: (id: string) => Promise<void>
+    clearSinpeMessages: () => Promise<void>
+    getSinpeConfig: () => Promise<{ port: number; senderFilter: string }>
+    saveSinpeConfig: (cfg: { port: number; senderFilter: string }) => Promise<{ success: boolean; error?: string }>
+    getSinpeLocalIp: () => Promise<string>
+    getSinpeServerPort: () => Promise<number>
+    getSinpeDeleted: () => Promise<any[]>
+    restoreSinpeMessage: (id: string) => Promise<void>
+    hardDeleteSinpeMessage: (id: string) => Promise<void>
+    clearSinpeTrash: () => Promise<void>
+    onSinpeNewMessage: (callback: (msg: any) => void) => () => void
     platform: string
     isElectron: true
 }
