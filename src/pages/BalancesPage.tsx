@@ -1393,8 +1393,15 @@ function ClientDetailView({ client, onBack, onEdit }: {
                 setEditingInPOS(false)
                 return
             }
+            const snapshot = JSON.stringify({
+                saleNumber: editingSale.saleNumber,
+                items: items.map(i => ({ name: i.product.name, quantity: i.quantity, unitPrice: i.unitPrice, subtotal: i.subtotal })),
+                subtotal: editingSale.subtotal,
+                discount: editingSale.discount,
+                total: editingSale.total,
+            })
             await deleteCreditSale(editingSale.id)
-            pendingSaleLoad.set(items, editingSale.discount, editingSale.id, editingSale.saleNumber, client.name)
+            pendingSaleLoad.set(items, editingSale.discount, editingSale.id, editingSale.saleNumber, client.name, snapshot)
             setCurrentPage('pos')
         } catch (err) {
             toast.error('Error al cargar la cuenta al POS')

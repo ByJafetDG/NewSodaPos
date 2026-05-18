@@ -725,6 +725,7 @@ export function POSPage() {
                 modifiedFromSaleId: pendingSaleLoad.originalSaleId ?? null,
                 companyId: capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null,
                 consumerName: capturedInvoiceClient?.consumerName ?? null,
+                originalSaleSnapshot: pendingSaleLoad.originalSaleSnapshot ?? null,
             })
 
             const resolvedCompanyId = capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null
@@ -890,6 +891,7 @@ export function POSPage() {
                             subtotal: i.subtotal,
                         })),
                         subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
+                        modifiedFromSaleNumber: pendingSaleLoad.originalSaleNumber ?? undefined,
                     }).then(result => {
                         if (result.success) {
                             toast.success(`Recibo enviado a ${client.email}`)

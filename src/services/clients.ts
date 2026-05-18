@@ -305,6 +305,7 @@ function groupSaleRows(rows: any[]): any[] {
                 clientId: row.clientId, status: row.status,
                 notes: row.notes, syncStatus: row.syncStatus,
                 modifiedFromSaleId: row.modifiedFromSaleId ?? null,
+                originalSaleSnapshot: row.originalSaleSnapshot ?? null,
                 createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt),
                 items: [],
             })

@@ -57,6 +57,12 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
 
     const handleLoadOriginal = async () => {
         if (originalSale || !sale?.modifiedFromSaleId) return
+        // Prefer embedded snapshot (original may have been hard-deleted)
+        const snapshot = (sale as any).originalSaleSnapshot
+        if (snapshot) {
+            try { setOriginalSale(JSON.parse(snapshot)) } catch {}
+            return
+        }
         setLoadingOriginal(true)
         try {
             const data = await getSaleDetails(sale.modifiedFromSaleId)
@@ -357,15 +363,46 @@ function SaleTotals({ sale }: { sale: any }) {
     )
 }
 
+type DiffRow = { orig: any | null; curr: any | null; type: 'same' | 'changed' | 'added' | 'removed' }
+
+function buildDiff(origItems: any[], currItems: any[]): DiffRow[] {
+    const rows: DiffRow[] = []
+    const currUsed = new Set<number>()
+    const getName = (item: any) => item.product?.name ?? item.name ?? ''
+
+    for (const origItem of origItems) {
+        const origName = getName(origItem)
+        let matchIdx = -1
+        for (let i = 0; i < currItems.length; i++) {
+            if (currUsed.has(i)) continue
+            if (getName(currItems[i]) === origName) { matchIdx = i; break }
+        }
+        if (matchIdx === -1) {
+            rows.push({ orig: origItem, curr: null, type: 'removed' })
+        } else {
+            currUsed.add(matchIdx)
+            const c = currItems[matchIdx]
+            const changed = origItem.quantity !== c.quantity || Math.abs(origItem.subtotal - c.subtotal) > 0.001
+            rows.push({ orig: origItem, curr: c, type: changed ? 'changed' : 'same' })
+        }
+    }
+    for (let i = 0; i < currItems.length; i++) {
+        if (!currUsed.has(i)) rows.push({ orig: null, curr: currItems[i], type: 'added' })
+    }
+    return rows
+}
+
 function CompareView({ currentSale, originalSale, loading }: { currentSale: any; originalSale: any | null; loading: boolean }) {
     const cfgCurrent = PM_CONFIG[currentSale.paymentMethod] ?? PM_CONFIG.EFECTIVO
     const cfgOriginal = originalSale ? (PM_CONFIG[originalSale.paymentMethod] ?? PM_CONFIG.EFECTIVO) : null
+    const rows = originalSale ? buildDiff(originalSale.items ?? [], currentSale.items ?? []) : []
+    const getName = (item: any) => item.product?.name ?? item.name ?? 'Producto'
 
     return (
-        <div className="flex divide-x divide-[#192030] min-h-[300px]">
-            {/* Left: original */}
-            <div className="flex-1 flex flex-col">
-                <div className="px-4 py-2.5 bg-[#090C14] border-b border-[#192030]">
+        <div className="flex flex-col min-h-[300px]">
+            {/* Column headers */}
+            <div className="flex border-b border-[#192030]">
+                <div className="flex-1 px-4 py-2.5 bg-[#090C14] border-r border-[#192030]">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Original</p>
                     {originalSale && (
                         <p className="text-[12px] text-[#7A8FAA] mt-0.5">
@@ -374,66 +411,94 @@ function CompareView({ currentSale, originalSale, loading }: { currentSale: any;
                         </p>
                     )}
                 </div>
-                {loading ? (
-                    <div className="flex-1 flex items-center justify-center">
-                        <p className="text-[11px] text-[#3D506A]">Cargando...</p>
-                    </div>
-                ) : !originalSale ? (
-                    <div className="flex-1 flex items-center justify-center">
-                        <p className="text-[11px] text-[#3D506A]">No disponible</p>
-                    </div>
-                ) : (
-                    <>
-                        <div className="overflow-y-auto flex-1">
-                            {(originalSale.items ?? []).map((item: any, i: number) => (
-                                <div key={i} className="flex items-center justify-between px-4 py-2 border-b border-[#192030] last:border-0">
-                                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                                        <span className="text-[11px] text-[#3D506A] shrink-0">{item.quantity}×</span>
-                                        <span className="text-[12px] text-[#E4ECF7] truncate">{item.product?.name ?? 'Producto'}</span>
-                                    </div>
-                                    <span className="text-[12px] font-semibold text-[#E4ECF7] ml-3 shrink-0">{formatCurrency(item.subtotal)}</span>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="px-4 py-2.5 border-t border-[#192030] bg-[#090C14] flex justify-between items-baseline">
-                            <span className="text-[11px] text-[#3D506A]">Total</span>
-                            <span className="text-[16px] font-bold text-[#E4ECF7]">{formatCurrency(originalSale.total)}</span>
-                        </div>
-                    </>
-                )}
-            </div>
-
-            {/* Right: current (modified) */}
-            <div className="flex-1 flex flex-col">
-                <div className="px-4 py-2.5 bg-[#090C14] border-b border-[#192030]">
+                <div className="flex-1 px-4 py-2.5 bg-[#090C14]">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-500/60">Modificada</p>
                     <p className="text-[12px] text-[#7A8FAA] mt-0.5">
                         Venta #{currentSale.saleNumber}
                         <span className={cn('ml-2 text-[11px]', cfgCurrent.color)}>{cfgCurrent.label}</span>
                     </p>
                 </div>
-                <div className="overflow-y-auto flex-1">
-                    {(currentSale.items ?? []).map((item: any, i: number) => (
-                        <div key={i} className="flex items-center justify-between px-4 py-2 border-b border-[#192030] last:border-0">
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <span className="text-[11px] text-[#3D506A] shrink-0">{item.quantity}×</span>
-                                <span className="text-[12px] text-[#E4ECF7] truncate">{item.product?.name ?? 'Producto'}</span>
+            </div>
+
+            {/* Body */}
+            {loading ? (
+                <div className="flex-1 flex items-center justify-center py-8">
+                    <p className="text-[11px] text-[#3D506A]">Cargando...</p>
+                </div>
+            ) : !originalSale ? (
+                <div className="flex-1 flex items-center justify-center py-8">
+                    <p className="text-[11px] text-[#3D506A]">No disponible</p>
+                </div>
+            ) : (
+                <div className="flex-1 overflow-y-auto">
+                    {rows.map((row, i) => (
+                        <div
+                            key={i}
+                            className={cn(
+                                'flex border-b border-[#192030] last:border-0',
+                                row.type === 'changed' ? 'bg-amber-500/5' :
+                                row.type === 'added'   ? 'bg-emerald-500/5' :
+                                row.type === 'removed' ? 'bg-red-500/5' : ''
+                            )}
+                        >
+                            {/* Original cell */}
+                            <div className="flex-1 flex items-center justify-between px-4 py-2.5 border-r border-[#192030]">
+                                {row.orig ? (
+                                    <>
+                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                            <span className="text-[11px] text-[#3D506A] shrink-0">{row.orig.quantity}×</span>
+                                            <span className={cn('text-[12px] truncate',
+                                                row.type === 'removed' ? 'text-red-400/60 line-through' : 'text-[#E4ECF7]'
+                                            )}>
+                                                {getName(row.orig)}
+                                            </span>
+                                        </div>
+                                        <span className={cn('text-[12px] font-semibold ml-3 shrink-0',
+                                            row.type === 'changed' ? 'text-[#3D506A] line-through' :
+                                            row.type === 'removed' ? 'text-red-400/50' : 'text-[#E4ECF7]'
+                                        )}>
+                                            {formatCurrency(row.orig.subtotal)}
+                                        </span>
+                                    </>
+                                ) : <span className="text-[12px] text-[#1C2438]">—</span>}
                             </div>
-                            <span className="text-[12px] font-semibold text-[#E4ECF7] ml-3 shrink-0">{formatCurrency(item.subtotal)}</span>
+                            {/* Modified cell */}
+                            <div className="flex-1 flex items-center justify-between px-4 py-2.5">
+                                {row.curr ? (
+                                    <>
+                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                            <span className="text-[11px] text-[#3D506A] shrink-0">{row.curr.quantity}×</span>
+                                            <span className={cn('text-[12px] truncate',
+                                                row.type === 'added' ? 'text-emerald-400' : 'text-[#E4ECF7]'
+                                            )}>
+                                                {getName(row.curr)}
+                                            </span>
+                                        </div>
+                                        <span className={cn('text-[12px] font-semibold ml-3 shrink-0',
+                                            row.type === 'changed' ? 'text-amber-400' :
+                                            row.type === 'added'   ? 'text-emerald-400' : 'text-[#E4ECF7]'
+                                        )}>
+                                            {formatCurrency(row.curr.subtotal)}
+                                        </span>
+                                    </>
+                                ) : <span className="text-[12px] text-[#1C2438]">—</span>}
+                            </div>
                         </div>
                     ))}
                 </div>
-                <div className="px-4 py-2.5 border-t border-[#192030] bg-[#090C14] flex justify-between items-baseline">
+            )}
+
+            {/* Totals */}
+            <div className="flex border-t border-[#192030] bg-[#090C14]">
+                <div className="flex-1 px-4 py-2.5 border-r border-[#192030] flex justify-between items-baseline">
+                    <span className="text-[11px] text-[#3D506A]">Total</span>
+                    <span className="text-[16px] font-bold text-[#E4ECF7]">{formatCurrency(originalSale?.total ?? 0)}</span>
+                </div>
+                <div className="flex-1 px-4 py-2.5 flex justify-between items-baseline">
                     <span className="text-[11px] text-[#3D506A]">Total</span>
                     <span className={cn(
                         'text-[16px] font-bold',
-                        originalSale
-                            ? currentSale.total > originalSale.total
-                                ? 'text-red-400'
-                                : currentSale.total < originalSale.total
-                                    ? 'text-emerald-400'
-                                    : 'text-[#E4ECF7]'
-                            : 'text-[#E4ECF7]'
+                        originalSale && currentSale.total !== originalSale.total ? 'text-amber-400' : 'text-[#E4ECF7]'
                     )}>
                         {formatCurrency(currentSale.total)}
                         {originalSale && currentSale.total !== originalSale.total && (

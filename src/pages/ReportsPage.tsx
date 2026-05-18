@@ -84,6 +84,13 @@ export function ReportsPage() {
         if (items.length === 0) {
             throw new Error('No se pudieron recuperar los productos de esta venta')
         }
+        const snapshot = JSON.stringify({
+            saleNumber: saleInfo?.saleNumber ?? 0,
+            items: items.map(i => ({ name: i.product.name, quantity: i.quantity, unitPrice: i.unitPrice, subtotal: i.subtotal })),
+            subtotal: saleInfo?.subtotal ?? 0,
+            discount: saleInfo?.discount ?? 0,
+            total: saleInfo?.total ?? 0,
+        })
         if (saleInfo?.isCredit) {
             // Credit sale: hard-delete so salesCredit on register stays correct
             await deleteCreditSale(saleId)
@@ -95,7 +102,8 @@ export function ReportsPage() {
             saleInfo?.discount ?? 0,
             saleId,
             saleInfo?.saleNumber ?? 0,
-            saleInfo?.clientName ?? saleInfo?.client?.name ?? null
+            saleInfo?.clientName ?? saleInfo?.client?.name ?? null,
+            snapshot
         )
         setSelectedSale(null)
         setCurrentPage('pos')

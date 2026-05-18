@@ -18,6 +18,7 @@ interface SendReceiptInput {
     discount: number
     total: number
     logoUrl?: string | null
+    modifiedFromSaleNumber?: number | null
 }
 
 interface SettledSaleInfo {
@@ -349,6 +350,24 @@ function buildHTML(input: SendReceiptInput, logoUrl?: string | null): string {
       </table>
     </td>
   </tr>
+
+  ${input.modifiedFromSaleNumber ? `
+  <!-- Modification notice -->
+  <tr>
+    <td bgcolor="#1c1500" style="background:#1c1500;padding:12px 36px;border-left:1px solid #d9770640;border-right:1px solid #d9770640;" class="email-pad">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="vertical-align:middle;padding-right:10px;width:24px;">
+            <span style="font-size:15px;">&#9888;&#65039;</span>
+          </td>
+          <td>
+            <p style="margin:0 0 2px;font-size:12px;font-weight:700;color:#fbbf24;">Factura corregida</p>
+            <p style="margin:0;font-size:11px;color:#92400e;">Esta factura reemplaza a la <strong style="color:#fbbf24;">#${input.modifiedFromSaleNumber}</strong>. Los montos anteriores quedaron sin efecto.</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>` : ''}
 
   <!-- Client + Meta -->
   <tr>
@@ -816,7 +835,9 @@ export async function sendReceiptEmail(input: SendReceiptInput): Promise<{ succe
         const result = await window.electronAPI.sendEmail({
             from: `${input.businessName} <noreply@jafetduarte.dev>`,
             to: [input.to],
-            subject: `Recibo #${input.saleNumber} — ${fmt(input.total)} | ${input.businessName}`,
+            subject: input.modifiedFromSaleNumber
+                ? `Corrección Crédito #${input.saleNumber} (reemplaza #${input.modifiedFromSaleNumber}) — ${fmt(input.total)} | ${input.businessName}`
+                : `Recibo #${input.saleNumber} — ${fmt(input.total)} | ${input.businessName}`,
             html,
         })
         if (!result.success) {

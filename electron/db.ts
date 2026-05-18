@@ -626,6 +626,10 @@ export function initDb() {
     db.exec(`ALTER TABLE Sale ADD COLUMN consumerName TEXT`);
   } catch {}
 
+  try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN originalSaleSnapshot TEXT`);
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);
