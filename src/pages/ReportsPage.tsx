@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import {
-    BarChart3, Banknote, Smartphone, CreditCard,
+    BarChart3, Banknote, Smartphone, CreditCard, Landmark,
     TrendingUp, ShoppingBag, PackageX, AlertTriangle, Calendar,
     Receipt, Search, Clock, X, Ban, UserCircle2, Pencil, ChevronDown,
 } from 'lucide-react'
@@ -9,6 +9,7 @@ import { useReportData, useCashierLeaderboard } from '@/hooks/useReports'
 import { CashierPodium } from '@/components/organisms/pos/CashierPodium'
 import { useVoidSale } from '@/hooks/useSales'
 import { getSaleItemsForCart } from '@/services/sales'
+import { deleteCreditSale } from '@/services/clients'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { cn, formatCurrency } from '@/lib/utils'
 import { ReportSaleModal } from '@/components/modals/ReportSaleModal'
@@ -39,9 +40,12 @@ function getDateRange(filter: string, customFrom: string, customTo: string, show
 
 
 const PM_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-    EFECTIVO: { label: 'Efectivo', color: 'text-emerald-400', bg: 'bg-emerald-500', icon: <Banknote size={13} /> },
-    SINPE:    { label: 'SINPE',    color: 'text-blue-400',    bg: 'bg-blue-500',    icon: <Smartphone size={13} /> },
-    CREDITO:  { label: 'Crédito', color: 'text-violet-400',  bg: 'bg-violet-500',  icon: <CreditCard size={13} /> },
+    EFECTIVO:      { label: 'Efectivo',  color: 'text-emerald-400', bg: 'bg-emerald-500', icon: <Banknote size={13} /> },
+    SINPE:         { label: 'SINPE',     color: 'text-blue-400',    bg: 'bg-blue-500',    icon: <Smartphone size={13} /> },
+    CREDITO:       { label: 'Crédito',   color: 'text-violet-400',  bg: 'bg-violet-500',  icon: <CreditCard size={13} /> },
+    DEPOSITO:      { label: 'Depósito',  color: 'text-amber-400',   bg: 'bg-amber-500',   icon: <Landmark size={13} /> },
+    TARJETA:       { label: 'Tarjeta',   color: 'text-cyan-400',    bg: 'bg-cyan-500',    icon: <CreditCard size={13} /> },
+    TRANSFERENCIA: { label: 'Transfer.', color: 'text-orange-400',  bg: 'bg-orange-500',  icon: <Landmark size={13} /> },
 }
 
 const DATE_FILTERS = ['Hoy', 'Semana', 'Mes', 'Año', 'Todo'] as const
@@ -80,7 +84,12 @@ export function ReportsPage() {
         if (items.length === 0) {
             throw new Error('No se pudieron recuperar los productos de esta venta')
         }
-        await voidSaleMutation.mutateAsync(saleId)
+        if (saleInfo?.isCredit) {
+            // Credit sale: hard-delete so salesCredit on register stays correct
+            await deleteCreditSale(saleId)
+        } else {
+            await voidSaleMutation.mutateAsync(saleId)
+        }
         pendingSaleLoad.set(
             items,
             saleInfo?.discount ?? 0,
@@ -276,7 +285,7 @@ export function ReportsPage() {
                         <p className="text-[12px] font-semibold text-[#7A8FAA] mb-4">Métodos de pago</p>
                         <div className="space-y-3">
                             {Object.entries(effectivePayment).map(([method, amount]) => {
-                                const cfg = PM_CONFIG[method]
+                                const cfg = PM_CONFIG[method] ?? PM_CONFIG['EFECTIVO']
                                 const pct = Math.round((amount / (totalSalesAmt || 1)) * 100)
                                 const barW = Math.round((amount / maxPayment) * 100)
                                 return (

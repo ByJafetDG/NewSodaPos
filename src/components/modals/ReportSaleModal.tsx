@@ -488,7 +488,9 @@ function SaleActions({
                         </p>
                         <p className="text-[11px] text-[#3D506A] mt-0.5">
                             {isModify
-                                ? 'La venta se anulará y sus productos se cargarán en el POS.'
+                                ? sale.isCredit
+                                    ? 'La cuenta de crédito se eliminará y sus productos se cargarán en el POS.'
+                                    : 'La venta se anulará y sus productos se cargarán en el POS.'
                                 : 'El stock se revertirá. Esta acción no se puede deshacer.'}
                         </p>
                     </div>
@@ -529,7 +531,7 @@ function SaleActions({
                     Anular
                 </button>
             )}
-            {onModify && !sale.isCredit && (
+            {onModify && (
                 <button
                     onClick={() => setConfirm('modify')}
                     className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[12px] text-amber-400 hover:bg-amber-500/20 transition-all cursor-pointer"

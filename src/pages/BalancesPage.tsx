@@ -5,13 +5,14 @@ import {
     Phone, Mail, ChevronLeft, CheckCircle2, Receipt, Banknote,
     Check, ChevronDown, CreditCard, History, IdCard,
     Building2, X, Pencil, Send, FileDown, ChevronRight, Printer,
-    Smartphone, Banknote as BanknoteIcon, ArrowLeft,
+    Smartphone, Banknote as BanknoteIcon, ArrowLeft, Landmark,
 } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { ClientFormModal } from '@/components/modals/ClientFormModal'
 import { CompanyFormModal } from '@/components/modals/CompanyFormModal'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
+import { BaseModal } from '@/components/modals/BaseModal'
 import { SaleDetailModal } from '@/components/modals/SaleDetailModal'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import {
@@ -22,7 +23,7 @@ import {
     useAllCompanySales, useCompanySales,
 } from '@/hooks/useClients'
 import { useActiveRegister } from '@/hooks/useCashRegister'
-import { getSaleItemsForCart } from '@/services/sales'
+import { getSaleItemsForCart, getSaleDetails } from '@/services/sales'
 import { deleteCreditSale, settleSaleDirect } from '@/services/clients'
 import { sendCompanyStatementPDFEmail } from '@/services/emailReceipt'
 import { generateCompanyStatementPDF } from '@/services/generateCompanyPDF'
@@ -40,6 +41,11 @@ function parseMixedNotes(notes: string | null | undefined): { ef?: number; sinpe
     const idx = notes.indexOf('||MIXED||')
     if (idx === -1) return null
     try { return JSON.parse(notes.slice(idx + 9)) } catch { return null }
+}
+
+const SETTLE_METHOD_LABEL: Record<string, string> = {
+    EFECTIVO: 'Efectivo', SINPE: 'SINPE', DEPOSITO: 'Depósito',
+    TARJETA: 'Tarjeta', TRANSFERENCIA: 'Trans.',
 }
 
 const TYPE_LABELS: Record<ClientType, string> = {
@@ -304,7 +310,7 @@ export function BalancesPage() {
                             {companies.map(co => {
                                 const coSales = allCompanySales.filter((s: any) => s.companyId === co.id)
                                 const debt = coSales.filter((s: any) => s.isCredit && !s.paidAt).reduce((sum: number, s: any) => sum + s.total, 0)
-                                const invoiceCount = coSales.length
+                                const invoiceCount = coSales.filter((s: any) => s.status !== 'ANULADA').length
                                 return (
                                     <div
                                         key={co.id}
@@ -504,10 +510,14 @@ function CompanyDetailView({ company, onBack, onEdit }: {
     const [expandedId, setExpandedId] = useState<string | null>(null)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [confirmSettle, setConfirmSettle] = useState<string[] | null>(null)
+    const [settleMethod, setSettleMethod] = useState<'EFECTIVO' | 'SINPE' | 'DEPOSITO'>('EFECTIVO')
     const [isSettling, setIsSettling] = useState(false)
     const [isSending, setIsSending] = useState(false)
     const [isPrinting, setIsPrinting] = useState(false)
     const [invoiceSearch, setInvoiceSearch] = useState('')
+    const [coCompareTarget, setCoCompareTarget] = useState<any | null>(null)
+    const [coCompareOriginal, setCoCompareOriginal] = useState<any | null>(null)
+    const [coCompareLoading, setCoCompareLoading] = useState(false)
 
     const { data: sales = [], isLoading } = useCompanySales(company.id)
     const { data: config } = useBusinessConfig()
@@ -515,6 +525,7 @@ function CompanyDetailView({ company, onBack, onEdit }: {
     const invoiceSearchKb = useKeyboardInput(invoiceSearch, setInvoiceSearch, { mode: 'alpha' })
 
     const pendingSales = (sales as any[]).filter(s => s.isCredit && !s.paidAt)
+    const nonVoidedCount = (sales as any[]).filter((s: any) => s.status !== 'ANULADA').length
     const pendingDebt = pendingSales.reduce((sum: number, s: any) => sum + s.total, 0)
     const selectedPendingTotal = pendingSales.filter((s: any) => selectedIds.has(s.id)).reduce((sum: number, s: any) => sum + s.total, 0)
     const allPendingSelected = pendingSales.length > 0 && pendingSales.every((s: any) => selectedIds.has(s.id))
@@ -543,10 +554,10 @@ function CompanyDetailView({ company, onBack, onEdit }: {
         else setSelectedIds(new Set(pendingSales.map((s: any) => s.id)))
     }
 
-    async function handleSettle(ids: string[]) {
+    async function handleSettle(ids: string[], method: string) {
         setIsSettling(true)
         try {
-            for (const id of ids) await settleSaleDirect(id)
+            for (const id of ids) await settleSaleDirect(id, { paymentMethod: method })
             qc.invalidateQueries({ queryKey: ['company-sales', company.id] })
             qc.invalidateQueries({ queryKey: ['all-company-sales'] })
             qc.invalidateQueries({ queryKey: ['credit-sales'] })
@@ -636,6 +647,22 @@ function CompanyDetailView({ company, onBack, onEdit }: {
         catch { return String(d) }
     }
 
+    async function openCoCompare(sale: any) {
+        const origId = sale.modifiedFromSaleId
+        if (!origId) return
+        setCoCompareTarget(sale)
+        setCoCompareOriginal(null)
+        setCoCompareLoading(true)
+        try {
+            const orig = await getSaleDetails(origId)
+            setCoCompareOriginal(orig)
+        } catch {
+            toast.error('No se pudo cargar la factura original')
+        } finally {
+            setCoCompareLoading(false)
+        }
+    }
+
     return (
         <div className="flex flex-col h-full">
             {/* Header */}
@@ -649,7 +676,7 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                     </div>
                     <div>
                         <h1 className="text-[16px] font-semibold text-[#E4ECF7]">{company.name}</h1>
-                        <p className="text-[11px] text-[#3D506A]">{sales.length} factura{sales.length !== 1 ? 's' : ''} · {pendingSales.length} pendiente{pendingSales.length !== 1 ? 's' : ''}</p>
+                        <p className="text-[11px] text-[#3D506A]">{nonVoidedCount} factura{nonVoidedCount !== 1 ? 's' : ''} · {pendingSales.length} pendiente{pendingSales.length !== 1 ? 's' : ''}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -920,14 +947,16 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                         ) : filteredHistory.length === 0 && searchQ ? (
                             <p className="text-center text-[12px] text-[#3D506A] py-8">Sin resultados para "{invoiceSearch}"</p>
                         ) : filteredHistory.map((s: any) => {
-                            const isPending = s.isCredit && !s.paidAt
+                            const isVoided = s.status === 'ANULADA'
+                            const isPending = !isVoided && s.isCredit && !s.paidAt
                             const isExpanded = expandedId === s.id
+                            const isModified = !!s.modifiedFromSaleId
                             return (
                                 <div
                                     key={s.id}
                                     className={cn(
                                         'rounded-xl border transition-all',
-                                        isPending ? 'bg-[#0F1623] border-[#192030]' : 'bg-[#0B1019] border-[#141C28]'
+                                        isVoided ? 'bg-[#0A0D14] border-[#131820] opacity-60' : isPending ? 'bg-[#0F1623] border-[#192030]' : 'bg-[#0B1019] border-[#141C28]'
                                     )}
                                 >
                                     <button
@@ -939,15 +968,26 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                                                 <span className="text-[13px] font-mono font-bold text-[#E4ECF7]">#{s.saleNumber}</span>
                                                 <span className="text-[11px] text-[#3D506A]">{fmtDate(s.date)}</span>
                                                 {s.consumerName && <span className="text-[11px] text-orange-400/80">· {s.consumerName}</span>}
+                                                {isModified && <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/25 px-1.5 py-0.5 rounded-md">Modificada</span>}
                                             </div>
-                                            <p className="text-[11px] text-[#3D506A] truncate">
-                                                {(s.items ?? []).map((it: any) => `${it.quantity}× ${it.productName ?? it.product?.name ?? 'Producto'}`).join(', ') || 'Sin detalles'}
-                                            </p>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <p className="text-[11px] text-[#3D506A] truncate">
+                                                    {(s.items ?? []).map((it: any) => `${it.quantity}× ${it.productName ?? it.product?.name ?? 'Producto'}`).join(', ') || 'Sin detalles'}
+                                                </p>
+                                                {isModified && (
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); openCoCompare(s) }}
+                                                        className="text-[10px] text-amber-400/70 hover:text-amber-400 transition-colors cursor-pointer shrink-0"
+                                                    >
+                                                        Ver cambios →
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="text-right shrink-0 flex flex-col items-end gap-1">
                                             <p className="text-[14px] font-bold text-[#E4ECF7]">{formatCurrency(s.total)}</p>
-                                            <span className={cn('text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded', isPending ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400')}>
-                                                {isPending ? 'Crédito' : 'Pagado'}
+                                            <span className={cn('text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded', isVoided ? 'bg-[#1C2438] text-[#3D506A]' : isPending ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400')}>
+                                                {isVoided ? 'Anulada' : isPending ? 'Crédito' : SETTLE_METHOD_LABEL[s.paymentMethod] ? `Pagado · ${SETTLE_METHOD_LABEL[s.paymentMethod]}` : 'Pagado'}
                                             </span>
                                         </div>
                                         <ChevronRight size={14} className={cn('text-[#3D506A] shrink-0 transition-transform', isExpanded && 'rotate-90')} />
@@ -983,17 +1023,116 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                 )}
             </div>
 
-            {/* Confirm settle modal */}
-            <DeleteConfirmModal
+            {/* Compare modal */}
+            <BaseModal
+                isOpen={coCompareTarget !== null}
+                onClose={() => { setCoCompareTarget(null); setCoCompareOriginal(null) }}
+                title={`Cambios · Factura #${coCompareTarget?.saleNumber}`}
+                width="max-w-2xl"
+            >
+                {coCompareLoading ? (
+                    <p className="text-center text-[12px] text-[#3D506A] py-8">Cargando factura original...</p>
+                ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <p className="text-[11px] text-[#3D506A] uppercase tracking-wider font-semibold">Factura original</p>
+                            <div className="rounded-xl bg-[#0F1623] border border-[#192030] p-3 space-y-1">
+                                {coCompareOriginal ? (coCompareOriginal.items ?? []).map((it: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between text-[12px]">
+                                        <span className="text-[#7A8FAA]">{it.quantity}× {it.product?.name ?? it.productName ?? 'Producto'}</span>
+                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(it.subtotal)}</span>
+                                    </div>
+                                )) : <p className="text-[12px] text-[#3D506A]">No disponible</p>}
+                                {(coCompareOriginal?.discount ?? 0) > 0 && (
+                                    <div className="flex items-center justify-between text-[12px] text-emerald-400 border-t border-[#192030] pt-1">
+                                        <span>Descuento</span><span>-{formatCurrency(coCompareOriginal.discount)}</span>
+                                    </div>
+                                )}
+                                {coCompareOriginal && (
+                                    <div className="flex items-center justify-between text-[13px] font-bold border-t border-[#192030] pt-2">
+                                        <span className="text-[#7A8FAA]">Total</span>
+                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(coCompareOriginal.total)}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <p className="text-[11px] text-amber-400/70 uppercase tracking-wider font-semibold">Factura modificada</p>
+                            <div className="rounded-xl bg-amber-500/5 border border-amber-500/15 p-3 space-y-1">
+                                {(coCompareTarget?.items ?? []).map((it: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between text-[12px]">
+                                        <span className="text-[#7A8FAA]">{it.quantity}× {it.productName ?? it.product?.name ?? 'Producto'}</span>
+                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(it.subtotal)}</span>
+                                    </div>
+                                ))}
+                                {(coCompareTarget?.discount ?? 0) > 0 && (
+                                    <div className="flex items-center justify-between text-[12px] text-emerald-400 border-t border-amber-500/15 pt-1">
+                                        <span>Descuento</span><span>-{formatCurrency(coCompareTarget?.discount ?? 0)}</span>
+                                    </div>
+                                )}
+                                <div className="flex items-center justify-between text-[13px] font-bold border-t border-amber-500/15 pt-2">
+                                    <span className="text-[#7A8FAA]">Total</span>
+                                    <span className={cn('tabular-nums', coCompareOriginal && coCompareTarget && coCompareTarget.total !== coCompareOriginal.total ? 'text-amber-400' : 'text-[#E4ECF7]')}>
+                                        {formatCurrency(coCompareTarget?.total ?? 0)}
+                                        {coCompareOriginal && coCompareTarget && coCompareTarget.total !== coCompareOriginal.total && (
+                                            <span className="text-[11px] ml-1 opacity-70">
+                                                ({coCompareTarget.total > coCompareOriginal.total ? '+' : ''}{formatCurrency(coCompareTarget.total - coCompareOriginal.total)})
+                                            </span>
+                                        )}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </BaseModal>
+
+            {/* Settle payment method modal */}
+            <BaseModal
                 isOpen={confirmSettle !== null}
                 onClose={() => setConfirmSettle(null)}
-                onConfirm={() => confirmSettle && handleSettle(confirmSettle)}
-                title="Saldar facturas"
-                description={`¿Marcar ${confirmSettle?.length === 1 ? 'esta factura' : `${confirmSettle?.length ?? 0} facturas`} como pagadas? Total: ${formatCurrency(confirmSettle?.reduce((s, id) => s + ((sales as any[]).find((x: any) => x.id === id)?.total ?? 0), 0) ?? 0)}`}
-                confirmLabel="Saldar"
-                confirmVariant="success"
-                isPending={isSettling}
-            />
+                title="Método de pago"
+                description={`${confirmSettle?.length === 1 ? '1 factura' : `${confirmSettle?.length ?? 0} facturas`} · Total: ${formatCurrency(confirmSettle?.reduce((s, id) => s + ((sales as any[]).find((x: any) => x.id === id)?.total ?? 0), 0) ?? 0)}`}
+                width="max-w-sm"
+            >
+                <div className="space-y-4">
+                    <div className="grid grid-cols-3 gap-2">
+                        {([
+                            { id: 'EFECTIVO' as const, label: 'Efectivo',  Icon: Banknote   },
+                            { id: 'SINPE'    as const, label: 'SINPE',     Icon: Smartphone },
+                            { id: 'DEPOSITO' as const, label: 'Depósito',  Icon: Landmark   },
+                        ]).map(({ id, label, Icon }) => (
+                            <button
+                                key={id}
+                                onClick={() => setSettleMethod(id)}
+                                className={cn(
+                                    'flex flex-col items-center gap-2 py-3 rounded-xl border text-[12px] font-medium transition-all cursor-pointer',
+                                    settleMethod === id
+                                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                                        : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:border-[#283A56] hover:text-[#E4ECF7]'
+                                )}
+                            >
+                                <Icon size={18} />
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex gap-2">
+                        <Button variant="secondary" size="md" onClick={() => setConfirmSettle(null)} className="flex-1">
+                            Cancelar
+                        </Button>
+                        <Button
+                            variant="success"
+                            size="md"
+                            loading={isSettling}
+                            onClick={() => confirmSettle && handleSettle(confirmSettle, settleMethod)}
+                            className="flex-1"
+                        >
+                            Saldar
+                        </Button>
+                    </div>
+                </div>
+            </BaseModal>
         </div>
     )
 }
@@ -1113,6 +1252,9 @@ function ClientDetailView({ client, onBack, onEdit }: {
     const [editingSale, setEditingSale] = useState<Sale | null>(null)
     const [editStep, setEditStep] = useState<'main' | 'method'>('main')
     const [editingInPOS, setEditingInPOS] = useState(false)
+    const [compareTarget, setCompareTarget] = useState<Sale | null>(null)
+    const [compareOriginal, setCompareOriginal] = useState<any | null>(null)
+    const [compareLoading, setCompareLoading] = useState(false)
 
     const { data: pendingSales = [] } = useCreditSales(client.id)
     const { data: allSales = [] } = useSalesByClient(client.id)
@@ -1212,6 +1354,22 @@ function ClientDetailView({ client, onBack, onEdit }: {
         setEditingSale(null)
         setEditStep('main')
         setEditingInPOS(false)
+    }
+
+    async function openCompare(sale: Sale) {
+        const origId = (sale as any).modifiedFromSaleId
+        if (!origId) return
+        setCompareTarget(sale)
+        setCompareOriginal(null)
+        setCompareLoading(true)
+        try {
+            const orig = await getSaleDetails(origId)
+            setCompareOriginal(orig)
+        } catch {
+            toast.error('No se pudo cargar la venta original')
+        } finally {
+            setCompareLoading(false)
+        }
     }
 
     async function handleConvertPayment(method: 'EFECTIVO' | 'SINPE') {
@@ -1570,6 +1728,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                 const isPending = s.isCredit
                                 const isAnulada = s.status === 'ANULADA'
                                 const mixed = parseMixedNotes((s as any).notes)
+                                const isModified = !!(s as any).modifiedFromSaleId
 
                                 return (
                                     <div
@@ -1595,17 +1754,28 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                                 </span>
                                                 {mixed && <span className="text-[10px] bg-orange-500/12 text-orange-400 border border-orange-500/25 px-1.5 py-0.5 rounded-md">Pago mixto</span>}
                                                 {!mixed && <span className="text-[10px] text-[#3D506A] bg-[#1C2438] px-1.5 py-0.5 rounded-md">{s.paymentMethod}</span>}
+                                                {isModified && <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/25 px-1.5 py-0.5 rounded-md">Modificada</span>}
                                             </div>
-                                            {mixed ? (
-                                                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                                    {mixed.ef != null && <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-md">Efectivo {formatCurrency(mixed.ef)}</span>}
-                                                    {mixed.sinpe != null && <span className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded-md">SINPE {formatCurrency(mixed.sinpe)}</span>}
-                                                    <span className="text-[10px] bg-orange-500/10 text-orange-400 px-1.5 py-0.5 rounded-md">Cuenta {formatCurrency(mixed.cuenta)}</span>
-                                                    <span className="text-[10px] text-[#3D506A]">· {dateStr}</span>
-                                                </div>
-                                            ) : (
-                                                <p className="text-[11px] text-[#3D506A]">{dateStr} · {s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}</p>
-                                            )}
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                {mixed ? (
+                                                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                        {mixed.ef != null && <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-md">Efectivo {formatCurrency(mixed.ef)}</span>}
+                                                        {mixed.sinpe != null && <span className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded-md">SINPE {formatCurrency(mixed.sinpe)}</span>}
+                                                        <span className="text-[10px] bg-orange-500/10 text-orange-400 px-1.5 py-0.5 rounded-md">Cuenta {formatCurrency(mixed.cuenta)}</span>
+                                                        <span className="text-[10px] text-[#3D506A]">· {dateStr}</span>
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-[11px] text-[#3D506A]">{dateStr} · {s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}</p>
+                                                )}
+                                                {isModified && (
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); openCompare(s) }}
+                                                        className="text-[10px] text-amber-400/70 hover:text-amber-400 transition-colors cursor-pointer"
+                                                    >
+                                                        Ver cambios →
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                         <p className={cn('text-[14px] font-bold tabular-nums shrink-0', isAnulada ? 'text-[#3D506A] line-through' : 'text-[#E4ECF7]')}>
                                             {formatCurrency(s.total)}
@@ -1770,6 +1940,69 @@ function ClientDetailView({ client, onBack, onEdit }: {
                 confirmVariant="success"
                 isPending={settleClientSales.isPending}
             />
+
+            <BaseModal
+                isOpen={compareTarget !== null}
+                onClose={() => { setCompareTarget(null); setCompareOriginal(null) }}
+                title={`Cambios · Venta #${compareTarget?.saleNumber}`}
+                width="max-w-2xl"
+            >
+                {compareLoading ? (
+                    <p className="text-center text-[12px] text-[#3D506A] py-8">Cargando venta original...</p>
+                ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <p className="text-[11px] text-[#3D506A] uppercase tracking-wider font-semibold">Venta original</p>
+                            <div className="rounded-xl bg-[#0F1623] border border-[#192030] p-3 space-y-1">
+                                {compareOriginal ? (compareOriginal.items ?? []).map((it: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between text-[12px]">
+                                        <span className="text-[#7A8FAA]">{it.quantity}× {it.product?.name ?? it.productName ?? 'Producto'}</span>
+                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(it.subtotal)}</span>
+                                    </div>
+                                )) : <p className="text-[12px] text-[#3D506A]">No disponible</p>}
+                                {(compareOriginal?.discount ?? 0) > 0 && (
+                                    <div className="flex items-center justify-between text-[12px] text-emerald-400 border-t border-[#192030] pt-1">
+                                        <span>Descuento</span><span>-{formatCurrency(compareOriginal.discount)}</span>
+                                    </div>
+                                )}
+                                {compareOriginal && (
+                                    <div className="flex items-center justify-between text-[13px] font-bold border-t border-[#192030] pt-2">
+                                        <span className="text-[#7A8FAA]">Total</span>
+                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(compareOriginal.total)}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <p className="text-[11px] text-amber-400/70 uppercase tracking-wider font-semibold">Venta modificada</p>
+                            <div className="rounded-xl bg-amber-500/5 border border-amber-500/15 p-3 space-y-1">
+                                {(compareTarget?.items ?? []).map((it: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between text-[12px]">
+                                        <span className="text-[#7A8FAA]">{it.quantity}× {it.product?.name ?? (it as any).productName ?? 'Producto'}</span>
+                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(it.subtotal)}</span>
+                                    </div>
+                                ))}
+                                {(compareTarget?.discount ?? 0) > 0 && (
+                                    <div className="flex items-center justify-between text-[12px] text-emerald-400 border-t border-amber-500/15 pt-1">
+                                        <span>Descuento</span><span>-{formatCurrency(compareTarget?.discount ?? 0)}</span>
+                                    </div>
+                                )}
+                                <div className="flex items-center justify-between text-[13px] font-bold border-t border-amber-500/15 pt-2">
+                                    <span className="text-[#7A8FAA]">Total</span>
+                                    <span className={cn('tabular-nums', compareOriginal && compareTarget && compareTarget.total !== compareOriginal.total ? 'text-amber-400' : 'text-[#E4ECF7]')}>
+                                        {formatCurrency(compareTarget?.total ?? 0)}
+                                        {compareOriginal && compareTarget && compareTarget.total !== compareOriginal.total && (
+                                            <span className="text-[11px] ml-1 opacity-70">
+                                                ({compareTarget.total > compareOriginal.total ? '+' : ''}{formatCurrency(compareTarget.total - compareOriginal.total)})
+                                            </span>
+                                        )}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </BaseModal>
         </div>
     )
 }
