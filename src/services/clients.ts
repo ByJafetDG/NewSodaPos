@@ -140,10 +140,54 @@ export async function updateClient(id: string, input: Partial<ClientInput>): Pro
 }
 
 export async function deleteClient(id: string): Promise<void> {
+    const now = new Date().toISOString()
     if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            "UPDATE Client SET isActive = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?",
+            [now, id]
+        )
+        return
+    }
+    const { error } = await supabase.from('Client').update({ isActive: false, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
+    if (error) throw error
+}
+
+export async function getDeletedClients(): Promise<any[]> {
+    if (window.electronAPI) {
+        return await window.electronAPI.dbQuery(
+            "SELECT * FROM Client WHERE isActive = 0 ORDER BY name ASC"
+        )
+    }
+    const { data } = await supabase.from('Client').select('*').eq('isActive', false).order('name')
+    return data ?? []
+}
+
+export async function restoreClient(id: string): Promise<void> {
+    const now = new Date().toISOString()
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            "UPDATE Client SET isActive = 1, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?",
+            [now, id]
+        )
+        return
+    }
+    const { error } = await supabase.from('Client').update({ isActive: true, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
+    if (error) throw error
+}
+
+export async function hardDeleteClient(id: string): Promise<void> {
+    const now = new Date().toISOString()
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            "UPDATE Sale SET clientId = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE clientId = ?",
+            [now, id]
+        )
+        await window.electronAPI.dbExecute("DELETE FROM Payment WHERE clientId = ?", [id])
         await window.electronAPI.dbExecute("DELETE FROM Client WHERE id = ?", [id])
         return
     }
+    await supabase.from('Sale').update({ clientId: null, updatedAt: now }).eq('clientId', id)
+    await supabase.from('Payment').delete().eq('clientId', id)
     const { error } = await supabase.from('Client').delete().eq('id', id)
     if (error) throw error
 }

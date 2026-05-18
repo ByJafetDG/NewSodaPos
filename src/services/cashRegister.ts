@@ -118,7 +118,7 @@ export async function closeRegister(registerId: string, finalAmount: number, not
             .filter((s: any) => s.paymentMethod2 === 'SINPE')
             .reduce((sum: number, s: any) => sum + (s.amount2 ?? 0), 0);
         const salesCredit = sales
-            .filter((s: any) => s.isCredit === 1 && !s.paymentMethod2)
+            .filter((s: any) => s.paymentMethod === 'CREDITO' && !s.paymentMethod2)
             .reduce((sum: number, s: any) => sum + s.total, 0)
             + sales
             .filter((s: any) => s.paymentMethod2 === 'CREDITO')

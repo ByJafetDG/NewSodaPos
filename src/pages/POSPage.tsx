@@ -62,7 +62,7 @@ export function POSPage() {
     const updateClient = useUpdateClient()
 
     // ── Cart ────────────────────────────────────────────────────────────────
-    const { items, addItem, removeItem, removeItems, updateQuantity, clearCart, loadOrder, getSubtotal, getTotal, discount } = useCartStore()
+    const { items, addItem, removeItem, removeItems, updateQuantity, clearCart, loadOrder, getSubtotal, getTotal, discount, invoiceClient, setInvoiceClient } = useCartStore()
     const { orders: heldOrders, saveOrder: saveHeldOrder, updateOrder: updateHeldOrder, renameOrder: renameHeldOrder, deleteOrder: deleteHeldOrder } = useHeldOrdersStore()
     const subtotal = getSubtotal()
     const total = getTotal()
@@ -118,6 +118,7 @@ export function POSPage() {
     const [activeOrderName, setActiveOrderName] = useState<string | null>(null)
     const [mergeSnapshot, setMergeSnapshot] = useState<HeldOrder[] | null>(null)
     const [autoSavedFusionId, setAutoSavedFusionId] = useState<string | null>(null)
+    const [showInvoiceModal, setShowInvoiceModal] = useState(false)
 
     // Autosave: cart changes → update linked held order in store
     useEffect(() => {
@@ -126,7 +127,7 @@ export function POSPage() {
                 const debtSnapshot = pendingDebt.hasDebt
                     ? { clientId: pendingDebt.clientId, clientName: pendingDebt.clientName, saleIds: pendingDebt.saleIds, debtTotal: pendingDebt.debtTotal, sales: pendingDebt.sales }
                     : undefined
-                updateHeldOrder(activeOrderId, items, discount, debtSnapshot)
+                updateHeldOrder(activeOrderId, items, discount, debtSnapshot, invoiceClient)
             } else {
                 // All items removed manually — delete the now-empty held order
                 deleteHeldOrder(activeOrderId)
@@ -135,7 +136,7 @@ export function POSPage() {
                 toast.warning('Cuenta vaciada — se eliminó automáticamente')
             }
         }
-    }, [items, discount, activeOrderId])
+    }, [items, discount, activeOrderId, invoiceClient])
 
     // ── Modals ───────────────────────────────────────────────────────────────
     const [showCreditModal, setShowCreditModal] = useState(false)
@@ -151,8 +152,6 @@ export function POSPage() {
     const [scanOutOfStock, setScanOutOfStock] = useState<Product | null>(null)
     const [showCreateProduct, setShowCreateProduct] = useState(false)
     const [createProductBarcode, setCreateProductBarcode] = useState('')
-    const [showInvoiceModal, setShowInvoiceModal] = useState(false)
-    const [invoiceClient, setInvoiceClient] = useState<{ name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string } | null>(null)
 
     // ── Pending sale load (from Reports page modify flow) ────────────────────
     const pendingSaleLoad = usePendingSaleLoadStore()
@@ -312,20 +311,25 @@ export function POSPage() {
             ? { clientId: pendingDebt.clientId, clientName: pendingDebt.clientName, saleIds: pendingDebt.saleIds, debtTotal: pendingDebt.debtTotal, sales: pendingDebt.sales }
             : undefined
         if (activeOrderId) {
-            updateHeldOrder(activeOrderId, items, discount, debtSnapshot)
+            updateHeldOrder(activeOrderId, items, discount, debtSnapshot, invoiceClient)
         } else {
             const actualName = name.trim() || `Cuenta pendiente ${heldOrders.length + 1}`
-            saveHeldOrder(actualName, items, discount, debtSnapshot)
+            saveHeldOrder(actualName, items, discount, debtSnapshot, undefined, invoiceClient)
         }
         pendingDebt.clear()
         clearCart()
+        setInvoiceClient(null)
         setAmountReceived('')
         setActiveOrderId(null)
         setActiveOrderName(null)
         setHeldOrdersView(null)
     }
 
-    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string }) => {
+    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string }) => {
+        if (data.companyId) {
+            setInvoiceClient({ name: data.name, cedula: data.cedula, email: data.email, ccEmails: data.ccEmails, companyId: data.companyId, consumerName: data.consumerName })
+            return
+        }
         let finalId = data.existingId
         try {
             if (data.existingId) {
@@ -386,6 +390,7 @@ export function POSPage() {
         setActiveOrderId(null)
         setActiveOrderName(null)
         clearCart()
+        setInvoiceClient(null)
         setAmountReceived('')
         setHeldOrdersView(null)
         pendingDebt.clear()
@@ -439,6 +444,7 @@ export function POSPage() {
         loadOrder(validItems, order.discount)
         setActiveOrderId(order.id)
         setActiveOrderName(order.name)
+        setInvoiceClient(order.invoiceClient ?? null)
         setHeldOrdersView(null)
         if (order.pendingDebt) {
             const d = order.pendingDebt
@@ -550,7 +556,7 @@ export function POSPage() {
         await processSale({ method: paymentMethod })
     }
 
-    const processSale = async ({ isCredit = false, clientId = null as string | null, method = paymentMethod }) => {
+    const processSale = async ({ isCredit = false, clientId = null as string | null, method = paymentMethod, companyId = null as string | null }) => {
         try {
             // Capture before clearCart — closures over Zustand state can become stale after async points
             const saleItems = items
@@ -571,6 +577,7 @@ export function POSPage() {
             const capturedCreditAmt = capturedHasCuenta ? creditAmountNum : 0
             const capturedCreditClientId = capturedHasCuenta ? creditClientId : null
             const capturedInvoiceClient = invoiceClient
+            const capturedCreditCompanyId = companyId
 
             // Cart empty + debt only: settle original sales (no new sale, avoids empty-items record)
             if (saleItems.length === 0 && capturedDebt && !isCredit) {
@@ -716,7 +723,15 @@ export function POSPage() {
                     ? { clientId: capturedCreditClientId, amount: capturedCreditAmt }
                     : null,
                 modifiedFromSaleId: pendingSaleLoad.originalSaleId ?? null,
+                companyId: capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null,
+                consumerName: capturedInvoiceClient?.consumerName ?? null,
             })
+
+            const resolvedCompanyId = capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null
+            if (resolvedCompanyId) {
+                qc.invalidateQueries({ queryKey: ['company-sales', resolvedCompanyId] })
+                qc.invalidateQueries({ queryKey: ['all-company-sales'] })
+            }
 
             if (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId) {
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
@@ -1188,9 +1203,10 @@ export function POSPage() {
                                 onChangeCreditAmount={setCreditAmount}
                                 creditClientId={creditClientId}
                                 onSelectCreditClient={setCreditClientId}
-                                clients={clients.filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name }))}
+                                clients={clients.filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name, code: c.code ?? null }))}
                                 invoiceClient={invoiceClient}
                                 onOpenInvoiceModal={() => setShowInvoiceModal(true)}
+                                onClearInvoiceClient={() => setInvoiceClient(null)}
                             />
                         </div>
                     </>
@@ -1270,9 +1286,10 @@ export function POSPage() {
                                     onChangeCreditAmount={setCreditAmount}
                                     creditClientId={creditClientId}
                                     onSelectCreditClient={setCreditClientId}
-                                    clients={clients.filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name }))}
+                                    clients={clients.filter((c: any) => c.isActive).map((c: any) => ({ id: c.id, name: c.name, code: c.code ?? null }))}
                                     invoiceClient={invoiceClient}
                                     onOpenInvoiceModal={() => setShowInvoiceModal(true)}
+                                    onClearInvoiceClient={() => setInvoiceClient(null)}
                                 />
                             </div>
                         </div>
@@ -1305,6 +1322,7 @@ export function POSPage() {
                 selectedClientId={selectedClientId}
                 onSelectClient={setSelectedClientId}
                 onConfirm={() => processSale({ isCredit: true, clientId: selectedClientId })}
+                onConfirmCompany={(cid) => processSale({ isCredit: true, clientId: null, companyId: cid })}
                 onSplitConfirm={handleSplitCreditConfirm}
                 isPending={createSale.isPending || splitCreditPending}
             />

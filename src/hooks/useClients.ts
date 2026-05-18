@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getClients, createClient, updateClient, deleteClient, getCreditSales, settleSale, settleClientSales, settleClientSalesWithMethod, getSalesByClient, deleteCreditSale, settleSaleDirect, getCompanies, createCompany, updateCompany, deleteCompany } from '@/services/clients'
+import { getSalesForCompany, getAllCompanySales } from '@/services/sales'
 import { toast } from '@/components/ui/Toast'
 import type { Client, Company } from '@/types'
 
@@ -49,10 +50,11 @@ export function useCreditSales(clientId?: string) {
 export function useSettleSale() {
     const qc = useQueryClient()
     return useMutation({
-        mutationFn: settleSale,
+        mutationFn: (id: string) => settleSaleDirect(id),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['credit-sales'] })
             qc.invalidateQueries({ queryKey: ['clients'] })
+            qc.invalidateQueries({ queryKey: ['active-register'] })
         },
         onError: (err: Error) => toast.error(err.message),
     })
@@ -166,5 +168,22 @@ export function useDeleteCompany() {
             qc.invalidateQueries({ queryKey: ['companies'] })
             qc.invalidateQueries({ queryKey: ['clients'] })
         },
+    })
+}
+
+export function useCompanySales(companyId: string | null) {
+    return useQuery({
+        queryKey: ['company-sales', companyId],
+        queryFn: () => getSalesForCompany(companyId!),
+        enabled: !!companyId,
+        staleTime: 1000 * 30,
+    })
+}
+
+export function useAllCompanySales() {
+    return useQuery({
+        queryKey: ['all-company-sales'],
+        queryFn: getAllCompanySales,
+        staleTime: 1000 * 30,
     })
 }

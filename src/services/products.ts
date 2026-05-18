@@ -118,8 +118,8 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(`
             INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, price, cost, minStock, stockQty, isActive, isInfinite, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, 'PENDING', ?)
-        `, [id, productInput.name, productInput.barcode || null, productInput.categoryId, productInput.price, productInput.cost || 0, productInput.minStock || 0, productInput.stockQty || 0, productInput.isInfinite ? 1 : 0, now]);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'PENDING', ?)
+        `, [id, productInput.name, productInput.barcode || null, productInput.categoryId, subcategoryIds?.[0] ?? null, productInput.price, productInput.cost || 0, productInput.minStock || 0, productInput.stockQty || 0, productInput.isInfinite ? 1 : 0, now]);
 
         if (subcategoryIds?.length) {
             for (const subId of subcategoryIds) {
@@ -239,6 +239,57 @@ export async function updateProductStock(productId: string, delta: number): Prom
         .update({ stockQty: newQty, updatedAt: new Date().toISOString() })
         .eq('id', productId)
 
+    if (error) throw error
+}
+
+export async function getDeletedProducts(): Promise<any[]> {
+    if (window.electronAPI) {
+        const data = await window.electronAPI.dbQuery(`
+            SELECT p.*, c.name as cat_name FROM Product p
+            LEFT JOIN Category c ON p.categoryId = c.id
+            WHERE p.isDeleted = 1 ORDER BY p.name ASC
+        `)
+        return data
+    }
+    const { data } = await supabase
+        .from('Product')
+        .select('*, category:Category(name)')
+        .eq('isDeleted', true)
+        .order('name')
+    return data ?? []
+}
+
+export async function restoreProduct(id: string): Promise<void> {
+    const now = new Date().toISOString()
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            "UPDATE Product SET isDeleted = 0, isActive = 1, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?",
+            [now, id]
+        )
+        return
+    }
+    const { error } = await supabase
+        .from('Product')
+        .update({ isDeleted: false, isActive: true, updatedAt: now })
+        .eq('id', id)
+    if (error) throw error
+}
+
+export async function hardDeleteProduct(id: string): Promise<void> {
+    if (window.electronAPI) {
+        const saleItems = await window.electronAPI.dbQuery(
+            'SELECT id FROM SaleItem WHERE productId = ? LIMIT 1', [id]
+        )
+        if (saleItems.length > 0) throw new Error('El producto tiene ventas y no puede eliminarse permanentemente')
+        await window.electronAPI.dbExecute('DELETE FROM ProductSubcategory WHERE productId = ?', [id])
+        await window.electronAPI.dbExecute('DELETE FROM Product WHERE id = ?', [id])
+        return
+    }
+    const { count } = await supabase
+        .from('SaleItem').select('id', { count: 'exact', head: true }).eq('productId', id)
+    if ((count ?? 0) > 0) throw new Error('El producto tiene ventas y no puede eliminarse permanentemente')
+    await supabase.from('ProductSubcategory').delete().eq('productId', id)
+    const { error } = await supabase.from('Product').delete().eq('id', id)
     if (error) throw error
 }
 

@@ -1,35 +1,37 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
     Users, Search, Plus, Edit3, Trash2, UserCircle2,
     Phone, Mail, ChevronLeft, CheckCircle2, Receipt, Banknote,
     Check, ChevronDown, CreditCard, History, IdCard,
-    Building2, Send, AlertTriangle, X, FileDown, Pencil,
+    Building2, X, Pencil, Send, FileDown, ChevronRight, Printer,
     Smartphone, Banknote as BanknoteIcon, ArrowLeft,
 } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { ClientFormModal } from '@/components/modals/ClientFormModal'
 import { CompanyFormModal } from '@/components/modals/CompanyFormModal'
-import { SettlePaymentModal } from '@/components/modals/SettlePaymentModal'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { SaleDetailModal } from '@/components/modals/SaleDetailModal'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import {
     useClients, useCreateClient, useUpdateClient, useDeleteClient,
     useCreditSales, useSettleSale, useSettleSaleDirect, useSettleClientSales, useSalesByClient,
-    useDeleteCreditSale, useSettleClientSalesWithMethod, useConvertCreditPayment,
+    useDeleteCreditSale, useConvertCreditPayment,
     useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany,
+    useAllCompanySales, useCompanySales,
 } from '@/hooks/useClients'
 import { useActiveRegister } from '@/hooks/useCashRegister'
 import { getSaleItemsForCart } from '@/services/sales'
-import { deleteCreditSale } from '@/services/clients'
+import { deleteCreditSale, settleSaleDirect } from '@/services/clients'
+import { sendCompanyStatementPDFEmail } from '@/services/emailReceipt'
+import { generateCompanyStatementPDF } from '@/services/generateCompanyPDF'
 import { usePendingSaleLoadStore } from '@/store/pendingSaleLoadStore'
 import { cn, formatCurrency, normalizeStr } from '@/lib/utils'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
 import { useUIStore } from '@/store/uiStore'
 import { useBusinessConfig } from '@/hooks/useConfig'
-import { sendSettledEmail, sendCompanyBillingEmail, sendCompanyStatementPDFEmail } from '@/services/emailReceipt'
-import { generateCompanyStatementPDF } from '@/services/generateCompanyPDF'
+import { sendSettledEmail } from '@/services/emailReceipt'
 import { toast } from '@/components/ui/Toast'
 import type { Client, ClientType, Company, Sale } from '@/types'
 
@@ -76,11 +78,12 @@ export function BalancesPage() {
     const [companyFormOpen, setCompanyFormOpen] = useState(false)
     const [editingCompany, setEditingCompany] = useState<Company | null>(null)
     const [deletingCompany, setDeletingCompany] = useState<Company | null>(null)
-    const [newClientCompanyId, setNewClientCompanyId] = useState<string | null>(null)
+
 
     const { data: clients = [] } = useClients()
     const { data: companies = [] } = useCompanies()
     const { data: allCreditSales = [] } = useCreditSales()
+    const { data: allCompanySales = [] } = useAllCompanySales()
     const { data: config } = useBusinessConfig()
     const createClient = useCreateClient()
     const updateClient = useUpdateClient()
@@ -145,7 +148,7 @@ export function BalancesPage() {
         await settleSale.mutateAsync(saleId)
     }
 
-    function handleNew() { setEditingClient(null); setNewClientCompanyId(null); setFormOpen(true) }
+    function handleNew() { setEditingClient(null); setFormOpen(true) }
     function handleEdit(client: Client) { setEditingClient(client); setFormOpen(true) }
 
     async function handleFormConfirm(data: Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>) {
@@ -154,7 +157,7 @@ export function BalancesPage() {
         } else {
             await createClient.mutateAsync(data)
         }
-        setFormOpen(false); setEditingClient(null); setNewClientCompanyId(null)
+        setFormOpen(false); setEditingClient(null)
     }
 
     async function handleToggle(client: Client) {
@@ -197,7 +200,6 @@ export function BalancesPage() {
                     onClose={() => { setFormOpen(false); setEditingClient(null) }}
                     onConfirm={handleFormConfirm}
                     client={editingClient}
-                    companies={companies}
                     isPending={createClient.isPending || updateClient.isPending}
                 />
             </>
@@ -206,25 +208,12 @@ export function BalancesPage() {
 
     const selectedCompany = companies.find(c => c.id === selectedCompanyId) ?? null
     if (selectedCompany) {
-        const employees = clients.filter(cl => cl.companyId === selectedCompany.id)
-        const availableClients = clients.filter(cl => !cl.companyId && cl.isActive)
         return (
             <>
                 <CompanyDetailView
                     company={selectedCompany}
-                    employees={employees}
-                    allCreditSales={allCreditSales}
-                    config={config}
                     onBack={() => setSelectedCompanyId(null)}
                     onEdit={() => { setEditingCompany(selectedCompany); setCompanyFormOpen(true) }}
-                    onSelectEmployee={(id) => setSelectedClientId(id)}
-                    onNewEmployee={() => { setEditingClient(null); setNewClientCompanyId(selectedCompany.id); setFormOpen(true) }}
-                    onAssignEmployees={async (ids) => {
-                        for (const id of ids) {
-                            await updateClient.mutateAsync({ id, input: { companyId: selectedCompany.id } as any })
-                        }
-                    }}
-                    availableClients={availableClients}
                 />
                 <CompanyFormModal
                     isOpen={companyFormOpen}
@@ -232,15 +221,6 @@ export function BalancesPage() {
                     onConfirm={handleCompanyFormConfirm}
                     company={editingCompany}
                     isPending={createCompany.isPending || updateCompany.isPending}
-                />
-                <ClientFormModal
-                    isOpen={formOpen}
-                    onClose={() => { setFormOpen(false); setEditingClient(null); setNewClientCompanyId(null) }}
-                    onConfirm={handleFormConfirm}
-                    client={editingClient}
-                    companies={companies}
-                    defaultCompanyId={newClientCompanyId ?? undefined}
-                    isPending={createClient.isPending || updateClient.isPending}
                 />
             </>
         )
@@ -322,16 +302,14 @@ export function BalancesPage() {
                     ) : (
                         <div className="p-6 space-y-3">
                             {companies.map(co => {
-                                const emps = clients.filter(cl => cl.companyId === co.id)
-                                const empDebt = emps.reduce((sum, emp) => {
-                                    return sum + allCreditSales.filter((s: Sale) => s.clientId === emp.id).reduce((s2, sale) => s2 + sale.total, 0)
-                                }, 0)
-                                const empCount = emps.filter(e => e.isActive).length
+                                const coSales = allCompanySales.filter((s: any) => s.companyId === co.id)
+                                const debt = coSales.filter((s: any) => s.isCredit && !s.paidAt).reduce((sum: number, s: any) => sum + s.total, 0)
+                                const invoiceCount = coSales.length
                                 return (
                                     <div
                                         key={co.id}
                                         onClick={() => setSelectedCompanyId(co.id)}
-                                        className="flex items-center gap-4 px-5 py-4 rounded-xl bg-[#0F1623] border border-[#192030] cursor-pointer"
+                                        className="flex items-center gap-4 px-5 py-4 rounded-xl bg-[#0F1623] border border-[#192030] hover:bg-[#141C2E] hover:border-[#283A56] transition-all cursor-pointer"
                                     >
                                         <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/15 flex items-center justify-center shrink-0">
                                             <Building2 size={18} className="text-orange-400" />
@@ -339,15 +317,15 @@ export function BalancesPage() {
                                         <div className="flex-1 min-w-0">
                                             <p className="text-[14px] font-semibold text-[#E4ECF7] truncate">{co.name}</p>
                                             <div className="flex items-center gap-3 mt-0.5">
-                                                <span className="text-[11px] text-[#3D506A]">{empCount} colaborador{empCount !== 1 ? 'es' : ''}</span>
+                                                <span className="text-[11px] text-[#3D506A]">{invoiceCount} factura{invoiceCount !== 1 ? 's' : ''}</span>
                                                 {co.billingEmail && <span className="text-[11px] text-[#3D506A]">· {co.billingEmail}</span>}
                                             </div>
                                         </div>
                                         <div className="text-right shrink-0">
-                                            {empDebt > 0 ? (
+                                            {debt > 0 ? (
                                                 <>
-                                                    <p className="text-[15px] font-bold text-red-400">{formatCurrency(empDebt)}</p>
-                                                    <p className="text-[11px] text-[#3D506A]">deuda total</p>
+                                                    <p className="text-[15px] font-bold text-red-400">{formatCurrency(debt)}</p>
+                                                    <p className="text-[11px] text-[#3D506A]">deuda pendiente</p>
                                                 </>
                                             ) : (
                                                 <span className="text-[13px] font-medium text-emerald-400">Al día</span>
@@ -470,11 +448,9 @@ export function BalancesPage() {
             {/* Modals */}
             <ClientFormModal
                 isOpen={formOpen}
-                onClose={() => { setFormOpen(false); setEditingClient(null); setNewClientCompanyId(null) }}
+                onClose={() => { setFormOpen(false); setEditingClient(null) }}
                 onConfirm={handleFormConfirm}
                 client={editingClient}
-                companies={companies}
-                defaultCompanyId={newClientCompanyId ?? undefined}
                 isPending={createClient.isPending || updateClient.isPending}
             />
             <CompanyFormModal
@@ -519,146 +495,146 @@ export function BalancesPage() {
 
 // ─── Company detail view ──────────────────────────────────────────────────────
 
-function CompanyDetailView({ company, employees, allCreditSales, config, onBack, onEdit, onSelectEmployee, onNewEmployee, onAssignEmployees, availableClients }: {
+function CompanyDetailView({ company, onBack, onEdit }: {
     company: Company
-    employees: Client[]
-    allCreditSales: Sale[]
-    config: any
     onBack: () => void
     onEdit: () => void
-    onSelectEmployee: (id: string) => void
-    onNewEmployee: () => void
-    onAssignEmployees: (ids: string[]) => Promise<void>
-    availableClients: Client[]
 }) {
-    const [settleAllOpen, setSettleAllOpen] = useState(false)
-    const [settleEmployeeId, setSettleEmployeeId] = useState<string | null>(null)
+    const [tab, setTab] = useState<'pending' | 'history'>('pending')
+    const [expandedId, setExpandedId] = useState<string | null>(null)
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+    const [confirmSettle, setConfirmSettle] = useState<string[] | null>(null)
+    const [isSettling, setIsSettling] = useState(false)
+    const [isSending, setIsSending] = useState(false)
+    const [isPrinting, setIsPrinting] = useState(false)
+    const [invoiceSearch, setInvoiceSearch] = useState('')
 
-    const [assignOpen, setAssignOpen] = useState(false)
-    const [assignSearch, setAssignSearch] = useState('')
-    const [assignSelectedIds, setAssignSelectedIds] = useState<Set<string>>(new Set())
-    const [assigning, setAssigning] = useState(false)
+    const { data: sales = [], isLoading } = useCompanySales(company.id)
+    const { data: config } = useBusinessConfig()
+    const qc = useQueryClient()
+    const invoiceSearchKb = useKeyboardInput(invoiceSearch, setInvoiceSearch, { mode: 'alpha' })
 
-    // Unified billing/pdf two-step flow
-    const [flowType, setFlowType] = useState<null | 'billing' | 'pdf'>(null)
-    const [flowStep, setFlowStep] = useState<'select' | 'confirm'>('select')
-    const [flowSearch, setFlowSearch] = useState('')
-    const [flowPage, setFlowPage] = useState(0)
-    const [flowSelectedIds, setFlowSelectedIds] = useState<Set<string>>(new Set())
-    const [flowEmailAddress, setFlowEmailAddress] = useState('')
-    const [flowSending, setFlowSending] = useState(false)
+    const pendingSales = (sales as any[]).filter(s => s.isCredit && !s.paidAt)
+    const pendingDebt = pendingSales.reduce((sum: number, s: any) => sum + s.total, 0)
+    const selectedPendingTotal = pendingSales.filter((s: any) => selectedIds.has(s.id)).reduce((sum: number, s: any) => sum + s.total, 0)
+    const allPendingSelected = pendingSales.length > 0 && pendingSales.every((s: any) => selectedIds.has(s.id))
 
-    const settleWithMethod = useSettleClientSalesWithMethod()
-    const flowSearchKb = useKeyboardInput(flowSearch, (v) => { setFlowSearch(v); setFlowPage(0) }, { mode: 'alpha' })
-    const flowEmailKb = useKeyboardInput(flowEmailAddress, setFlowEmailAddress, { mode: 'alpha' })
-
-    function employeePendingSales(empId: string): Sale[] {
-        return allCreditSales.filter((s: Sale) => s.clientId === empId)
+    const searchQ = invoiceSearch.trim().toLowerCase()
+    function matchesSearch(s: any) {
+        if (!searchQ) return true
+        if (String(s.saleNumber).includes(searchQ)) return true
+        if ((s.consumerName ?? '').toLowerCase().includes(searchQ)) return true
+        if ((s.items ?? []).some((it: any) => (it.productName ?? it.product?.name ?? '').toLowerCase().includes(searchQ))) return true
+        return false
     }
-    function employeePendingTotal(empId: string): number {
-        return employeePendingSales(empId).reduce((s, sale) => s + sale.total, 0)
+    const filteredPending = pendingSales.filter(matchesSearch)
+    const filteredHistory = (sales as any[]).filter(matchesSearch)
+
+    function toggleExpand(id: string) { setExpandedId(prev => prev === id ? null : id) }
+    function toggleSelect(id: string) {
+        setSelectedIds(prev => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id); else next.add(id)
+            return next
+        })
+    }
+    function toggleAllPending() {
+        if (allPendingSelected) setSelectedIds(new Set())
+        else setSelectedIds(new Set(pendingSales.map((s: any) => s.id)))
     }
 
-    const activeEmployees = employees.filter(e => e.isActive)
-    const employeesWithDebt = activeEmployees.filter(e => employeePendingTotal(e.id) > 0)
-    const totalDebt = activeEmployees.reduce((s, e) => s + employeePendingTotal(e.id), 0)
-
-    const settleEmployee = employees.find(e => e.id === settleEmployeeId) ?? null
-    const settleEmployeeAmount = settleEmployeeId ? employeePendingTotal(settleEmployeeId) : 0
-
-    async function handleSettleEmployee(method: string) {
-        if (!settleEmployeeId) return
-        await settleWithMethod.mutateAsync({ clientId: settleEmployeeId, method })
-        setSettleEmployeeId(null)
-        toast.success(`Cuenta de ${settleEmployee?.name} saldada`)
-    }
-
-    async function handleSettleAll(method: string) {
-        for (const emp of employeesWithDebt) {
-            await settleWithMethod.mutateAsync({ clientId: emp.id, method })
+    async function handleSettle(ids: string[]) {
+        setIsSettling(true)
+        try {
+            for (const id of ids) await settleSaleDirect(id)
+            qc.invalidateQueries({ queryKey: ['company-sales', company.id] })
+            qc.invalidateQueries({ queryKey: ['all-company-sales'] })
+            qc.invalidateQueries({ queryKey: ['credit-sales'] })
+            setSelectedIds(new Set())
+            setConfirmSettle(null)
+            setExpandedId(null)
+            toast.success(ids.length === 1 ? 'Factura saldada' : `${ids.length} facturas saldadas`)
+        } catch {
+            toast.error('Error al saldar')
+        } finally {
+            setIsSettling(false)
         }
-        setSettleAllOpen(false)
-        toast.success(`Todas las cuentas de ${company.name} saldadas`)
     }
 
-    function openFlow(type: 'billing' | 'pdf') {
-        setFlowType(type); setFlowStep('select')
-        setFlowSearch(''); setFlowPage(0); setFlowSelectedIds(new Set()); setFlowEmailAddress('')
-    }
-    function closeFlow() {
-        setFlowType(null); setFlowStep('select')
-        setFlowSearch(''); setFlowPage(0); setFlowSelectedIds(new Set()); setFlowEmailAddress('')
-    }
-
-    async function handleFlowConfirmBilling() {
-        if (!company.billingEmail || flowSelectedIds.size === 0) return
-        setFlowSending(true)
+    async function handleSendPDF() {
+        if (!company.billingEmail || pendingDebt === 0) return
+        setIsSending(true)
         try {
-            const targets = employeesWithDebt.filter(e => flowSelectedIds.has(e.id))
-            const result = await sendCompanyBillingEmail({
-                to: company.billingEmail,
-                companyName: company.name,
-                businessName: config?.name ?? 'Mi Soda',
-                employees: targets.map(e => ({ employeeName: e.name, pendingTotal: employeePendingTotal(e.id) })),
-                logoUrl: config?.emailLogoUrl,
-            })
-            if (result.success) toast.success('Cobro enviado a ' + company.billingEmail)
-            else toast.error(result.error ?? 'Error al enviar')
-        } finally { setFlowSending(false); closeFlow() }
-    }
-
-    async function handleFlowConfirmPDF() {
-        const addr = flowEmailAddress.trim()
-        if (!addr || flowSelectedIds.size === 0) return
-        setFlowSending(true)
-        try {
-            const selectedEmps = employeesWithDebt.filter(e => flowSelectedIds.has(e.id))
-            const selectedDebt = selectedEmps.reduce((s, e) => s + employeePendingTotal(e.id), 0)
+            const groups: Record<string, { name: string; phone: null; pendingTotal: number; pendingCount: number }> = {}
+            for (const s of pendingSales) {
+                const key = (s as any).consumerName || 'Empresa'
+                if (!groups[key]) groups[key] = { name: key, phone: null, pendingTotal: 0, pendingCount: 0 }
+                groups[key].pendingTotal += (s as any).total
+                groups[key].pendingCount += 1
+            }
+            const employees = Object.values(groups)
             const pdfBase64 = generateCompanyStatementPDF({
                 companyName: company.name,
-                businessName: config?.name ?? 'Mi Soda',
-                employees: selectedEmps.map(e => ({
-                    name: e.name, phone: e.phone,
-                    pendingTotal: employeePendingTotal(e.id),
-                    pendingCount: employeePendingSales(e.id).length,
-                })),
-                totalDebt: selectedDebt,
+                businessName: config?.name ?? '',
+                employees,
+                totalDebt: pendingDebt,
             })
-            const result = await sendCompanyStatementPDFEmail({
-                to: addr, companyName: company.name, businessName: config?.name ?? 'Mi Soda',
-                pdfBase64, logoUrl: config?.emailLogoUrl,
-                employeeCount: selectedEmps.length, totalDebt: selectedDebt,
+            const res = await sendCompanyStatementPDFEmail({
+                to: company.billingEmail,
+                companyName: company.name,
+                businessName: config?.name ?? '',
+                pdfBase64,
+                totalDebt: pendingDebt,
+                employeeCount: employees.length,
             })
-            if (result.success) toast.success('PDF enviado a ' + addr)
-            else toast.error(result.error ?? 'Error al enviar PDF')
-        } finally { setFlowSending(false); closeFlow() }
-    }
-
-    async function handleConfirmAssign() {
-        if (assignSelectedIds.size === 0) return
-        setAssigning(true)
-        try {
-            await onAssignEmployees(Array.from(assignSelectedIds))
-            toast.success(`${assignSelectedIds.size} colaborador${assignSelectedIds.size !== 1 ? 'es' : ''} asignado${assignSelectedIds.size !== 1 ? 's' : ''}`)
+            if (res.success) toast.success('Estado de cuenta enviado a ' + company.billingEmail)
+            else toast.error(res.error ?? 'Error al enviar')
+        } catch {
+            toast.error('Error al generar PDF')
         } finally {
-            setAssigning(false)
-            setAssignOpen(false)
-            setAssignSelectedIds(new Set())
-            setAssignSearch('')
+            setIsSending(false)
         }
     }
 
-    const filteredAvailable = availableClients.filter(c =>
-        !assignSearch || normalizeStr(c.name).includes(normalizeStr(assignSearch))
-    )
+    async function handlePrint() {
+        if (!config?.printerPort || pendingDebt === 0) return
+        setIsPrinting(true)
+        try {
+            const res = await window.electronAPI!.printCompanyStatement(config.printerPort, {
+                businessName: config.name,
+                address: config.address,
+                phone: config.phone,
+                currencySymbol: config.currencySymbol,
+                showDecimals: config.showDecimals,
+                companyName: company.name,
+                date: new Date().toISOString(),
+                invoices: pendingSales.map((s: any) => ({
+                    saleNumber: s.saleNumber,
+                    date: s.date,
+                    consumerName: s.consumerName ?? null,
+                    items: (s.items ?? []).map((it: any) => ({
+                        name: it.productName ?? it.product?.name ?? '',
+                        quantity: it.quantity,
+                        subtotal: it.subtotal,
+                    })),
+                    total: s.total,
+                })),
+                totalPending: pendingDebt,
+                footer: config.ticketFooter,
+            })
+            if (res.success) toast.success('Ticket impreso')
+            else toast.error(res.error ?? 'Error al imprimir')
+        } catch {
+            toast.error('Error al imprimir')
+        } finally {
+            setIsPrinting(false)
+        }
+    }
 
-    const FLOW_PAGE_SIZE = 10
-    const flowFiltered = employeesWithDebt.filter(e =>
-        !flowSearch || normalizeStr(e.name).includes(normalizeStr(flowSearch))
-    )
-    const flowPageCount = Math.max(1, Math.ceil(flowFiltered.length / FLOW_PAGE_SIZE))
-    const flowPageItems = flowFiltered.slice(flowPage * FLOW_PAGE_SIZE, (flowPage + 1) * FLOW_PAGE_SIZE)
-    const flowSelectedTotal = employeesWithDebt.filter(e => flowSelectedIds.has(e.id)).reduce((s, e) => s + employeePendingTotal(e.id), 0)
+    function fmtDate(d: any) {
+        try { return new Date(d).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) }
+        catch { return String(d) }
+    }
 
     return (
         <div className="flex flex-col h-full">
@@ -673,436 +649,350 @@ function CompanyDetailView({ company, employees, allCreditSales, config, onBack,
                     </div>
                     <div>
                         <h1 className="text-[16px] font-semibold text-[#E4ECF7]">{company.name}</h1>
-                        <p className="text-[11px] text-[#3D506A]">{activeEmployees.length} colaborador{activeEmployees.length !== 1 ? 'es' : ''}</p>
+                        <p className="text-[11px] text-[#3D506A]">{sales.length} factura{sales.length !== 1 ? 's' : ''} · {pendingSales.length} pendiente{pendingSales.length !== 1 ? 's' : ''}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    {company.billingEmail && employeesWithDebt.length > 0 && (
+                    {config?.printerPort && pendingDebt > 0 && (
                         <button
-                            onClick={() => openFlow('billing')}
-                            className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[12px] font-semibold hover:bg-blue-500/20 transition-all cursor-pointer"
+                            onClick={handlePrint}
+                            disabled={isPrinting}
+                            className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[12px] hover:text-[#E4ECF7] hover:border-[#283A56] transition-all cursor-pointer disabled:opacity-50"
+                        >
+                            <Printer size={12} />
+                            {isPrinting ? 'Imprimiendo...' : 'Imprimir'}
+                        </button>
+                    )}
+                    {company.billingEmail && pendingDebt > 0 && (
+                        <button
+                            onClick={handleSendPDF}
+                            disabled={isSending}
+                            className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[12px] hover:text-orange-400 hover:border-orange-500/30 hover:bg-orange-500/5 transition-all cursor-pointer disabled:opacity-50"
                         >
                             <Send size={12} />
-                            Enviar cobro
+                            {isSending ? 'Enviando...' : 'Enviar PDF'}
                         </button>
                     )}
-                    {employeesWithDebt.length > 0 && (
-                        <button
-                            onClick={() => openFlow('pdf')}
-                            className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-400 text-[12px] font-semibold hover:bg-violet-500/20 transition-all cursor-pointer"
-                        >
-                            <FileDown size={12} />
-                            PDF
-                        </button>
-                    )}
-                    {employeesWithDebt.length > 0 && (
-                        <button
-                            onClick={() => setSettleAllOpen(true)}
-                            className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[12px] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer"
-                        >
-                            <CheckCircle2 size={12} />
-                            Saldar todo — {formatCurrency(totalDebt)}
-                        </button>
-                    )}
-                    <button onClick={onEdit} className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[12px] hover:text-[#E4ECF7] transition-all cursor-pointer">
+                    <button onClick={onEdit} className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[12px] hover:text-[#E4ECF7] hover:border-[#283A56] transition-all cursor-pointer">
                         <Edit3 size={13} />
                         Editar
                     </button>
                 </div>
             </div>
 
-            {/* Company info */}
-            <div className="px-6 py-3 border-b border-[#192030] shrink-0">
-                <div className="flex items-center gap-6">
-                    {company.billingEmail && (
-                        <div className="flex items-center gap-1.5 text-[12px] text-[#7A8FAA]">
-                            <Mail size={12} className="text-[#3D506A]" />
-                            {company.billingEmail}
-                        </div>
-                    )}
-                    {company.phone && (
-                        <div className="flex items-center gap-1.5 text-[12px] text-[#7A8FAA]">
-                            <Phone size={12} className="text-[#3D506A]" />
-                            {company.phone}
-                        </div>
-                    )}
-                    {!company.billingEmail && !company.phone && (
-                        <span className="text-[12px] text-[#3D506A]">Sin datos de contacto</span>
-                    )}
-                    {totalDebt > 0 && (
-                        <div className="ml-auto flex items-center gap-2 px-4 py-1.5 rounded-xl bg-red-500/8 border border-red-500/15">
-                            <span className="text-[11px] text-red-400/70 uppercase tracking-wider">Deuda total</span>
-                            <span className="text-[18px] font-bold text-red-400">{formatCurrency(totalDebt)}</span>
-                        </div>
-                    )}
-                    {totalDebt === 0 && (
-                        <div className="ml-auto flex items-center gap-2 px-4 py-1.5 rounded-xl bg-emerald-500/8 border border-emerald-500/15">
-                            <span className="text-[13px] font-semibold text-emerald-400">Empresa al día</span>
-                        </div>
-                    )}
-                </div>
-                {!company.billingEmail && (
-                    <div className="flex items-center gap-1.5 mt-2 text-[11px] text-amber-400/70">
-                        <AlertTriangle size={11} />
-                        Sin correo de facturación — edita la empresa para agregar uno
+            {/* Info + balance */}
+            <div className="px-6 py-4 border-b border-[#192030] shrink-0">
+                <div className="grid grid-cols-3 gap-3">
+                    <div className="col-span-2 flex flex-col justify-center gap-1.5">
+                        {company.billingEmail && (
+                            <div className="flex items-center gap-1.5 text-[12px] text-[#7A8FAA]">
+                                <Mail size={12} className="text-[#3D506A] shrink-0" />
+                                {company.billingEmail}
+                            </div>
+                        )}
+                        {company.phone && (
+                            <div className="flex items-center gap-1.5 text-[12px] text-[#7A8FAA]">
+                                <Phone size={12} className="text-[#3D506A] shrink-0" />
+                                {company.phone}
+                            </div>
+                        )}
+                        {company.notes && (
+                            <p className="text-[12px] text-[#7A8FAA] italic">"{company.notes}"</p>
+                        )}
+                        {!company.billingEmail && !company.phone && !company.notes && (
+                            <span className="text-[12px] text-[#3D506A]">Sin datos de contacto</span>
+                        )}
                     </div>
-                )}
+                    <div className={cn(
+                        'rounded-xl border px-4 py-3 flex flex-col gap-0.5',
+                        pendingDebt > 0 ? 'bg-red-500/5 border-red-500/15' : 'bg-emerald-500/5 border-emerald-500/15'
+                    )}>
+                        <span className={cn('text-[10px] uppercase tracking-wider font-semibold', pendingDebt > 0 ? 'text-red-400/70' : 'text-emerald-400/70')}>
+                            {pendingDebt > 0 ? 'Deuda pendiente' : 'Estado'}
+                        </span>
+                        <span className={cn('text-[20px] font-bold tabular-nums leading-tight', pendingDebt > 0 ? 'text-red-400' : 'text-emerald-400')}>
+                            {pendingDebt > 0 ? formatCurrency(pendingDebt) : 'Al día'}
+                        </span>
+                        {pendingSales.length > 0 && (
+                            <span className="text-[11px] text-[#3D506A]">
+                                {pendingSales.length} factura{pendingSales.length !== 1 ? 's' : ''} pendiente{pendingSales.length !== 1 ? 's' : ''}
+                            </span>
+                        )}
+                    </div>
+                </div>
             </div>
 
-            {/* Employees toolbar */}
-            <div className="flex items-center justify-between px-6 py-2.5 border-b border-[#192030] shrink-0">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Colaboradores</p>
-                <div className="flex items-center gap-1.5">
-                    {availableClients.length > 0 && (
-                        <button
-                            onClick={() => setAssignOpen(true)}
-                            className="flex items-center gap-1.5 px-3 h-7 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[11px] font-medium hover:text-orange-400 hover:border-orange-500/25 hover:bg-orange-500/5 transition-all cursor-pointer"
-                        >
-                            <Users size={11} />
-                            Asignar existente
+            {/* Tabs */}
+            <div className="flex items-center gap-1 px-6 py-2.5 border-b border-[#192030] shrink-0">
+                {([
+                    { id: 'pending' as const, label: 'Pendientes', count: pendingSales.length },
+                    { id: 'history' as const, label: 'Historial completo', count: sales.length },
+                ]).map(t => (
+                    <button
+                        key={t.id}
+                        onClick={() => { setTab(t.id); setSelectedIds(new Set()); setExpandedId(null); setInvoiceSearch('') }}
+                        className={cn(
+                            'flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium transition-all cursor-pointer',
+                            tab === t.id ? 'bg-orange-500/15 text-orange-400' : 'text-[#3D506A] hover:text-[#7A8FAA] hover:bg-[#1C2438]'
+                        )}
+                    >
+                        {t.label}
+                        {t.count > 0 && (
+                            <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold', tab === t.id ? 'bg-orange-500/20 text-orange-300' : 'bg-[#1C2438] text-[#3D506A]')}>
+                                {t.count}
+                            </span>
+                        )}
+                    </button>
+                ))}
+            </div>
+
+            {/* Search */}
+            <div className="px-6 py-2.5 border-b border-[#192030] shrink-0">
+                <div className="relative">
+                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none" />
+                    <input
+                        type="text"
+                        {...invoiceSearchKb}
+                        placeholder="Buscar por # factura, consumidor o producto..."
+                        className="w-full h-9 pl-8 pr-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
+                    />
+                    {invoiceSearch && (
+                        <button onClick={() => setInvoiceSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#3D506A] hover:text-[#7A8FAA] cursor-pointer">
+                            <X size={12} />
                         </button>
                     )}
-                    <button
-                        onClick={onNewEmployee}
-                        className="flex items-center gap-1.5 px-3 h-7 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[11px] font-semibold hover:bg-orange-500/15 transition-all cursor-pointer"
-                    >
-                        <Plus size={11} />
-                        Nuevo colaborador
-                    </button>
                 </div>
             </div>
 
-            {/* Employees list */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-2">
-                {activeEmployees.length === 0 ? (
-                    <EmptyState
-                        icon={<Users size={28} className="text-[#283A56]" />}
-                        title="Sin colaboradores"
-                        description="Crea un nuevo colaborador o asigna clientes existentes a esta empresa"
-                    />
-                ) : (
-                    activeEmployees.map(emp => {
-                        const debt = employeePendingTotal(emp.id)
-                        const debtCount = employeePendingSales(emp.id).length
-                        return (
-                            <div key={emp.id} className="flex items-center gap-4 px-4 py-3 rounded-xl bg-[#0F1623] border border-[#192030] hover:bg-[#141C2E] hover:border-[#283A56] transition-all group">
-                                <UserCircle2 size={18} className="text-[#3D506A] shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-[13px] font-semibold text-[#E4ECF7] truncate">{emp.name}</p>
-                                    {emp.phone && <p className="text-[11px] text-[#3D506A]">{emp.phone}</p>}
-                                </div>
-                                <div className="text-right shrink-0 mr-2">
-                                    {debt > 0 ? (
-                                        <>
-                                            <p className="text-[14px] font-bold text-red-400">{formatCurrency(debt)}</p>
-                                            <p className="text-[10px] text-[#3D506A]">{debtCount} cuenta{debtCount !== 1 ? 's' : ''}</p>
-                                        </>
-                                    ) : (
-                                        <span className="text-[12px] text-emerald-400">Al día</span>
-                                    )}
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0">
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto">
+                {/* ── Pendientes ── */}
+                {tab === 'pending' && (
+                    <div className="p-6 space-y-3">
+                        {isLoading ? (
+                            <p className="text-center text-[12px] text-[#3D506A] py-12">Cargando...</p>
+                        ) : pendingSales.length === 0 ? (
+                            <EmptyState
+                                icon={<CheckCircle2 size={28} className="text-emerald-400" />}
+                                title="Sin facturas pendientes"
+                                description="Esta empresa no tiene deudas activas"
+                            />
+                        ) : (
+                            <>
+                                {/* Actions bar */}
+                                <div className="flex items-center gap-2">
                                     <button
-                                        onClick={() => onSelectEmployee(emp.id)}
-                                        className="px-2.5 h-7 rounded-lg bg-[#1C2438] text-[#7A8FAA] text-[11px] font-medium hover:text-[#E4ECF7] hover:bg-[#283A56] transition-all cursor-pointer"
+                                        onClick={toggleAllPending}
+                                        className={cn(
+                                            'flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium border transition-all cursor-pointer',
+                                            allPendingSelected
+                                                ? 'bg-orange-500/15 border-orange-500/30 text-orange-400'
+                                                : 'bg-[#101828] border-[#1E2A40] text-[#7A8FAA] hover:text-[#E4ECF7]'
+                                        )}
                                     >
-                                        Historial
+                                        <div className={cn('w-3.5 h-3.5 rounded border flex items-center justify-center', allPendingSelected ? 'bg-orange-500 border-orange-500' : 'border-[#3D506A]')}>
+                                            {allPendingSelected && <Check size={9} className="text-white" />}
+                                        </div>
+                                        {allPendingSelected ? 'Deseleccionar todo' : 'Seleccionar todo'}
                                     </button>
-                                    {debt > 0 && (
+
+                                    {selectedIds.size > 0 && (
+                                        <>
+                                            <span className="text-[12px] text-[#7A8FAA]">
+                                                {selectedIds.size} seleccionada{selectedIds.size !== 1 ? 's' : ''} — <span className="font-semibold text-[#E4ECF7]">{formatCurrency(selectedPendingTotal)}</span>
+                                            </span>
+                                            <button
+                                                onClick={() => setConfirmSettle(Array.from(selectedIds))}
+                                                disabled={isSettling}
+                                                className="ml-auto flex items-center gap-1.5 px-3 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[12px] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-60"
+                                            >
+                                                <CheckCircle2 size={13} />
+                                                Saldar seleccionadas
+                                            </button>
+                                        </>
+                                    )}
+                                    {selectedIds.size === 0 && (
                                         <button
-                                            onClick={() => setSettleEmployeeId(emp.id)}
-                                            className="flex items-center gap-1 px-2.5 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer"
+                                            onClick={() => setConfirmSettle(pendingSales.map((s: any) => s.id))}
+                                            disabled={isSettling}
+                                            className="ml-auto flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[12px] font-medium hover:text-emerald-400 hover:border-emerald-500/25 hover:bg-emerald-500/8 transition-all cursor-pointer disabled:opacity-60"
                                         >
-                                            <CheckCircle2 size={11} />
-                                            Saldar
+                                            <CheckCircle2 size={13} />
+                                            Saldar todo
                                         </button>
                                     )}
                                 </div>
-                            </div>
-                        )
-                    })
+
+                                {/* Pending sale cards */}
+                                {filteredPending.length === 0 && searchQ ? (
+                                    <p className="text-center text-[12px] text-[#3D506A] py-8">Sin resultados para "{invoiceSearch}"</p>
+                                ) : filteredPending.map((s: any) => {
+                                    const isSelected = selectedIds.has(s.id)
+                                    const isExpanded = expandedId === s.id
+                                    return (
+                                        <div
+                                            key={s.id}
+                                            className={cn(
+                                                'rounded-xl border transition-all',
+                                                isSelected ? 'bg-orange-500/8 border-orange-500/25' : 'bg-[#0F1623] border-[#192030]'
+                                            )}
+                                        >
+                                            <div className="flex items-center gap-3 p-4">
+                                                {/* Checkbox */}
+                                                <button
+                                                    onClick={() => toggleSelect(s.id)}
+                                                    className={cn('w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors cursor-pointer', isSelected ? 'bg-orange-500 border-orange-500' : 'border-[#3D506A] hover:border-orange-500/50')}
+                                                >
+                                                    {isSelected && <Check size={10} className="text-white" />}
+                                                </button>
+
+                                                {/* Main info — clickable to expand */}
+                                                <button onClick={() => toggleExpand(s.id)} className="flex-1 flex items-center gap-3 text-left cursor-pointer min-w-0">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-0.5">
+                                                            <span className="text-[13px] font-mono font-bold text-[#E4ECF7]">#{s.saleNumber}</span>
+                                                            <span className="text-[11px] text-[#3D506A]">{fmtDate(s.date)}</span>
+                                                            {s.consumerName && (
+                                                                <span className="text-[11px] text-orange-400/80 truncate">· {s.consumerName}</span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[11px] text-[#3D506A] truncate">
+                                                            {(s.items ?? []).map((it: any) => `${it.quantity}× ${it.productName ?? it.product?.name ?? 'Producto'}`).join(', ') || 'Sin detalles'}
+                                                        </p>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <p className="text-[15px] font-bold text-[#E4ECF7]">{formatCurrency(s.total)}</p>
+                                                    </div>
+                                                    <ChevronRight size={14} className={cn('text-[#3D506A] shrink-0 transition-transform', isExpanded && 'rotate-90')} />
+                                                </button>
+                                            </div>
+
+                                            {/* Expanded detail */}
+                                            {isExpanded && (
+                                                <div className="px-4 pb-4 border-t border-[#192030] pt-3 space-y-3">
+                                                    <div className="space-y-1">
+                                                        {(s.items ?? []).map((it: any, i: number) => (
+                                                            <div key={i} className="flex items-center justify-between text-[12px]">
+                                                                <span className="text-[#7A8FAA]">{it.quantity}× {it.productName ?? it.product?.name ?? 'Producto'}</span>
+                                                                <span className="text-[#E4ECF7] font-medium tabular-nums">{formatCurrency(it.subtotal)}</span>
+                                                            </div>
+                                                        ))}
+                                                        {s.discount > 0 && (
+                                                            <div className="flex items-center justify-between text-[12px] text-emerald-400">
+                                                                <span>Descuento</span>
+                                                                <span>-{formatCurrency(s.discount)}</span>
+                                                            </div>
+                                                        )}
+                                                        <div className="flex items-center justify-between text-[13px] font-bold border-t border-[#192030] pt-2 mt-1">
+                                                            <span className="text-[#7A8FAA]">Total</span>
+                                                            <span className="text-[#E4ECF7]">{formatCurrency(s.total)}</span>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setConfirmSettle([s.id])}
+                                                        disabled={isSettling}
+                                                        className="w-full flex items-center justify-center gap-1.5 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[12px] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-60"
+                                                    >
+                                                        <CheckCircle2 size={13} />
+                                                        Marcar como pagada
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                })}
+                            </>
+                        )}
+                    </div>
+                )}
+
+                {/* ── Historial ── */}
+                {tab === 'history' && (
+                    <div className="p-6 space-y-2">
+                        {isLoading ? (
+                            <p className="text-center text-[12px] text-[#3D506A] py-12">Cargando...</p>
+                        ) : sales.length === 0 ? (
+                            <EmptyState
+                                icon={<Receipt size={28} className="text-orange-400/40" />}
+                                title="Sin facturas"
+                                description="Las facturas emitidas a esta empresa aparecerán aquí"
+                            />
+                        ) : filteredHistory.length === 0 && searchQ ? (
+                            <p className="text-center text-[12px] text-[#3D506A] py-8">Sin resultados para "{invoiceSearch}"</p>
+                        ) : filteredHistory.map((s: any) => {
+                            const isPending = s.isCredit && !s.paidAt
+                            const isExpanded = expandedId === s.id
+                            return (
+                                <div
+                                    key={s.id}
+                                    className={cn(
+                                        'rounded-xl border transition-all',
+                                        isPending ? 'bg-[#0F1623] border-[#192030]' : 'bg-[#0B1019] border-[#141C28]'
+                                    )}
+                                >
+                                    <button
+                                        onClick={() => toggleExpand(s.id)}
+                                        className="w-full flex items-center gap-3 p-4 text-left cursor-pointer"
+                                    >
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                                                <span className="text-[13px] font-mono font-bold text-[#E4ECF7]">#{s.saleNumber}</span>
+                                                <span className="text-[11px] text-[#3D506A]">{fmtDate(s.date)}</span>
+                                                {s.consumerName && <span className="text-[11px] text-orange-400/80">· {s.consumerName}</span>}
+                                            </div>
+                                            <p className="text-[11px] text-[#3D506A] truncate">
+                                                {(s.items ?? []).map((it: any) => `${it.quantity}× ${it.productName ?? it.product?.name ?? 'Producto'}`).join(', ') || 'Sin detalles'}
+                                            </p>
+                                        </div>
+                                        <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                                            <p className="text-[14px] font-bold text-[#E4ECF7]">{formatCurrency(s.total)}</p>
+                                            <span className={cn('text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded', isPending ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400')}>
+                                                {isPending ? 'Crédito' : 'Pagado'}
+                                            </span>
+                                        </div>
+                                        <ChevronRight size={14} className={cn('text-[#3D506A] shrink-0 transition-transform', isExpanded && 'rotate-90')} />
+                                    </button>
+
+                                    {isExpanded && (
+                                        <div className="px-4 pb-4 border-t border-[#192030] pt-3 space-y-1">
+                                            {(s.items ?? []).map((it: any, i: number) => (
+                                                <div key={i} className="flex items-center justify-between text-[12px]">
+                                                    <span className="text-[#7A8FAA]">{it.quantity}× {it.productName ?? it.product?.name ?? 'Producto'}</span>
+                                                    <span className="text-[#E4ECF7] font-medium tabular-nums">{formatCurrency(it.subtotal)}</span>
+                                                </div>
+                                            ))}
+                                            {s.discount > 0 && (
+                                                <div className="flex items-center justify-between text-[12px] text-emerald-400">
+                                                    <span>Descuento</span>
+                                                    <span>-{formatCurrency(s.discount)}</span>
+                                                </div>
+                                            )}
+                                            <div className="flex items-center justify-between text-[13px] font-bold border-t border-[#192030] pt-2 mt-1">
+                                                <span className="text-[#7A8FAA]">Total</span>
+                                                <span className="text-[#E4ECF7]">{formatCurrency(s.total)}</span>
+                                            </div>
+                                            {!isPending && s.paidAt && (
+                                                <p className="text-[11px] text-[#3D506A] pt-1">Pagado el {fmtDate(s.paidAt)}</p>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )
+                        })}
+                    </div>
                 )}
             </div>
 
-            {/* Unified billing / PDF two-step flow modal */}
-            {flowType && (
-                <>
-                    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" onClick={closeFlow} />
-                    <div className="fixed z-50 inset-x-0 mx-auto top-1/2 -translate-y-1/2 w-full max-w-md px-4">
-                        <div className="bg-[#0F1523] border border-[#1E2A40] rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ maxHeight: 'calc(100vh - 80px)' }}>
-
-                            {flowStep === 'select' ? (
-                                <>
-                                    {/* Step 1 header */}
-                                    <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
-                                        <div>
-                                            <h2 className="text-[15px] font-semibold text-[#E4ECF7]">Seleccionar colaboradores</h2>
-                                            <p className="text-[11px] text-[#3D506A] mt-0.5">
-                                                {flowType === 'pdf' ? 'PDF del estado de cuenta' : `Cobro a ${company.billingEmail}`}
-                                            </p>
-                                        </div>
-                                        <button onClick={closeFlow} className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-[#E4ECF7] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer">
-                                            <X size={16} />
-                                        </button>
-                                    </div>
-
-                                    {/* Search + select-all */}
-                                    <div className="px-5 pb-2 shrink-0 space-y-2">
-                                        <div className="relative">
-                                            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none" />
-                                            <input
-                                                type="text"
-                                                {...flowSearchKb}
-                                                placeholder="Buscar colaborador..."
-                                                className="w-full h-9 pl-9 pr-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-violet-500/40 transition-colors"
-                                            />
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-[11px] text-[#3D506A]">{flowFiltered.length} colaborador{flowFiltered.length !== 1 ? 'es' : ''}</span>
-                                            <button
-                                                onClick={() => setFlowSelectedIds(
-                                                    flowSelectedIds.size === employeesWithDebt.length
-                                                        ? new Set()
-                                                        : new Set(employeesWithDebt.map(e => e.id))
-                                                )}
-                                                className={cn('text-[11px] font-semibold cursor-pointer transition-colors', flowType === 'pdf' ? 'text-violet-400 hover:text-violet-300' : 'text-blue-400 hover:text-blue-300')}
-                                            >
-                                                {flowSelectedIds.size === employeesWithDebt.length ? 'Quitar todos' : 'Seleccionar todos'}
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* Scrollable employee list */}
-                                    <div className="flex-1 overflow-y-auto px-5 space-y-1.5 pb-2 min-h-0">
-                                        {flowPageItems.length === 0 && (
-                                            <p className="text-center text-[12px] text-[#3D506A] py-8">Sin resultados</p>
-                                        )}
-                                        {flowPageItems.map(emp => {
-                                            const checked = flowSelectedIds.has(emp.id)
-                                            const accent = flowType === 'pdf'
-                                                ? checked ? 'bg-violet-500/8 border-violet-500/20' : 'bg-[#101520] border-[#192030] hover:bg-[#141C2E]'
-                                                : checked ? 'bg-blue-500/8 border-blue-500/20' : 'bg-[#101520] border-[#192030] hover:bg-[#141C2E]'
-                                            const chk = flowType === 'pdf'
-                                                ? checked ? 'bg-violet-500 border-violet-500' : 'border-[#3D506A]'
-                                                : checked ? 'bg-blue-500 border-blue-500' : 'border-[#3D506A]'
-                                            return (
-                                                <button
-                                                    key={emp.id}
-                                                    onClick={() => setFlowSelectedIds(prev => {
-                                                        const next = new Set(prev)
-                                                        if (next.has(emp.id)) next.delete(emp.id); else next.add(emp.id)
-                                                        return next
-                                                    })}
-                                                    className={cn('w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer text-left', accent)}
-                                                >
-                                                    <div className={cn('w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors', chk)}>
-                                                        {checked && <Check size={10} className="text-white" />}
-                                                    </div>
-                                                    <p className="text-[12px] font-semibold text-[#E4ECF7] flex-1 truncate">{emp.name}</p>
-                                                    <span className="text-[12px] font-bold text-red-400 shrink-0">{formatCurrency(employeePendingTotal(emp.id))}</span>
-                                                </button>
-                                            )
-                                        })}
-                                    </div>
-
-                                    {/* Pagination */}
-                                    {flowPageCount > 1 && (
-                                        <div className="flex items-center justify-between px-5 py-2 border-t border-[#192030] shrink-0">
-                                            <button
-                                                onClick={() => setFlowPage(p => Math.max(0, p - 1))}
-                                                disabled={flowPage === 0}
-                                                className="px-3 h-7 rounded-lg text-[11px] font-medium text-[#7A8FAA] hover:text-[#E4ECF7] hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
-                                            >
-                                                ← Anterior
-                                            </button>
-                                            <span className="text-[11px] text-[#3D506A]">{flowPage + 1} / {flowPageCount}</span>
-                                            <button
-                                                onClick={() => setFlowPage(p => Math.min(flowPageCount - 1, p + 1))}
-                                                disabled={flowPage >= flowPageCount - 1}
-                                                className="px-3 h-7 rounded-lg text-[11px] font-medium text-[#7A8FAA] hover:text-[#E4ECF7] hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
-                                            >
-                                                Siguiente →
-                                            </button>
-                                        </div>
-                                    )}
-
-                                    {/* Footer */}
-                                    <div className="px-5 py-4 border-t border-[#192030] shrink-0 space-y-3">
-                                        {flowSelectedIds.size > 0 && (
-                                            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#101520] border border-[#1E2A40]">
-                                                <span className="text-[11px] text-[#7A8FAA]">{flowSelectedIds.size} seleccionado{flowSelectedIds.size !== 1 ? 's' : ''}</span>
-                                                <span className="text-[13px] font-bold text-[#E4ECF7]">{formatCurrency(flowSelectedTotal)}</span>
-                                            </div>
-                                        )}
-                                        <button
-                                            onClick={() => setFlowStep('confirm')}
-                                            disabled={flowSelectedIds.size === 0}
-                                            className={cn(
-                                                'w-full h-11 rounded-xl text-white text-[13px] font-bold disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center gap-2',
-                                                flowType === 'pdf' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-blue-500 hover:bg-blue-600'
-                                            )}
-                                        >
-                                            Continuar →
-                                        </button>
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    {/* Step 2 header */}
-                                    <div className="flex items-center gap-2 px-5 pt-5 pb-4 shrink-0">
-                                        <button
-                                            onClick={() => setFlowStep('select')}
-                                            className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-[#E4ECF7] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer"
-                                        >
-                                            <ChevronLeft size={16} />
-                                        </button>
-                                        <h2 className="flex-1 text-[15px] font-semibold text-[#E4ECF7]">
-                                            {flowType === 'pdf' ? 'Enviar PDF' : 'Confirmar cobro'}
-                                        </h2>
-                                        <button onClick={closeFlow} className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-[#E4ECF7] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer">
-                                            <X size={16} />
-                                        </button>
-                                    </div>
-
-                                    <div className="px-5 pb-5 space-y-4">
-                                        {/* Summary */}
-                                        <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#101520] border border-[#1E2A40]">
-                                            <div>
-                                                <p className="text-[11px] text-[#3D506A]">Colaboradores incluidos</p>
-                                                <p className="text-[14px] font-bold text-[#E4ECF7] mt-0.5">{flowSelectedIds.size} de {employeesWithDebt.length}</p>
-                                            </div>
-                                            <div className="text-right">
-                                                <p className="text-[11px] text-[#3D506A]">Total</p>
-                                                <p className="text-[16px] font-bold text-red-400 mt-0.5">{formatCurrency(flowSelectedTotal)}</p>
-                                            </div>
-                                        </div>
-
-                                        {flowType === 'pdf' ? (
-                                            <>
-                                                <div className="space-y-1.5">
-                                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Enviar a correo</p>
-                                                    <input
-                                                        type="email"
-                                                        {...flowEmailKb}
-                                                        onKeyDown={e => { if (e.key === 'Enter') handleFlowConfirmPDF() }}
-                                                        placeholder="tucorreo@ejemplo.com"
-                                                        className="w-full h-11 px-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-violet-500/40 transition-colors"
-                                                        autoFocus
-                                                    />
-                                                </div>
-                                                <button
-                                                    onClick={handleFlowConfirmPDF}
-                                                    disabled={!flowEmailAddress.trim() || flowSending}
-                                                    className="w-full h-11 rounded-xl bg-violet-500 text-white text-[13px] font-bold hover:bg-violet-600 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center gap-2"
-                                                >
-                                                    <FileDown size={14} />
-                                                    {flowSending ? 'Generando y enviando...' : 'Enviar PDF'}
-                                                </button>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <div className="p-3 rounded-xl bg-blue-500/5 border border-blue-500/15">
-                                                    <p className="text-[11px] text-blue-400/70">Destino: <span className="font-semibold text-blue-400">{company.billingEmail}</span></p>
-                                                </div>
-                                                <button
-                                                    onClick={handleFlowConfirmBilling}
-                                                    disabled={flowSending}
-                                                    className="w-full h-11 rounded-xl bg-blue-500 text-white text-[13px] font-bold hover:bg-blue-600 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center gap-2"
-                                                >
-                                                    <Send size={14} />
-                                                    {flowSending ? 'Enviando...' : 'Enviar cobro'}
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    </div>
-                </>
-            )}
-
-            {/* Assign employees modal */}
-            {assignOpen && (
-                <>
-                    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" onClick={() => { setAssignOpen(false); setAssignSearch(''); setAssignSelectedIds(new Set()) }} />
-                    <div className="fixed z-50 inset-x-0 mx-auto top-1/2 -translate-y-1/2 w-full max-w-sm px-4">
-                        <div className="bg-[#0F1523] border border-[#1E2A40] rounded-2xl shadow-2xl overflow-hidden">
-                            <div className="flex items-center justify-between px-5 pt-5 pb-3">
-                                <h2 className="text-[15px] font-semibold text-[#E4ECF7]">Asignar colaboradores</h2>
-                                <button onClick={() => { setAssignOpen(false); setAssignSearch(''); setAssignSelectedIds(new Set()) }} className="w-8 h-8 rounded-lg text-[#3D506A] hover:text-[#E4ECF7] hover:bg-white/5 flex items-center justify-center transition-all cursor-pointer">
-                                    <X size={16} />
-                                </button>
-                            </div>
-                            <div className="px-5 pb-5 space-y-3">
-                                <div className="relative">
-                                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none" />
-                                    <input
-                                        type="text"
-                                        value={assignSearch}
-                                        onChange={e => setAssignSearch(e.target.value)}
-                                        placeholder="Buscar cliente sin empresa..."
-                                        className="w-full h-9 pl-9 pr-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
-                                    />
-                                </div>
-                                <div className="space-y-1.5 max-h-52 overflow-y-auto">
-                                    {filteredAvailable.length === 0 ? (
-                                        <p className="text-center text-[12px] text-[#3D506A] py-6">Sin clientes sin empresa disponibles</p>
-                                    ) : filteredAvailable.map(cl => {
-                                        const checked = assignSelectedIds.has(cl.id)
-                                        return (
-                                            <button
-                                                key={cl.id}
-                                                onClick={() => setAssignSelectedIds(prev => {
-                                                    const next = new Set(prev)
-                                                    if (next.has(cl.id)) next.delete(cl.id); else next.add(cl.id)
-                                                    return next
-                                                })}
-                                                className={cn(
-                                                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer text-left',
-                                                    checked ? 'bg-orange-500/8 border-orange-500/20' : 'bg-[#101520] border-[#192030] hover:bg-[#141C2E]'
-                                                )}
-                                            >
-                                                <div className={cn('w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors', checked ? 'bg-orange-500 border-orange-500' : 'border-[#3D506A]')}>
-                                                    {checked && <Check size={10} className="text-white" />}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-[12px] font-semibold text-[#E4ECF7] truncate">{cl.name}</p>
-                                                    {cl.phone && <p className="text-[10px] text-[#3D506A]">{cl.phone}</p>}
-                                                </div>
-                                            </button>
-                                        )
-                                    })}
-                                </div>
-                                <button
-                                    onClick={handleConfirmAssign}
-                                    disabled={assignSelectedIds.size === 0 || assigning}
-                                    className="w-full h-11 rounded-xl bg-orange-500 text-white text-[13px] font-bold hover:bg-orange-600 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center gap-2"
-                                >
-                                    <Check size={14} />
-                                    {assigning ? 'Asignando...' : `Asignar ${assignSelectedIds.size > 0 ? assignSelectedIds.size + ' ' : ''}colaborador${assignSelectedIds.size !== 1 ? 'es' : ''}`}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </>
-            )}
-
-            <SettlePaymentModal
-                isOpen={settleAllOpen}
-                onClose={() => setSettleAllOpen(false)}
-                onConfirm={handleSettleAll}
-                title={`Saldar toda la empresa`}
-                amount={totalDebt}
-                isPending={settleWithMethod.isPending}
-            />
-            <SettlePaymentModal
-                isOpen={settleEmployeeId !== null}
-                onClose={() => setSettleEmployeeId(null)}
-                onConfirm={handleSettleEmployee}
-                title={`Saldar cuenta de ${settleEmployee?.name ?? ''}`}
-                amount={settleEmployeeAmount}
-                isPending={settleWithMethod.isPending}
+            {/* Confirm settle modal */}
+            <DeleteConfirmModal
+                isOpen={confirmSettle !== null}
+                onClose={() => setConfirmSettle(null)}
+                onConfirm={() => confirmSettle && handleSettle(confirmSettle)}
+                title="Saldar facturas"
+                description={`¿Marcar ${confirmSettle?.length === 1 ? 'esta factura' : `${confirmSettle?.length ?? 0} facturas`} como pagadas? Total: ${formatCurrency(confirmSettle?.reduce((s, id) => s + ((sales as any[]).find((x: any) => x.id === id)?.total ?? 0), 0) ?? 0)}`}
+                confirmLabel="Saldar"
+                confirmVariant="success"
+                isPending={isSettling}
             />
         </div>
     )

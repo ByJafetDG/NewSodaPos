@@ -1,12 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
     Settings2, Store, Receipt, Printer, Users, Cloud,
     Monitor, Save, Plus, Trash2, ChevronRight, Wifi, WifiOff,
     RefreshCw, HardDrive, Zap, LogOut, Minimize2, Maximize2,
     CheckCircle2, Search, Info, Edit2, Download, AlertTriangle, X,
-    Mail, Upload,
+    Mail, Upload, RotateCcw, Package,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { getDeletedClients, restoreClient, hardDeleteClient } from '@/services/clients'
+import { getDeletedProducts, restoreProduct, hardDeleteProduct } from '@/services/products'
+import { getVoidedSales } from '@/services/sales'
 import { Button } from '@/components/atoms/Button'
 import { toast } from '@/components/ui/Toast'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
@@ -19,7 +23,7 @@ import { useUIStore } from '@/store/uiStore'
 import { cn } from '@/lib/utils'
 import type { Employee } from '@/types'
 
-type Section = 'business' | 'ticket' | 'email' | 'printer' | 'employees' | 'sync' | 'system' | 'updates'
+type Section = 'business' | 'ticket' | 'email' | 'printer' | 'employees' | 'sync' | 'system' | 'updates' | 'trash'
 
 function timeAgo(date: Date) {
     const diff = Date.now() - date.getTime()
@@ -42,6 +46,7 @@ const SECTIONS: { id: Section; label: string; desc: string; icon: React.ElementT
     { id: 'sync',       label: 'Sincronización',   desc: 'Estado de la nube',                 icon: Cloud,    color: 'text-blue-400' },
     { id: 'system',     label: 'Sistema',          desc: 'Control de ventana y app',          icon: Monitor,  color: 'text-slate-400' },
     { id: 'updates',    label: 'Actualizaciones',  desc: 'Versión y actualizaciones del app',  icon: Download, color: 'text-emerald-400' },
+    { id: 'trash',      label: 'Papelera',         desc: 'Eliminados y ventas anuladas',       icon: Trash2,   color: 'text-red-400' },
 ]
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -1064,6 +1069,8 @@ export function SettingsPage() {
                         </SectionContent>
                     )}
 
+                    {section === 'trash' && <TrashSection />}
+
                     {section === 'system' && (
                         <SectionContent
                             icon={Monitor} color="text-slate-400" iconBg="bg-slate-500/10"
@@ -1314,6 +1321,207 @@ function LogoUploadField({ logoUrl, uploading, onUpload, onClear, accentColor, h
                 }}
             />
         </div>
+    )
+}
+
+function TrashSection() {
+    const [tab, setTab] = useState<'clients' | 'products' | 'sales'>('clients')
+    const [confirmHard, setConfirmHard] = useState<{ type: 'client' | 'product'; id: string; name: string } | null>(null)
+    const [confirmRestore, setConfirmRestore] = useState<{ type: 'client' | 'product'; id: string; name: string } | null>(null)
+    const [isActing, setIsActing] = useState(false)
+    const qc = useQueryClient()
+
+    const { data: deletedClients = [], isLoading: loadingClients } = useQuery({
+        queryKey: ['trash-clients'],
+        queryFn: getDeletedClients,
+    })
+    const { data: deletedProducts = [], isLoading: loadingProducts } = useQuery({
+        queryKey: ['trash-products'],
+        queryFn: getDeletedProducts,
+    })
+    const { data: voidedSales = [], isLoading: loadingSales } = useQuery({
+        queryKey: ['trash-sales'],
+        queryFn: getVoidedSales,
+    })
+
+    async function handleRestoreConfirmed() {
+        if (!confirmRestore) return
+        setIsActing(true)
+        try {
+            if (confirmRestore.type === 'client') {
+                await restoreClient(confirmRestore.id)
+                qc.invalidateQueries({ queryKey: ['clients'] })
+                qc.invalidateQueries({ queryKey: ['trash-clients'] })
+                toast.success('Cliente restaurado')
+            } else {
+                await restoreProduct(confirmRestore.id)
+                qc.invalidateQueries({ queryKey: ['products'] })
+                qc.invalidateQueries({ queryKey: ['trash-products'] })
+                toast.success('Producto restaurado')
+            }
+            setConfirmRestore(null)
+        } catch {
+            toast.error('Error al restaurar')
+        } finally {
+            setIsActing(false)
+        }
+    }
+
+    async function handleHardDelete() {
+        if (!confirmHard) return
+        setIsActing(true)
+        try {
+            if (confirmHard.type === 'client') {
+                await hardDeleteClient(confirmHard.id)
+                qc.invalidateQueries({ queryKey: ['clients'] })
+                qc.invalidateQueries({ queryKey: ['trash-clients'] })
+            } else {
+                await hardDeleteProduct(confirmHard.id)
+                qc.invalidateQueries({ queryKey: ['trash-products'] })
+            }
+            toast.success('Eliminado permanentemente')
+            setConfirmHard(null)
+        } catch (err: any) {
+            toast.error(err.message ?? 'Error al eliminar')
+        } finally {
+            setIsActing(false)
+        }
+    }
+
+    function fmtDate(d: any) {
+        try { return new Date(d).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) }
+        catch { return String(d) }
+    }
+
+    const tabs = [
+        { id: 'clients' as const, label: 'Clientes', count: (deletedClients as any[]).length },
+        { id: 'products' as const, label: 'Productos', count: (deletedProducts as any[]).length },
+        { id: 'sales' as const, label: 'Ventas anuladas', count: (voidedSales as any[]).length },
+    ]
+
+    return (
+        <SectionContent icon={Trash2} color="text-red-400" iconBg="bg-red-500/10" title="Papelera" desc="Registros eliminados y ventas anuladas">
+            <div className="flex gap-1 p-1 bg-[#0B0E19] rounded-xl border border-[#192030] mb-1">
+                {tabs.map(t => (
+                    <button
+                        key={t.id}
+                        onClick={() => setTab(t.id)}
+                        className={cn(
+                            'flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg text-[12px] font-medium transition-all cursor-pointer',
+                            tab === t.id ? 'bg-[#141C2E] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        {t.label}
+                        {t.count > 0 && (
+                            <span className={cn('px-1.5 py-0.5 rounded-full text-[10px] font-semibold', tab === t.id ? 'bg-red-500/20 text-red-400' : 'bg-[#1C2438] text-[#3D506A]')}>
+                                {t.count}
+                            </span>
+                        )}
+                    </button>
+                ))}
+            </div>
+
+            {tab === 'clients' && (
+                <div className="space-y-2">
+                    {loadingClients ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">Cargando...</p>
+                    ) : (deletedClients as any[]).length === 0 ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">No hay clientes eliminados</p>
+                    ) : (deletedClients as any[]).map((c: any) => (
+                        <div key={c.id} className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#0B0E19] border border-[#192030]">
+                            <div>
+                                <p className="text-[13px] text-[#E4ECF7] font-medium">{c.name}</p>
+                                <p className="text-[11px] text-[#3D506A]">{c.phone || c.email || 'Sin contacto'}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setConfirmRestore({ type: 'client', id: c.id, name: c.name })} disabled={isActing} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50">
+                                    <RotateCcw size={11} /> Restaurar
+                                </button>
+                                <button onClick={() => setConfirmHard({ type: 'client', id: c.id, name: c.name })} disabled={isActing} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] hover:bg-red-500/20 transition-all cursor-pointer disabled:opacity-50">
+                                    <Trash2 size={11} /> Borrar
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {tab === 'products' && (
+                <div className="space-y-2">
+                    {loadingProducts ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">Cargando...</p>
+                    ) : (deletedProducts as any[]).length === 0 ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">No hay productos eliminados</p>
+                    ) : (deletedProducts as any[]).map((p: any) => (
+                        <div key={p.id} className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#0B0E19] border border-[#192030]">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-[#141C2E] border border-[#1E2A40] flex items-center justify-center shrink-0">
+                                    <Package size={14} className="text-[#3D506A]" />
+                                </div>
+                                <div>
+                                    <p className="text-[13px] text-[#E4ECF7] font-medium">{p.name}</p>
+                                    <p className="text-[11px] text-[#3D506A]">{p.cat_name || p.category?.name || 'Sin categoría'}</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setConfirmRestore({ type: 'product', id: p.id, name: p.name })} disabled={isActing} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50">
+                                    <RotateCcw size={11} /> Restaurar
+                                </button>
+                                <button onClick={() => setConfirmHard({ type: 'product', id: p.id, name: p.name })} disabled={isActing} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] hover:bg-red-500/20 transition-all cursor-pointer disabled:opacity-50">
+                                    <Trash2 size={11} /> Borrar
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {tab === 'sales' && (
+                <div className="space-y-2">
+                    {loadingSales ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">Cargando...</p>
+                    ) : (voidedSales as any[]).length === 0 ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">No hay ventas anuladas</p>
+                    ) : (voidedSales as any[]).map((s: any) => (
+                        <div key={s.id} className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#0B0E19] border border-[#192030]">
+                            <div className="flex items-center gap-3">
+                                <span className="px-2 py-0.5 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] font-mono shrink-0">#{s.saleNumber}</span>
+                                <div>
+                                    <p className="text-[12px] text-[#E4ECF7]">{fmtDate(s.date)}</p>
+                                    {(s.clientName || s.consumerName) && (
+                                        <p className="text-[11px] text-[#3D506A]">{s.clientName || s.consumerName}</p>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-[13px] font-semibold text-[#E4ECF7]">₡{(s.total ?? 0).toLocaleString('es-CR')}</p>
+                                <p className="text-[10px] text-[#3D506A]">{s.paymentMethod}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            <DeleteConfirmModal
+                isOpen={confirmHard !== null}
+                onClose={() => setConfirmHard(null)}
+                onConfirm={handleHardDelete}
+                title="Eliminar permanentemente"
+                description={`¿Eliminar "${confirmHard?.name}" para siempre? Esta acción no se puede deshacer.`}
+                confirmLabel="Eliminar para siempre"
+                isPending={isActing}
+            />
+            <DeleteConfirmModal
+                isOpen={confirmRestore !== null}
+                onClose={() => setConfirmRestore(null)}
+                onConfirm={handleRestoreConfirmed}
+                title="Restaurar elemento"
+                description={`¿Restaurar "${confirmRestore?.name}"? Volverá a estar activo en el sistema.`}
+                confirmLabel="Restaurar"
+                confirmVariant="success"
+                isPending={isActing}
+            />
+        </SectionContent>
     )
 }
 

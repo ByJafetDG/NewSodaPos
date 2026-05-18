@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { HeldOrder, HeldOrderDebt, CartItem } from '@/types'
+import type { HeldOrder, HeldOrderDebt, HeldOrderInvoiceClient, CartItem } from '@/types'
 
 interface HeldOrdersState {
     orders: HeldOrder[]
-    saveOrder: (name: string, items: CartItem[], discount: number, pendingDebt?: HeldOrderDebt, id?: string) => void
-    updateOrder: (id: string, items: CartItem[], discount: number, pendingDebt?: HeldOrderDebt) => void
+    saveOrder: (name: string, items: CartItem[], discount: number, pendingDebt?: HeldOrderDebt, id?: string, invoiceClient?: HeldOrderInvoiceClient | null) => void
+    updateOrder: (id: string, items: CartItem[], discount: number, pendingDebt?: HeldOrderDebt, invoiceClient?: HeldOrderInvoiceClient | null) => void
     renameOrder: (id: string, name: string) => void
     deleteOrder: (id: string) => void
 }
@@ -14,7 +14,7 @@ export const useHeldOrdersStore = create<HeldOrdersState>()(
     persist(
         (set) => ({
             orders: [],
-            saveOrder: (name, items, discount, pendingDebt, id) => set(s => ({
+            saveOrder: (name, items, discount, pendingDebt, id, invoiceClient) => set(s => ({
                 orders: [...s.orders, {
                     id: id ?? crypto.randomUUID(),
                     name: name.trim() || `Cuenta pendiente ${s.orders.length + 1}`,
@@ -22,10 +22,11 @@ export const useHeldOrdersStore = create<HeldOrdersState>()(
                     discount,
                     savedAt: new Date().toISOString(),
                     pendingDebt,
+                    invoiceClient: invoiceClient ?? null,
                 }]
             })),
-            updateOrder: (id, items, discount, pendingDebt) => set(s => ({
-                orders: s.orders.map(o => o.id === id ? { ...o, items, discount, pendingDebt } : o)
+            updateOrder: (id, items, discount, pendingDebt, invoiceClient) => set(s => ({
+                orders: s.orders.map(o => o.id === id ? { ...o, items, discount, pendingDebt, invoiceClient: invoiceClient ?? o.invoiceClient } : o)
             })),
             renameOrder: (id, name) => set(s => ({
                 orders: s.orders.map(o => o.id === id ? { ...o, name: name.trim() || o.name } : o)

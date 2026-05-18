@@ -47,14 +47,12 @@ interface ClientFormModalProps {
     onClose: () => void
     onConfirm: (data: Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>) => void
     client?: Client | null
-    companies?: Company[]
-    defaultCompanyId?: string
     isPending?: boolean
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function ClientFormModal({ isOpen, onClose, onConfirm, client, companies = [], defaultCompanyId, isPending }: ClientFormModalProps) {
+export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending }: ClientFormModalProps) {
     const [step, setStep] = useState<WizardStep>('name')
     const [dir, setDir]   = useState(1)
     const [data, setData] = useState<WizardData>(EMPTY)
@@ -81,9 +79,8 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, companies 
             if (draft?.name) { setData({ ...base, ...draft }); setStep('draft-prompt') }
             else             { setData(base);  setStep('name') }
         } else {
-            const base = defaultCompanyId ? { ...EMPTY, companyId: defaultCompanyId } : EMPTY
-            if (draft?.name) { setData({ ...base, ...draft }); setStep('draft-prompt') }
-            else             { setData(base); setStep('name') }
+            if (draft?.name) { setData({ ...EMPTY, ...draft }); setStep('draft-prompt') }
+            else             { setData(EMPTY); setStep('name') }
         }
         setDir(1)
     }, [isOpen])
@@ -220,13 +217,13 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, companies 
                                             <TypeStep value={data.type} onSelect={t => { setData(d => ({ ...d, type: t })); advance('contact') }} />
                                         )}
                                         {step === 'contact' && (
-                                            <ContactStep data={data} companies={companies} onChange={patch => setData(d => ({ ...d, ...patch }))} onNext={() => advance('notes')} />
+                                            <ContactStep data={data} onChange={patch => setData(d => ({ ...d, ...patch }))} onNext={() => advance('notes')} />
                                         )}
                                         {step === 'notes' && (
                                             <NotesStep value={data.notes} onChange={v => setData(d => ({ ...d, notes: v }))} onNext={() => advance('recap')} onSkip={() => { setData(d => ({ ...d, notes: '' })); advance('recap') }} />
                                         )}
                                         {step === 'recap' && (
-                                            <RecapStep data={data} companies={companies} isEdit={!!client} isPending={isPending} onToggleActive={() => setData(d => ({ ...d, isActive: !d.isActive }))} onConfirm={handleConfirm} onEdit={goToStep} />
+                                            <RecapStep data={data} isEdit={!!client} isPending={isPending} onToggleActive={() => setData(d => ({ ...d, isActive: !d.isActive }))} onConfirm={handleConfirm} onEdit={goToStep} />
                                         )}
                                     </motion.div>
                                 </AnimatePresence>
@@ -449,13 +446,11 @@ function CompanySelect({ value, companies, onChange }: {
 
 // ── Step: Contact ─────────────────────────────────────────────────────────────
 
-function ContactStep({ data, companies, onChange, onNext }: {
+function ContactStep({ data, onChange, onNext }: {
     data: WizardData
-    companies: Company[]
     onChange: (p: Partial<WizardData>) => void
     onNext: () => void
 }) {
-    const activeCompanies = companies.filter(c => c.isActive)
     return (
         <div className="space-y-3">
             <div className="flex items-center gap-2 mb-1">
@@ -480,16 +475,6 @@ function ContactStep({ data, companies, onChange, onNext }: {
                 <div>
                     <FieldLabel>Código interno</FieldLabel>
                     <SmallInput value={data.code} onChange={v => onChange({ code: v })} placeholder="ASO-001" mode="numeric" />
-                </div>
-            )}
-            {activeCompanies.length > 0 && (
-                <div>
-                    <FieldLabel>Empresa (opcional)</FieldLabel>
-                    <CompanySelect
-                        value={data.companyId}
-                        companies={activeCompanies}
-                        onChange={id => onChange({ companyId: id })}
-                    />
                 </div>
             )}
             <NextBtn onClick={onNext} label="Continuar" />
@@ -524,12 +509,11 @@ function NotesStep({ value, onChange, onNext, onSkip }: {
 
 // ── Step: Recap ───────────────────────────────────────────────────────────────
 
-function RecapStep({ data, companies, isEdit, isPending, onToggleActive, onConfirm, onEdit }: {
-    data: WizardData; companies: Company[]; isEdit: boolean; isPending?: boolean
+function RecapStep({ data, isEdit, isPending, onToggleActive, onConfirm, onEdit }: {
+    data: WizardData; isEdit: boolean; isPending?: boolean
     onToggleActive: () => void; onConfirm: () => void; onEdit: (s: WizardStep) => void
 }) {
     const typeInfo = CLIENT_TYPES.find(t => t.value === data.type)
-    const companyName = data.companyId ? (companies.find(c => c.id === data.companyId)?.name ?? '—') : null
 
     const rows: { label: string; value: string; step: WizardStep }[] = [
         { label: 'Nombre',   value: data.name || '—',               step: 'name'    },
@@ -540,7 +524,6 @@ function RecapStep({ data, companies, isEdit, isPending, onToggleActive, onConfi
         ...(data.type === 'ASOCIACION' ? [
             { label: 'Código interno', value: data.code || 'Sin código', step: 'contact' as WizardStep },
         ] : []),
-        ...(companyName ? [{ label: 'Empresa', value: companyName, step: 'contact' as WizardStep }] : []),
         { label: 'Notas',    value: data.notes || 'Sin notas',      step: 'notes'   },
     ]
 

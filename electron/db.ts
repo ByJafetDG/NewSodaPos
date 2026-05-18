@@ -618,6 +618,14 @@ export function initDb() {
     db.exec(`ALTER TABLE Client ADD COLUMN companyId TEXT REFERENCES Company(id) ON DELETE SET NULL`);
   } catch {}
 
+  try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN companyId TEXT`);
+  } catch {}
+
+  try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN consumerName TEXT`);
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);
@@ -628,6 +636,7 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_inventory_movement_product_id ON InventoryMovement(productId);
     CREATE INDEX IF NOT EXISTS idx_cash_adjustment_register ON CashAdjustment(cashRegisterId);
     CREATE INDEX IF NOT EXISTS idx_expense_register ON Expense(cashRegisterId);
+    CREATE INDEX IF NOT EXISTS idx_sale_company_id ON Sale(companyId);
   `);
 }
 

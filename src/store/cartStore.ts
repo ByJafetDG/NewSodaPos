@@ -1,10 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { CartItem, Product } from '@/types'
+import type { CartItem, Product, HeldOrderInvoiceClient } from '@/types'
 
 interface CartState {
     items: CartItem[]
     discount: number
+    invoiceClient: HeldOrderInvoiceClient | null
     addItem: (product: Product, qty?: number) => void
     removeItem: (productId: string) => void
     removeItems: (ids: string[]) => void
@@ -15,6 +16,7 @@ interface CartState {
     getSubtotal: () => number
     getTotal: () => number
     setDiscount: (d: number) => void
+    setInvoiceClient: (c: HeldOrderInvoiceClient | null) => void
 }
 
 export const useCartStore = create<CartState>()(
@@ -22,6 +24,7 @@ export const useCartStore = create<CartState>()(
         (set, get) => ({
             items: [],
             discount: 0,
+            invoiceClient: null,
             addItem: (product, qty = 1) => {
                 const existing = get().items.find(i => i.id === product.id)
                 const currentQty = existing ? existing.quantity : 0
@@ -53,12 +56,13 @@ export const useCartStore = create<CartState>()(
             updatePrice: (id, price) => set(s => ({
                 items: s.items.map(i => i.id === id ? { ...i, unitPrice: price, subtotal: i.quantity * price } : i)
             })),
-            clearCart: () => set({ items: [], discount: 0 }),
+            clearCart: () => set({ items: [], discount: 0, invoiceClient: null }),
             loadOrder: (items, discount) => set({ items, discount }),
+            setInvoiceClient: (c) => set({ invoiceClient: c }),
             getSubtotal: () => get().items.reduce((s, i) => s + i.subtotal, 0),
             getTotal: () => Math.max(0, get().getSubtotal() - get().discount),
             setDiscount: (d) => set({ discount: d }),
         }),
-        { name: 'pos-cart-v2', partialize: s => ({ items: s.items, discount: s.discount }) }
+        { name: 'pos-cart-v2', partialize: s => ({ items: s.items, discount: s.discount, invoiceClient: s.invoiceClient }) }
     )
 )

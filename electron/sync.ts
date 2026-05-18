@@ -378,8 +378,8 @@ async function pullSync() {
             transaction(() => {
                 for (const sale of sales) {
                     execute(`
-                        INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                        INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             saleNumber = excluded.saleNumber,
                             date = excluded.date,
@@ -395,7 +395,9 @@ async function pullSync() {
                             status = excluded.status,
                             notes = excluded.notes,
                             syncStatus = 'SYNCED',
-                            updatedAt = excluded.updatedAt
+                            updatedAt = excluded.updatedAt,
+                            companyId = excluded.companyId,
+                            consumerName = excluded.consumerName
                         ON CONFLICT(saleNumber) DO UPDATE SET
                             date = excluded.date,
                             subtotal = excluded.subtotal,
@@ -403,7 +405,7 @@ async function pullSync() {
                             total = excluded.total,
                             status = excluded.status,
                             updatedAt = excluded.updatedAt
-                    `, [sale.id, sale.saleNumber, sale.date, sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt]);
+                    `, [sale.id, sale.saleNumber, sale.date, sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null]);
                 }
             });
         }
@@ -783,7 +785,9 @@ export async function pushSync(): Promise<string[]> {
                 status: sale.status,
                 notes: sale.notes,
                 syncStatus: 'SYNCED',
-                updatedAt: new Date().toISOString()
+                updatedAt: new Date().toISOString(),
+                companyId: sale.companyId ?? null,
+                consumerName: sale.consumerName ?? null,
             });
             if (saleError) throw saleError;
             for (const item of items as any[]) {

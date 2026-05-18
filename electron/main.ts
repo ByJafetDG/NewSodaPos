@@ -574,6 +574,143 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
     }
 })
 
+// Company statement ticket: print all pending invoices for a company
+ipcMain.handle('printer:print-company-statement', async (_, portOrName: string, data: any) => {
+    try {
+        const comMatch = portOrName.match(/COM\d+/i)
+        const comPort = comMatch ? comMatch[0] : portOrName
+
+        const ESC = 0x1B
+        const GS = 0x1D
+        const LF = 0x0A
+        const bytes: number[] = []
+
+        const currency = data.currencySymbol || '₡'
+        const displayCurrency = currency === '₡' ? '¢' : currency
+
+        const formatMoney = (val: number) => {
+            const showDecimals = data.showDecimals !== false
+            return (val || 0).toLocaleString('es-CR', {
+                minimumFractionDigits: showDecimals ? 2 : 0,
+                maximumFractionDigits: showDecimals ? 2 : 0
+            })
+        }
+
+        const addText = (text: string) => {
+            const map: { [key: string]: number } = { '₡': 0x43, '€': 0x80 }
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i]
+                if (map[char] !== undefined) { bytes.push(map[char]); continue }
+                const c = text.charCodeAt(i)
+                if (c === 160 || c === 8239) bytes.push(0x20)
+                else if (c < 256) bytes.push(c)
+                else bytes.push(0x3F)
+            }
+        }
+
+        bytes.push(ESC, 0x40)
+        bytes.push(ESC, 0x74, 0x10)
+
+        bytes.push(ESC, 0x61, 0x01)
+        bytes.push(ESC, 0x45, 0x01)
+        bytes.push(GS, 0x21, 0x01)
+        addText(data.businessName || 'SODA')
+        bytes.push(LF)
+        bytes.push(GS, 0x21, 0x00)
+        bytes.push(ESC, 0x45, 0x00)
+
+        if (data.address) { addText(data.address); bytes.push(LF) }
+        if (data.phone) { addText(`Tel: ${data.phone}`); bytes.push(LF) }
+
+        addText('================================')
+        bytes.push(LF)
+
+        bytes.push(ESC, 0x45, 0x01)
+        addText('ESTADO DE CUENTA PENDIENTE')
+        bytes.push(LF)
+        bytes.push(ESC, 0x45, 0x00)
+
+        bytes.push(ESC, 0x61, 0x00)
+        addText(`Empresa: ${data.companyName}`)
+        bytes.push(LF)
+        addText(`Fecha: ${new Date(data.date).toLocaleDateString('es-CR')}`)
+        bytes.push(LF)
+
+        bytes.push(ESC, 0x61, 0x01)
+        addText('================================')
+        bytes.push(LF)
+        bytes.push(ESC, 0x61, 0x00)
+
+        const invoices: any[] = data.invoices || []
+        for (let i = 0; i < invoices.length; i++) {
+            const inv = invoices[i]
+
+            bytes.push(ESC, 0x45, 0x01)
+            addText(`Factura #${inv.saleNumber}`)
+            bytes.push(LF)
+            bytes.push(ESC, 0x45, 0x00)
+
+            addText(new Date(inv.date).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }))
+            bytes.push(LF)
+
+            if (inv.consumerName) {
+                addText(`  Consumidor: ${inv.consumerName}`)
+                bytes.push(LF)
+            }
+
+            for (const item of (inv.items || [])) {
+                const qty = `${item.quantity}x `
+                const itemName = item.name || ''
+                const price = ` ${displayCurrency}${formatMoney(item.subtotal)}`
+                const maxName = 32 - qty.length - price.length
+                const truncName = itemName.length > maxName ? itemName.substring(0, maxName) : itemName.padEnd(maxName)
+                addText(`  ${qty}${truncName}${price}`)
+                bytes.push(LF)
+            }
+
+            bytes.push(ESC, 0x61, 0x02)
+            bytes.push(ESC, 0x45, 0x01)
+            addText(`Total: ${displayCurrency}${formatMoney(inv.total)}`)
+            bytes.push(LF)
+            bytes.push(ESC, 0x45, 0x00)
+            bytes.push(ESC, 0x61, 0x00)
+
+            if (i < invoices.length - 1) {
+                bytes.push(ESC, 0x61, 0x01)
+                addText('--------------------------------')
+                bytes.push(LF)
+                bytes.push(ESC, 0x61, 0x00)
+            }
+        }
+
+        bytes.push(ESC, 0x61, 0x01)
+        addText('================================')
+        bytes.push(LF)
+        bytes.push(ESC, 0x61, 0x02)
+        bytes.push(ESC, 0x45, 0x01)
+        bytes.push(GS, 0x21, 0x01)
+        addText(`TOTAL PENDIENTE: ${displayCurrency}${formatMoney(data.totalPending)}`)
+        bytes.push(LF)
+        bytes.push(GS, 0x21, 0x00)
+        bytes.push(ESC, 0x45, 0x00)
+        bytes.push(ESC, 0x61, 0x01)
+        addText('================================')
+        bytes.push(LF)
+
+        if (data.footer) { addText(data.footer); bytes.push(LF) }
+
+        bytes.push(LF, LF, LF)
+        bytes.push(GS, 0x56, 0x01)
+
+        const ok = await sendToComPort(comPort, bytes)
+        if (ok) return { success: true }
+        else return { success: false, error: `No se pudo enviar al puerto ${comPort}. Verifique la conexion.` }
+    } catch (err: any) {
+        console.error('[Printer] Company statement error:', err)
+        return { success: false, error: err.message }
+    }
+})
+
 // Cash drawer: send ESC/POS kick command to COM port
 ipcMain.handle('printer:open-drawer', async (_, portOrName: string) => {
     try {

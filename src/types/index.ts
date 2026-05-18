@@ -64,7 +64,7 @@ export interface Sale {
     clientId: string | null; client?: Client; items: SaleItem[]; status: SaleStatus
     notes: string | null; syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
     paymentMethod2?: PaymentMethod | null; amount2?: number | null
-    paidAt?: string | null
+    paidAt?: string | null; companyId?: string | null; consumerName?: string | null
 }
 
 export interface CartItem {
@@ -80,6 +80,11 @@ export interface HeldOrderDebt {
     sales: Sale[]
 }
 
+export interface HeldOrderInvoiceClient {
+    name: string; cedula: string; email: string
+    ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string
+}
+
 export interface HeldOrder {
     id: string
     name: string
@@ -87,6 +92,7 @@ export interface HeldOrder {
     discount: number
     savedAt: string
     pendingDebt?: HeldOrderDebt
+    invoiceClient?: HeldOrderInvoiceClient | null
 }
 
 export type EmployeeRole = 'CAJERO' | 'DUEÑO' | 'COCINERO' | 'TEMPORAL'

@@ -10,10 +10,10 @@ import type { Client, Company } from '@/types'
 interface InvoiceNameModalProps {
     isOpen: boolean
     onClose: () => void
-    onAccept: (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string }) => void
+    onAccept: (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string }) => void
     clients: Client[]
     companies?: Company[]
-    initialData?: { name: string; cedula: string; email: string; existingId?: string } | null
+    initialData?: { name: string; cedula: string; email: string; existingId?: string; companyId?: string; consumerName?: string } | null
 }
 
 // Own component so each instance calls useKeyboardInput at component level (not in a loop)
@@ -47,6 +47,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
     const [cedula, setCedula] = useState(initialData?.cedula ?? '')
     const [email, setEmail] = useState(initialData?.email ?? '')
     const [ccEmails, setCcEmails] = useState<string[]>([])
+    const [consumerName, setConsumerName] = useState('')
     const [selectedId, setSelectedId] = useState<string | undefined>(initialData?.existingId)
     const [selectedCompanyId, setSelectedCompanyId] = useState<string | undefined>()
     const [rightTab, setRightTab] = useState<'clientes' | 'empresas'>('clientes')
@@ -58,9 +59,10 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
         setCedula(initialData?.cedula ?? '')
         setEmail(initialData?.email ?? '')
         setCcEmails([])
+        setConsumerName(initialData?.consumerName ?? '')
         setSelectedId(initialData?.existingId)
-        setSelectedCompanyId(undefined)
-        setRightTab('clientes')
+        setSelectedCompanyId(initialData?.companyId)
+        setRightTab(initialData?.companyId ? 'empresas' : 'clientes')
     }, [isOpen])
 
     const nameKb = useKeyboardInput(name, (v) => {
@@ -70,6 +72,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
     }, { mode: 'alpha' })
     const cedulaKb = useKeyboardInput(cedula, setCedula, { mode: 'alpha' })
     const emailKb = useKeyboardInput(email, setEmail, { mode: 'alpha' })
+    const consumerNameKb = useKeyboardInput(consumerName, setConsumerName, { mode: 'alpha' })
 
     const filteredClients = useMemo(() => {
         if (!name.trim()) return clients.slice(0, 10)
@@ -104,7 +107,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
     }
 
     function handleClear() {
-        setName(''); setCedula(''); setEmail(''); setCcEmails([])
+        setName(''); setCedula(''); setEmail(''); setCcEmails([]); setConsumerName('')
         setSelectedId(undefined); setSelectedCompanyId(undefined)
     }
 
@@ -119,7 +122,9 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
             cedula: cedula.trim(),
             email: email.trim(),
             ccEmails: validCc.length > 0 ? validCc : undefined,
-            existingId: selectedId,
+            existingId: selectedCompanyId ? undefined : selectedId,
+            companyId: selectedCompanyId,
+            consumerName: selectedCompanyId ? (consumerName.trim() || undefined) : undefined,
         })
         useKeyboardStore.getState().close()
         onClose()
@@ -150,6 +155,18 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
                             <label className={labelClass}>Cédula / RUC (Opcional)</label>
                             <input type="text" {...cedulaKb} placeholder="1-1234-5678" className={inputClass} />
                         </div>
+
+                        {selectedCompanyId && (
+                            <div className="space-y-1.5">
+                                <label className={labelClass}>Nombre del consumidor (Opcional)</label>
+                                <input
+                                    type="text"
+                                    {...consumerNameKb}
+                                    placeholder="Ej: Juan Pérez"
+                                    className={inputClass}
+                                />
+                            </div>
+                        )}
 
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">

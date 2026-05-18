@@ -10,7 +10,7 @@ import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { Trash2, Ticket, X, CreditCard, SplitSquareHorizontal, Smartphone, Inbox, UserCircle2, Search, Banknote } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
 
-interface ClientOption { id: string; name: string }
+interface ClientOption { id: string; name: string; code?: string | null }
 
 interface PaymentPanelProps {
     paymentMethod: PaymentMethod
@@ -45,6 +45,7 @@ interface PaymentPanelProps {
     // Invoice name
     invoiceClient?: { name: string; cedula: string; email: string; extraEmail?: string; existingId?: string } | null
     onOpenInvoiceModal?: () => void
+    onClearInvoiceClient?: () => void
 }
 
 export function PaymentPanel({
@@ -56,7 +57,7 @@ export function PaymentPanel({
     splitAmount, onChangeSplitAmount,
     creditAmount, onChangeCreditAmount,
     creditClientId, onSelectCreditClient, clients = [],
-    invoiceClient, onOpenInvoiceModal,
+    invoiceClient, onOpenInvoiceModal, onClearInvoiceClient,
 }: PaymentPanelProps) {
     const [confirmClearDebt, setConfirmClearDebt] = useState(false)
     const [splitFocus, setSplitFocus] = useState<'sinpe' | 'cash' | 'credit'>('sinpe')
@@ -79,7 +80,8 @@ export function PaymentPanel({
     const filteredClients = clients.filter(c =>
         !clientSearch ||
         normalizeStr(c.name).includes(normalizeStr(clientSearch)) ||
-        fuzzyMatch(clientSearch, c.name)
+        fuzzyMatch(clientSearch, c.name) ||
+        (c.code && normalizeStr(c.code).includes(normalizeStr(clientSearch)))
     )
     const selectedClient = clients.find(c => c.id === creditClientId)
 
@@ -114,18 +116,33 @@ export function PaymentPanel({
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#3D506A]">Forma de pago</p>
                     {paymentMethod !== 'CREDITO' && (
                         <div className="flex items-center gap-2">
-                            <button
-                                onClick={onOpenInvoiceModal}
-                                className={cn(
-                                    'flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer',
-                                    invoiceClient
-                                        ? 'bg-blue-500/12 text-blue-400 border border-blue-500/25 hover:bg-blue-500/20'
-                                        : 'text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5'
+                            <div className={cn(
+                                'flex items-center rounded-lg overflow-hidden border transition-all',
+                                invoiceClient
+                                    ? 'bg-blue-500/12 border-blue-500/25'
+                                    : 'border-transparent'
+                            )}>
+                                <button
+                                    onClick={onOpenInvoiceModal}
+                                    className={cn(
+                                        'flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all cursor-pointer',
+                                        invoiceClient
+                                            ? 'text-blue-400 hover:bg-blue-500/20'
+                                            : 'text-[#3D506A] hover:text-[#7A8FAA] hover:bg-white/5'
+                                    )}
+                                >
+                                    <UserCircle2 size={11} />
+                                    {invoiceClient ? 'Facturar a: ' + invoiceClient.name : 'Facturar a nombre'}
+                                </button>
+                                {invoiceClient && onClearInvoiceClient && (
+                                    <button
+                                        onClick={onClearInvoiceClient}
+                                        className="px-1.5 py-1 text-blue-400/50 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                                    >
+                                        <X size={10} />
+                                    </button>
                                 )}
-                            >
-                                <UserCircle2 size={11} />
-                                {invoiceClient ? 'Facturar a: ' + invoiceClient.name : 'Facturar a nombre'}
-                            </button>
+                            </div>
 
                             <button
                                 onClick={isMixed ? onOpenMixedCancel : onOpenMixedSelect}
@@ -227,6 +244,7 @@ export function PaymentPanel({
                                                 >
                                                     <UserCircle2 size={12} className="text-[#3D506A] shrink-0" />
                                                     <span className="text-[11px] text-[#7A8FAA] truncate">{c.name}</span>
+                                                    {c.code && <span className="text-[10px] text-[#3D506A] shrink-0 font-mono">{c.code}</span>}
                                                 </button>
                                             ))}
                                         </div>

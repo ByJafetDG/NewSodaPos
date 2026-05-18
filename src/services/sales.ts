@@ -24,6 +24,8 @@ interface CreateSaleInput {
     amount2?: number | null
     creditPart?: { clientId: string; amount: number } | null
     modifiedFromSaleId?: string | null
+    companyId?: string | null
+    consumerName?: string | null
 }
 
 /**
@@ -62,7 +64,7 @@ export async function getNextSaleNumber(): Promise<number> {
 export async function createSale(input: CreateSaleInput): Promise<any> {
     const saleNumber = await getNextSaleNumber()
     const id = crypto.randomUUID()
-    const now = localISO()
+    const now = new Date().toISOString()
 
     if (window.electronAPI) {
         // Validate stock before committing — second line of defense after cartStore
@@ -83,8 +85,8 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
 
         const ops: Array<{ sql: string; params: any[] }> = [
             {
-                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2, modifiedFromSaleId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING', input.paymentMethod2 ?? null, input.amount2 ?? null, input.modifiedFromSaleId ?? null]
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2, modifiedFromSaleId, companyId, consumerName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING', input.paymentMethod2 ?? null, input.amount2 ?? null, input.modifiedFromSaleId ?? null, input.companyId ?? null, input.consumerName ?? null]
             }
         ]
 
@@ -146,6 +148,8 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
             paymentMethod2: input.paymentMethod2 ?? null,
             amount2: input.amount2 ?? null,
             modifiedFromSaleId: input.modifiedFromSaleId ?? null,
+            companyId: input.companyId ?? null,
+            consumerName: input.consumerName ?? null,
         })
         .select('*')
         .single()
@@ -236,7 +240,7 @@ function methodToRegisterColumn(method: string): string | null {
  * Void a sale atomically: mark ANULADA, revert stock, adjust CLOSED cash register columns
  */
 export async function voidSale(saleId: string): Promise<void> {
-    const now = localISO()
+    const now = new Date().toISOString()
 
     if (window.electronAPI) {
         const sale = await window.electronAPI.dbGet(
@@ -428,7 +432,7 @@ interface CreateSplitCreditSalesInput {
 }
 
 export async function createSplitCreditSales(input: CreateSplitCreditSalesInput): Promise<{ baseSaleNumber: number }> {
-    const now = localISO()
+    const now = new Date().toISOString()
     const baseSaleNumber = await getNextSaleNumber()
 
     if (window.electronAPI) {
@@ -528,7 +532,7 @@ interface CreateCreditNoteInput {
 export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ id: string; saleNumber: number; date: string }> {
     const saleNumber = await getNextSaleNumber()
     const id = crypto.randomUUID()
-    const now = localISO()
+    const now = new Date().toISOString()
 
     if (window.electronAPI) {
         const ops: Array<{ sql: string; params: any[] }> = [
@@ -577,6 +581,60 @@ export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ 
 }
 
 /**
+ * Get all sales linked to a company (with items)
+ */
+export async function getSalesForCompany(companyId: string): Promise<any[]> {
+    if (window.electronAPI) {
+        const sales: any[] = await window.electronAPI.dbQuery(
+            `SELECT * FROM Sale WHERE companyId = ? ORDER BY date DESC`,
+            [companyId]
+        )
+        const result: any[] = []
+        for (const sale of sales) {
+            const items: any[] = await window.electronAPI.dbQuery(
+                `SELECT si.id, si.quantity, si.unitPrice, si.subtotal, si.notes,
+                        COALESCE(p.name, 'Producto eliminado') as productName
+                 FROM SaleItem si LEFT JOIN Product p ON p.id = si.productId
+                 WHERE si.saleId = ?`,
+                [sale.id]
+            )
+            result.push({
+                ...sale,
+                isCredit: !!sale.isCredit,
+                items: items.map((i: any) => ({ ...i, product: { name: i.productName } })),
+            })
+        }
+        return result
+    }
+    const { data, error } = await supabase
+        .from('Sale')
+        .select('*, items:SaleItem(id, quantity, unitPrice, subtotal, notes, product:Product(name))')
+        .eq('companyId', companyId)
+        .order('date', { ascending: false })
+    if (error) throw error
+    return data ?? []
+}
+
+/**
+ * Get lightweight summary of all company-linked sales (no items) for list cards
+ */
+export async function getAllCompanySales(): Promise<{ id: string; companyId: string; total: number; isCredit: boolean; status: string; paidAt: string | null }[]> {
+    if (window.electronAPI) {
+        const data: any[] = await window.electronAPI.dbQuery(
+            `SELECT id, companyId, total, isCredit, status, paidAt FROM Sale WHERE companyId IS NOT NULL`,
+            []
+        )
+        return data.map((s: any) => ({ ...s, isCredit: !!s.isCredit }))
+    }
+    const { data, error } = await supabase
+        .from('Sale')
+        .select('id, companyId, total, isCredit, status, paidAt')
+        .not('companyId', 'is', null)
+    if (error) throw error
+    return (data ?? []).map((s: any) => ({ ...s }))
+}
+
+/**
  * Fetch a single sale with items for comparison view
  */
 export async function getSaleDetails(saleId: string): Promise<any | null> {
@@ -606,4 +664,23 @@ export async function getSaleDetails(saleId: string): Promise<any | null> {
         .single()
     if (error || !data) return null
     return data
+}
+
+export async function getVoidedSales(): Promise<any[]> {
+    if (window.electronAPI) {
+        return await window.electronAPI.dbQuery(`
+            SELECT s.id, s.saleNumber, s.date, s.total, s.paymentMethod, s.consumerName,
+                   c.name as clientName
+            FROM Sale s
+            LEFT JOIN Client c ON s.clientId = c.id
+            WHERE s.status = 'ANULADA'
+            ORDER BY s.date DESC
+        `)
+    }
+    const { data } = await supabase
+        .from('Sale')
+        .select('id, saleNumber, date, total, paymentMethod, consumerName, client:Client(name)')
+        .eq('status', 'ANULADA')
+        .order('date', { ascending: false })
+    return data ?? []
 }

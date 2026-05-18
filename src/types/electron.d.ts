@@ -22,6 +22,7 @@ export interface ElectronAPI {
     // Printer
     getPrinters: () => Promise<any[]>
     printReceipt: (printerName: string, data: any) => Promise<{ success: boolean, error?: string }>
+    printCompanyStatement: (printerName: string, data: any) => Promise<{ success: boolean, error?: string }>
     openDrawer: (printerName: string) => Promise<{ success: boolean, error?: string }>
     cacheTicketLogo: (url: string) => Promise<{ success: boolean; error?: string }>
     clearTicketLogo: () => Promise<void>

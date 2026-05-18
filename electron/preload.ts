@@ -22,6 +22,7 @@ const electronAPI = {
     // Printer
     getPrinters: () => ipcRenderer.invoke('printer:get-printers'),
     printReceipt: (printerName: string, data: any) => ipcRenderer.invoke('printer:print', printerName, data),
+    printCompanyStatement: (printerName: string, data: any) => ipcRenderer.invoke('printer:print-company-statement', printerName, data),
     openDrawer: (printerName: string) => ipcRenderer.invoke('printer:open-drawer', printerName),
     cacheTicketLogo: (url: string) => ipcRenderer.invoke('printer:cache-ticket-logo', url),
     clearTicketLogo: () => ipcRenderer.invoke('printer:clear-ticket-logo'),
@@ -99,6 +100,7 @@ export interface ElectronAPI {
     dbTransaction: (ops: Array<{ sql: string; params: any[] }>) => Promise<void>;
     getPrinters: () => Promise<any[]>;
     printReceipt: (printerName: string, data: any) => Promise<any>;
+    printCompanyStatement: (printerName: string, data: any) => Promise<{ success: boolean; error?: string }>;
     openDrawer: (printerName: string) => Promise<any>;
     cacheTicketLogo: (url: string) => Promise<{ success: boolean; error?: string }>;
     clearTicketLogo: () => Promise<void>;
