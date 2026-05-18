@@ -135,6 +135,28 @@ export interface ElectronAPI {
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void;
     installUpdate: () => Promise<void>;
     checkForUpdate: () => Promise<void>;
+    getSinpeMessages: () => Promise<any[]>;
+    getSinpeUnreadCount: () => Promise<number>;
+    markSinpeRead: (id: string) => Promise<void>;
+    markAllSinpeRead: () => Promise<void>;
+    deleteSinpeMessage: (id: string) => Promise<void>;
+    clearSinpeMessages: () => Promise<void>;
+    getSinpeConfig: () => Promise<{ port: number; senderFilter: string }>;
+    saveSinpeConfig: (cfg: { port: number; senderFilter: string }) => Promise<{ success: boolean; error?: string }>;
+    getSinpeLocalIp: () => Promise<string>;
+    getSinpeServerPort: () => Promise<number>;
+    getSinpeDeleted: () => Promise<any[]>;
+    restoreSinpeMessage: (id: string) => Promise<void>;
+    hardDeleteSinpeMessage: (id: string) => Promise<void>;
+    clearSinpeTrash: () => Promise<void>;
+    onSinpeNewMessage: (callback: (msg: any) => void) => () => void;
+    getLogoBase64: () => Promise<string | null>;
+    openDevTools: () => Promise<void>;
+    getSyncErrors: () => Promise<any[]>;
+    clearSyncError: (id: string) => Promise<void>;
+    clearAllSyncErrors: () => Promise<void>;
+    onSyncLog: (callback: (data: { level: string; msg: string }) => void) => () => void;
+    onBarcodeConflict: (callback: (data: { productId: string; productName: string }) => void) => () => void;
     platform: string;
     isElectron: boolean;
 }
