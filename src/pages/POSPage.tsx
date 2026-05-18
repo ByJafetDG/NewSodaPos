@@ -325,9 +325,9 @@ export function POSPage() {
         setHeldOrdersView(null)
     }
 
-    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string }) => {
+    const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string; physicalInvoiceNumber?: string }) => {
         if (data.companyId) {
-            setInvoiceClient({ name: data.name, cedula: data.cedula, email: data.email, ccEmails: data.ccEmails, companyId: data.companyId, consumerName: data.consumerName })
+            setInvoiceClient({ name: data.name, cedula: data.cedula, email: data.email, ccEmails: data.ccEmails, companyId: data.companyId, consumerName: data.consumerName, physicalInvoiceNumber: data.physicalInvoiceNumber })
             return
         }
         let finalId = data.existingId
@@ -726,6 +726,7 @@ export function POSPage() {
                 companyId: capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null,
                 consumerName: capturedInvoiceClient?.consumerName ?? null,
                 originalSaleSnapshot: pendingSaleLoad.originalSaleSnapshot ?? null,
+                physicalInvoiceNumber: capturedInvoiceClient?.physicalInvoiceNumber ?? null,
             })
 
             const resolvedCompanyId = capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null

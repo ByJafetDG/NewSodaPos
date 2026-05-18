@@ -630,6 +630,10 @@ export function initDb() {
     db.exec(`ALTER TABLE Sale ADD COLUMN originalSaleSnapshot TEXT`);
   } catch {}
 
+  try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN physicalInvoiceNumber TEXT`);
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);

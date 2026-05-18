@@ -535,6 +535,7 @@ function CompanyDetailView({ company, onBack, onEdit }: {
         if (!searchQ) return true
         if (String(s.saleNumber).includes(searchQ)) return true
         if ((s.consumerName ?? '').toLowerCase().includes(searchQ)) return true
+        if ((s.physicalInvoiceNumber ?? '').toLowerCase().includes(searchQ)) return true
         if ((s.items ?? []).some((it: any) => (it.productName ?? it.product?.name ?? '').toLowerCase().includes(searchQ))) return true
         return false
     }
@@ -876,8 +877,11 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                                                 {/* Main info — clickable to expand */}
                                                 <button onClick={() => toggleExpand(s.id)} className="flex-1 flex items-center gap-3 text-left cursor-pointer min-w-0">
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2 mb-0.5">
+                                                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                                                             <span className="text-[13px] font-mono font-bold text-[#E4ECF7]">#{s.saleNumber}</span>
+                                                            {s.physicalInvoiceNumber && (
+                                                                <span className="text-[10px] bg-violet-500/10 text-violet-400 border border-violet-500/20 px-1.5 py-0.5 rounded-md font-mono">F-{s.physicalInvoiceNumber}</span>
+                                                            )}
                                                             <span className="text-[11px] text-[#3D506A]">{fmtDate(s.date)}</span>
                                                             {s.consumerName && (
                                                                 <span className="text-[11px] text-orange-400/80 truncate">· {s.consumerName}</span>
@@ -966,6 +970,9 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                                                 <span className="text-[13px] font-mono font-bold text-[#E4ECF7]">#{s.saleNumber}</span>
+                                                {s.physicalInvoiceNumber && (
+                                                    <span className="text-[10px] bg-violet-500/10 text-violet-400 border border-violet-500/20 px-1.5 py-0.5 rounded-md font-mono">F-{s.physicalInvoiceNumber}</span>
+                                                )}
                                                 <span className="text-[11px] text-[#3D506A]">{fmtDate(s.date)}</span>
                                                 {s.consumerName && <span className="text-[11px] text-orange-400/80">· {s.consumerName}</span>}
                                                 {isModified && <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/25 px-1.5 py-0.5 rounded-md">Modificada</span>}

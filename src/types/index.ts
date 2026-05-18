@@ -83,6 +83,7 @@ export interface HeldOrderDebt {
 export interface HeldOrderInvoiceClient {
     name: string; cedula: string; email: string
     ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string
+    physicalInvoiceNumber?: string
 }
 
 export interface HeldOrder {

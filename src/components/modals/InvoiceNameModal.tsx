@@ -10,10 +10,10 @@ import type { Client, Company } from '@/types'
 interface InvoiceNameModalProps {
     isOpen: boolean
     onClose: () => void
-    onAccept: (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string }) => void
+    onAccept: (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string; physicalInvoiceNumber?: string }) => void
     clients: Client[]
     companies?: Company[]
-    initialData?: { name: string; cedula: string; email: string; existingId?: string; companyId?: string; consumerName?: string } | null
+    initialData?: { name: string; cedula: string; email: string; existingId?: string; companyId?: string; consumerName?: string; physicalInvoiceNumber?: string } | null
 }
 
 // Own component so each instance calls useKeyboardInput at component level (not in a loop)
@@ -48,6 +48,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
     const [email, setEmail] = useState(initialData?.email ?? '')
     const [ccEmails, setCcEmails] = useState<string[]>([])
     const [consumerName, setConsumerName] = useState('')
+    const [physicalInvoiceNumber, setPhysicalInvoiceNumber] = useState(initialData?.physicalInvoiceNumber ?? '')
     const [selectedId, setSelectedId] = useState<string | undefined>(initialData?.existingId)
     const [selectedCompanyId, setSelectedCompanyId] = useState<string | undefined>()
     const [rightTab, setRightTab] = useState<'clientes' | 'empresas'>('clientes')
@@ -60,6 +61,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
         setEmail(initialData?.email ?? '')
         setCcEmails([])
         setConsumerName(initialData?.consumerName ?? '')
+        setPhysicalInvoiceNumber(initialData?.physicalInvoiceNumber ?? '')
         setSelectedId(initialData?.existingId)
         setSelectedCompanyId(initialData?.companyId)
         setRightTab(initialData?.companyId ? 'empresas' : 'clientes')
@@ -73,6 +75,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
     const cedulaKb = useKeyboardInput(cedula, setCedula, { mode: 'alpha' })
     const emailKb = useKeyboardInput(email, setEmail, { mode: 'alpha' })
     const consumerNameKb = useKeyboardInput(consumerName, setConsumerName, { mode: 'alpha' })
+    const physicalInvoiceKb = useKeyboardInput(physicalInvoiceNumber, setPhysicalInvoiceNumber, { mode: 'alpha' })
 
     const filteredClients = useMemo(() => {
         if (!name.trim()) return clients.slice(0, 10)
@@ -107,7 +110,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
     }
 
     function handleClear() {
-        setName(''); setCedula(''); setEmail(''); setCcEmails([]); setConsumerName('')
+        setName(''); setCedula(''); setEmail(''); setCcEmails([]); setConsumerName(''); setPhysicalInvoiceNumber('')
         setSelectedId(undefined); setSelectedCompanyId(undefined)
     }
 
@@ -125,6 +128,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
             existingId: selectedCompanyId ? undefined : selectedId,
             companyId: selectedCompanyId,
             consumerName: selectedCompanyId ? (consumerName.trim() || undefined) : undefined,
+            physicalInvoiceNumber: physicalInvoiceNumber.trim() || undefined,
         })
         useKeyboardStore.getState().close()
         onClose()
@@ -154,6 +158,11 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
                         <div className="space-y-1.5">
                             <label className={labelClass}>Cédula / RUC (Opcional)</label>
                             <input type="text" {...cedulaKb} placeholder="1-1234-5678" className={inputClass} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className={labelClass}>N.° Factura Física (Opcional)</label>
+                            <input type="text" {...physicalInvoiceKb} placeholder="Ej: 001, F-2024-0032" className={inputClass} />
                         </div>
 
                         {selectedCompanyId && (
