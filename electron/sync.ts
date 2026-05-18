@@ -1073,6 +1073,7 @@ function setupRealtimeSubscriptions() {
                 windowRef.webContents.send('sinpe:new-message', {
                     id: msg.id, sender: msg.sender, body: msg.body, receivedAt: msg.receivedAt, isRead: 0
                 });
+                windowRef.webContents.send('db-changed', { table: 'SinpeMessage' });
             }
         })
         .subscribe();

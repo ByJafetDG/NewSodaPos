@@ -59,10 +59,16 @@ export function SinpePage() {
 
     useEffect(() => {
         fetchMessages()
-        const unsub = window.electronAPI?.onSinpeNewMessage?.((msg: SinpeMsg) => {
-            setMessages(prev => [msg, ...prev])
+        const unsubNew = window.electronAPI?.onSinpeNewMessage?.((msg: SinpeMsg) => {
+            setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [msg, ...prev])
         })
-        return () => { unsub?.() }
+        const unsubDb = window.electronAPI?.onDbChanged?.((data) => {
+            if (data.table !== 'SinpeMessage') return
+            window.electronAPI?.getSinpeMessages?.().then(msgs => {
+                setMessages(msgs as SinpeMsg[])
+            })
+        })
+        return () => { unsubNew?.(); unsubDb?.() }
     }, [])
 
     useEffect(() => {

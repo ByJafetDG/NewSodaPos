@@ -994,6 +994,7 @@ async function startSinpeServer(port: number, senderFilter: string) {
                 execute('INSERT INTO SinpeMessage (id, sender, body, receivedAt, isRead) VALUES (?, ?, ?, ?, 0)', [id, sender, message, receivedAt])
                 const msg = { id, sender, body: message, receivedAt, isRead: 0 }
                 mainWindow?.webContents.send('sinpe:new-message', msg)
+                mainWindow?.webContents.send('db-changed', { table: 'SinpeMessage' })
 
                 res.writeHead(200, { 'Content-Type': 'text/plain' })
                 res.end('ok')
