@@ -63,7 +63,9 @@ export default function App() {
         window.electronAPI.getSinpeUnreadCount().then((n: number) => setSinpeUnread(n))
         const unsub = window.electronAPI.onSinpeNewMessage?.(() => {
             incrementSinpeUnread()
-            playNotificationChime()
+            if (useUIStore.getState().currentPage !== 'sinpe') {
+                playNotificationChime()
+            }
         })
         return () => { unsub?.() }
     }, [])

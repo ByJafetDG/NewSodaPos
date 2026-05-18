@@ -104,6 +104,37 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
     }
     setInterval(pullSync, 300000); // Pull every 5m (Safety fallback only)
     setInterval(processEmailQueue, 60000); // Retry emails every 1m
+
+    // Poll Supabase every 3s for new SinpeMessages (Realtime is unreliable)
+    let lastSinpeCheck = new Date().toISOString()
+    setInterval(async () => {
+        try {
+            const { data } = await supabase
+                .from('SinpeMessage')
+                .select('*')
+                .gt('receivedAt', lastSinpeCheck)
+                .order('receivedAt', { ascending: true })
+                .limit(20)
+            if (!data || data.length === 0) return
+            lastSinpeCheck = data[data.length - 1].receivedAt
+            transaction(() => {
+                for (const msg of data) {
+                    execute(
+                        `INSERT INTO SinpeMessage (id, sender, body, receivedAt, isRead, deletedAt, syncStatus) VALUES (?, ?, ?, ?, 0, ?, 'SYNCED') ON CONFLICT(id) DO NOTHING`,
+                        [msg.id, msg.sender, msg.body, msg.receivedAt, msg.deletedAt ?? null]
+                    )
+                }
+            })
+            if (windowRef && !windowRef.isDestroyed()) {
+                for (const msg of data) {
+                    windowRef.webContents.send('sinpe:new-message', {
+                        id: msg.id, sender: msg.sender, body: msg.body, receivedAt: msg.receivedAt, isRead: 0
+                    })
+                }
+                windowRef.webContents.send('db-changed', { table: 'SinpeMessage' })
+            }
+        } catch {}
+    }, 3000)
 }
 
 /**
