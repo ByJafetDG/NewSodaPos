@@ -1,41 +1,103 @@
 import { useEffect } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, QueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+
+function invalidateForTable(qc: QueryClient, table: string) {
+    switch (table) {
+        case 'Product':
+            qc.invalidateQueries({ queryKey: ['products'] })
+            qc.invalidateQueries({ queryKey: ['products-stock'] })
+            qc.invalidateQueries({ queryKey: ['product-barcode'] })
+            break
+        case 'Category':
+            qc.invalidateQueries({ queryKey: ['categories'] })
+            break
+        case 'Subcategory':
+            qc.invalidateQueries({ queryKey: ['subcategories'] })
+            qc.invalidateQueries({ queryKey: ['products'] })
+            break
+        case 'Client':
+            qc.invalidateQueries({ queryKey: ['clients'] })
+            qc.invalidateQueries({ queryKey: ['companies'] })
+            break
+        case 'Employee':
+            qc.invalidateQueries({ queryKey: ['employees'] })
+            break
+        case 'Sale':
+            qc.invalidateQueries({ queryKey: ['sales'] })
+            qc.invalidateQueries({ queryKey: ['credit-sales'] })
+            qc.invalidateQueries({ queryKey: ['clients-balances'] })
+            qc.invalidateQueries({ queryKey: ['active-register'] })
+            qc.invalidateQueries({ queryKey: ['register-history'] })
+            qc.invalidateQueries({ queryKey: ['sales-by-client'] })
+            qc.invalidateQueries({ queryKey: ['all-company-sales'] })
+            qc.invalidateQueries({ queryKey: ['company-sales'] })
+            qc.invalidateQueries({ queryKey: ['reports'] })
+            qc.invalidateQueries({ queryKey: ['recent-sales-picker'] })
+            break
+        case 'CashRegister':
+            qc.invalidateQueries({ queryKey: ['active-register'] })
+            qc.invalidateQueries({ queryKey: ['register-history'] })
+            qc.invalidateQueries({ queryKey: ['cash-audit'] })
+            break
+        case 'Expense':
+            qc.invalidateQueries({ queryKey: ['active-register'] })
+            qc.invalidateQueries({ queryKey: ['register-history'] })
+            qc.invalidateQueries({ queryKey: ['reports'] })
+            break
+        case 'InventoryMovement':
+            qc.invalidateQueries({ queryKey: ['inventory-movements'] })
+            qc.invalidateQueries({ queryKey: ['products-stock'] })
+            qc.invalidateQueries({ queryKey: ['products'] })
+            break
+        case 'Payment':
+            qc.invalidateQueries({ queryKey: ['credit-sales'] })
+            qc.invalidateQueries({ queryKey: ['clients-balances'] })
+            qc.invalidateQueries({ queryKey: ['clients'] })
+            qc.invalidateQueries({ queryKey: ['sales-by-client'] })
+            qc.invalidateQueries({ queryKey: ['active-register'] })
+            break
+        case 'BusinessConfig':
+            qc.invalidateQueries({ queryKey: ['business-config'] })
+            break
+    }
+}
 
 export function useRealtimeSync() {
     const qc = useQueryClient()
 
     useEffect(() => {
-        if (window.electronAPI) return
+        if (window.electronAPI) {
+            // Electron: escucha eventos IPC del sync engine y actualiza React Query
+            const unsub = window.electronAPI.onDbChanged((data: { table: string }) => {
+                invalidateForTable(qc, data.table)
+            })
+            return unsub
+        }
 
+        // Web mode: Supabase realtime directo
         const channel = supabase
             .channel('pos-realtime')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'Product' }, () => {
-                qc.invalidateQueries({ queryKey: ['products'] })
-                qc.invalidateQueries({ queryKey: ['products-stock'] })
+                invalidateForTable(qc, 'Product')
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'Category' }, () => {
-                qc.invalidateQueries({ queryKey: ['categories'] })
+                invalidateForTable(qc, 'Category')
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'Client' }, () => {
-                qc.invalidateQueries({ queryKey: ['clients'] })
+                invalidateForTable(qc, 'Client')
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'Sale' }, () => {
-                qc.invalidateQueries({ queryKey: ['credit-sales'] })
-                qc.invalidateQueries({ queryKey: ['sales'] })
-                qc.invalidateQueries({ queryKey: ['clients-balances'] })
-                qc.invalidateQueries({ queryKey: ['active-register'] })
+                invalidateForTable(qc, 'Sale')
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'InventoryMovement' }, () => {
-                qc.invalidateQueries({ queryKey: ['products-stock'] })
-                qc.invalidateQueries({ queryKey: ['products'] })
+                invalidateForTable(qc, 'InventoryMovement')
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'Employee' }, () => {
-                qc.invalidateQueries({ queryKey: ['employees'] })
+                invalidateForTable(qc, 'Employee')
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'CashRegister' }, () => {
-                qc.invalidateQueries({ queryKey: ['active-register'] })
-                qc.invalidateQueries({ queryKey: ['register-history'] })
+                invalidateForTable(qc, 'CashRegister')
             })
             .subscribe()
 

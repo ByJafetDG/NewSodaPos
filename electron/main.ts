@@ -22,7 +22,7 @@ if (isDev) {
 }
 
 import { initDb, query, execute, get, executeMany } from './db'
-import { startSyncEngine, pushSync, pullSinpeMessages } from './sync'
+import { startSyncEngine, pushSync, pullSinpeMessages, triggerPush } from './sync'
 
 // Disable GPU acceleration for better compatibility on some systems
 app.disableHardwareAcceleration()
@@ -125,9 +125,17 @@ ipcMain.handle('window:close', () => mainWindow?.close())
 ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized())
 
 ipcMain.handle('db:query', (_, sql: string, params: any[]) => query(sql, params))
-ipcMain.handle('db:execute', (_, sql: string, params: any[]) => execute(sql, params))
+ipcMain.handle('db:execute', (_, sql: string, params: any[]) => {
+    const result = execute(sql, params)
+    if (!isDev) triggerPush()
+    return result
+})
 ipcMain.handle('db:get', (_, sql: string, params: any[]) => get(sql, params))
-ipcMain.handle('db:execute-transaction', (_, ops: Array<{ sql: string; params: any[] }>) => executeMany(ops))
+ipcMain.handle('db:execute-transaction', (_, ops: Array<{ sql: string; params: any[] }>) => {
+    const result = executeMany(ops)
+    if (!isDev) triggerPush()
+    return result
+})
 
 // Sync Stats
 ipcMain.handle('sync:stats', async () => {

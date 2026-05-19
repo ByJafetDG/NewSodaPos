@@ -66,7 +66,8 @@ export async function getNextSaleNumber(): Promise<number> {
 export async function createSale(input: CreateSaleInput): Promise<any> {
     const saleNumber = await getNextSaleNumber()
     const id = crypto.randomUUID()
-    const now = new Date().toISOString()
+    const now = localISO()
+    const nowUTC = new Date().toISOString()
 
     if (window.electronAPI) {
         // Validate stock before committing — second line of defense after cartStore

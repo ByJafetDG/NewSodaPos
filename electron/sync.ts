@@ -3,6 +3,22 @@ import { supabase } from '../src/lib/supabase'; // We'll need to make sure this 
 import db, { query, execute, get, transaction } from './db';
 
 let windowRef: BrowserWindow | null = null;
+let isPushing = false;
+let pushDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function triggerPush() {
+    if (pushDebounceTimer) clearTimeout(pushDebounceTimer);
+    pushDebounceTimer = setTimeout(async () => {
+        if (isPushing) return;
+        isPushing = true;
+        try { await pushSync(); } finally { isPushing = false; }
+    }, 500);
+}
+
+// Supabase devuelve timestamps con espacio ('2026-05-19 15:40:xx'), SQLite los compara como strings.
+// Los filtros de fecha usan formato ISO con T ('2026-05-19T...'), lo que causa falsos negativos
+// cuando se compara mismo día (espacio < T en ASCII). Normalizar al guardar.
+const d = (v: string | null | undefined): string | null => v ? v.replace(' ', 'T') : null
 
 function notifyUI(table: string) {
     if (windowRef && !windowRef.isDestroyed()) {
@@ -100,7 +116,7 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
 
     // Setup intervals for periodic sync
     if (!readOnly) {
-        setInterval(pushSync, 15000);  // Push every 15s (Faster for sales tracking)
+        setInterval(pushSync, 5000);  // Push every 5s
     }
     setInterval(pullSync, 300000); // Pull every 5m (Safety fallback only)
     setInterval(processEmailQueue, 60000); // Retry emails every 1m
@@ -397,7 +413,7 @@ async function pullSync() {
                             status = excluded.status,
                             syncStatus = 'SYNCED',
                             updatedAt = excluded.updatedAt
-                    `, [reg.id, reg.openedAt, reg.closedAt ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
+                    `, [reg.id, d(reg.openedAt), d(reg.closedAt) ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
                 }
             });
         }
@@ -406,8 +422,11 @@ async function pullSync() {
         const { data: sales, error: saleError } = await supabase.from('Sale').select('*').order('date', { ascending: false }).limit(2000);
         if (saleError) throw saleError;
         if (sales) {
-            transaction(() => {
-                for (const sale of sales) {
+            for (const sale of sales) {
+                try {
+                    // Supabase es autoritativo en pull — eliminar venta local con mismo saleNumber pero distinto id
+                    execute(`DELETE FROM SaleItem WHERE saleId IN (SELECT id FROM Sale WHERE saleNumber = ? AND id != ?)`, [sale.saleNumber, sale.id]);
+                    execute(`DELETE FROM Sale WHERE saleNumber = ? AND id != ?`, [sale.saleNumber, sale.id]);
                     execute(`
                         INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?)
@@ -429,16 +448,11 @@ async function pullSync() {
                             updatedAt = excluded.updatedAt,
                             companyId = excluded.companyId,
                             consumerName = excluded.consumerName
-                        ON CONFLICT(saleNumber) DO UPDATE SET
-                            date = excluded.date,
-                            subtotal = excluded.subtotal,
-                            discount = excluded.discount,
-                            total = excluded.total,
-                            status = excluded.status,
-                            updatedAt = excluded.updatedAt
-                    `, [sale.id, sale.saleNumber, sale.date, sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null]);
+                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null]);
+                } catch (e) {
+                    console.error(`[SyncEngine] Sale pull ${sale.id} (#${sale.saleNumber}):`, e);
                 }
-            });
+            }
         }
 
         // 10. Sync SaleItems (depends on Sale, Product)
@@ -481,7 +495,7 @@ async function pullSync() {
                             cashRegisterId = excluded.cashRegisterId,
                             syncStatus = 'SYNCED',
                             updatedAt = excluded.updatedAt
-                    `, [exp.id, exp.description, exp.amount, exp.categoryId, exp.supplier ?? null, exp.date, exp.notes ?? null, exp.cashRegisterId ?? null, exp.updatedAt]);
+                    `, [exp.id, exp.description, exp.amount, exp.categoryId, exp.supplier ?? null, d(exp.date), exp.notes ?? null, exp.cashRegisterId ?? null, d(exp.updatedAt)]);
                 }
             });
         }
@@ -504,7 +518,7 @@ async function pullSync() {
                             notes = excluded.notes,
                             date = excluded.date,
                             syncStatus = 'SYNCED'
-                    `, [mov.id, mov.productId, mov.type, mov.quantity, mov.cost ?? null, mov.reference ?? null, mov.notes ?? null, mov.date]);
+                    `, [mov.id, mov.productId, mov.type, mov.quantity, mov.cost ?? null, mov.reference ?? null, mov.notes ?? null, d(mov.date)]);
                 }
             });
         }
@@ -526,7 +540,7 @@ async function pullSync() {
                             notes = excluded.notes,
                             date = excluded.date,
                             syncStatus = 'SYNCED'
-                    `, [pay.id, pay.clientId, pay.amount, pay.method, pay.reference ?? null, pay.notes ?? null, pay.date]);
+                    `, [pay.id, pay.clientId, pay.amount, pay.method, pay.reference ?? null, pay.notes ?? null, d(pay.date)]);
                 }
             });
         }
@@ -535,6 +549,11 @@ async function pullSync() {
         await pullSinpeMessages();
 
         console.log('[SyncEngine] Pull items success.');
+
+        // Notificar UI para que React Query invalide todas las queries afectadas
+        for (const table of ['Product', 'Category', 'Subcategory', 'Client', 'Employee', 'BusinessConfig', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment']) {
+            notifyUI(table);
+        }
     } catch (err) {
         console.error('[SyncEngine] Pull failed:', err);
     } finally {
@@ -570,6 +589,12 @@ export async function pullSinpeMessages(): Promise<void> {
  * Uploads transactional data (Sales, Expenses, Movements)
  */
 export async function pushSync(): Promise<string[]> {
+    if (isPushing) return [];
+    isPushing = true;
+    try { return await _pushSync(); } finally { isPushing = false; }
+}
+
+async function _pushSync(): Promise<string[]> {
     const pendingSales = query(`SELECT * FROM Sale WHERE syncStatus = 'PENDING'`) as any[];
     const pendingExpenses = query(`SELECT * FROM Expense WHERE syncStatus = 'PENDING'`) as any[];
     const pendingMovements = query(`SELECT * FROM InventoryMovement WHERE syncStatus = 'PENDING'`) as any[];
@@ -1106,6 +1131,139 @@ function setupRealtimeSubscriptions() {
                 });
                 windowRef.webContents.send('db-changed', { table: 'SinpeMessage' });
             }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'CashRegister' }, (payload) => {
+            const reg = payload.new as any;
+            if (!reg?.id) return;
+            try {
+                execute(`
+                    INSERT INTO CashRegister (id, openedAt, closedAt, initialAmount, finalAmount, salesCash, salesCard, salesSinpe, salesTransfer, salesCredit, expensesTotal, notes, status, syncStatus, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        openedAt = excluded.openedAt,
+                        closedAt = excluded.closedAt,
+                        initialAmount = excluded.initialAmount,
+                        finalAmount = excluded.finalAmount,
+                        salesCash = excluded.salesCash,
+                        salesCard = excluded.salesCard,
+                        salesSinpe = excluded.salesSinpe,
+                        salesTransfer = excluded.salesTransfer,
+                        salesCredit = excluded.salesCredit,
+                        expensesTotal = excluded.expensesTotal,
+                        notes = excluded.notes,
+                        status = excluded.status,
+                        syncStatus = 'SYNCED',
+                        updatedAt = excluded.updatedAt
+                `, [reg.id, d(reg.openedAt), d(reg.closedAt) ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
+            } catch (e) { console.error('[SyncRealtime] CashRegister:', e); }
+            notifyUI('CashRegister');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'Sale' }, (payload) => {
+            const sale = payload.new as any;
+            if (!sale?.id) return;
+            try {
+                execute(`
+                    INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        saleNumber = excluded.saleNumber,
+                        date = excluded.date,
+                        subtotal = excluded.subtotal,
+                        discount = excluded.discount,
+                        total = excluded.total,
+                        paymentMethod = excluded.paymentMethod,
+                        amountReceived = excluded.amountReceived,
+                        change = excluded.change,
+                        cashRegisterId = excluded.cashRegisterId,
+                        isCredit = excluded.isCredit,
+                        clientId = excluded.clientId,
+                        status = excluded.status,
+                        notes = excluded.notes,
+                        syncStatus = 'SYNCED',
+                        updatedAt = excluded.updatedAt,
+                        companyId = excluded.companyId,
+                        consumerName = excluded.consumerName
+                `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null]);
+            } catch (e) { console.error('[SyncRealtime] Sale:', e); }
+            notifyUI('Sale');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'SaleItem' }, (payload) => {
+            const item = payload.new as any;
+            if (!item?.id) return;
+            try {
+                execute(`
+                    INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        saleId = excluded.saleId,
+                        productId = excluded.productId,
+                        quantity = excluded.quantity,
+                        unitPrice = excluded.unitPrice,
+                        subtotal = excluded.subtotal,
+                        notes = excluded.notes
+                `, [item.id, item.saleId, item.productId, item.quantity, item.unitPrice, item.subtotal, item.notes ?? null]);
+            } catch (e) { console.error('[SyncRealtime] SaleItem:', e); }
+            notifyUI('Sale');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'Expense' }, (payload) => {
+            const exp = payload.new as any;
+            if (!exp?.id) return;
+            try {
+                execute(`
+                    INSERT INTO Expense (id, description, amount, categoryId, supplier, date, notes, cashRegisterId, syncStatus, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        description = excluded.description,
+                        amount = excluded.amount,
+                        categoryId = excluded.categoryId,
+                        supplier = excluded.supplier,
+                        date = excluded.date,
+                        notes = excluded.notes,
+                        cashRegisterId = excluded.cashRegisterId,
+                        syncStatus = 'SYNCED',
+                        updatedAt = excluded.updatedAt
+                `, [exp.id, exp.description, exp.amount, exp.categoryId, exp.supplier ?? null, d(exp.date), exp.notes ?? null, exp.cashRegisterId ?? null, d(exp.updatedAt)]);
+            } catch (e) { console.error('[SyncRealtime] Expense:', e); }
+            notifyUI('Expense');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'InventoryMovement' }, (payload) => {
+            const mov = payload.new as any;
+            if (!mov?.id) return;
+            try {
+                execute(`
+                    INSERT INTO InventoryMovement (id, productId, type, quantity, cost, reference, notes, date, syncStatus)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED')
+                    ON CONFLICT(id) DO UPDATE SET
+                        productId = excluded.productId,
+                        type = excluded.type,
+                        quantity = excluded.quantity,
+                        cost = excluded.cost,
+                        reference = excluded.reference,
+                        notes = excluded.notes,
+                        date = excluded.date,
+                        syncStatus = 'SYNCED'
+                `, [mov.id, mov.productId, mov.type, mov.quantity, mov.cost ?? null, mov.reference ?? null, mov.notes ?? null, d(mov.date)]);
+            } catch (e) { console.error('[SyncRealtime] InventoryMovement:', e); }
+            notifyUI('InventoryMovement');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'Payment' }, (payload) => {
+            const pay = payload.new as any;
+            if (!pay?.id) return;
+            try {
+                execute(`
+                    INSERT INTO Payment (id, clientId, amount, method, reference, notes, date, syncStatus)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED')
+                    ON CONFLICT(id) DO UPDATE SET
+                        clientId = excluded.clientId,
+                        amount = excluded.amount,
+                        method = excluded.method,
+                        reference = excluded.reference,
+                        notes = excluded.notes,
+                        date = excluded.date,
+                        syncStatus = 'SYNCED'
+                `, [pay.id, pay.clientId, pay.amount, pay.method, pay.reference ?? null, pay.notes ?? null, d(pay.date)]);
+            } catch (e) { console.error('[SyncRealtime] Payment:', e); }
+            notifyUI('Payment');
         })
         .subscribe();
 }
