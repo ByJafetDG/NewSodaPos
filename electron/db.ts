@@ -537,6 +537,27 @@ export function initDb() {
     `);
   } catch {}
 
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN totalCards INTEGER`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN prizeCount INTEGER`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN slotsPerCard INTEGER DEFAULT 3`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN cardSkin TEXT DEFAULT 'gold'`); } catch {}
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS RaspaditaCard (
+      id TEXT PRIMARY KEY,
+      sorteoId TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      slots TEXT NOT NULL,
+      isPrize INTEGER NOT NULL DEFAULT 0,
+      prizeLabel TEXT,
+      isScratched INTEGER NOT NULL DEFAULT 0,
+      scratchedAt TEXT,
+      FOREIGN KEY (sorteoId) REFERENCES Sorteo(id) ON DELETE CASCADE,
+      UNIQUE(sorteoId, position)
+    )
+  `);
+  try { db.exec(`ALTER TABLE RaspaditaCard ADD COLUMN prizeDescription TEXT`); } catch {}
+
   // Corrective migration: normalize CashRegister timestamps to UTC ISO with Z
   // Handles: no-Z ISO strings ("...T...") and SQLite format ("YYYY-MM-DD HH:MM:SS" with space)
   try {

@@ -143,13 +143,27 @@ export interface ReturnRecord {
     items: ReturnItem[]; date: Date; syncStatus: string
 }
 
-export type SorteoType = 'RULETA'
+export type SorteoType = 'RULETA' | 'RASPADITA'
 export type SorteoStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'ENDED'
 export interface Sorteo {
     id: string; name: string; type: SorteoType; status: SorteoStatus
     startAt: Date | null; endAt: Date | null
     minSpinsBetweenPrizes: number
+    totalCards: number | null; prizeCount: number | null
+    slotsPerCard: number | null; cardSkin: string | null
     syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
+}
+
+export interface RaspaditaCard {
+    id: string
+    sorteoId: string
+    position: number
+    slots: string[]
+    isPrize: boolean
+    prizeLabel: string | null
+    prizeDescription: string | null
+    isScratched: boolean
+    scratchedAt: Date | null
 }
 
 export interface SorteoOption {

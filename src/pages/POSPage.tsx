@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Search, UserCircle2, ChevronDown, Pencil, X } from 'lucide-react'
 import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
@@ -6,7 +6,7 @@ import { useKeyboardStore } from '@/store/keyboardStore'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
 import { usePendingSaleLoadStore } from '@/store/pendingSaleLoadStore'
 import { settleSaleDirect } from '@/services/clients'
-import { createCreditNote, createSplitCreditSales } from '@/services/sales'
+import { createCreditNote, createSplitCreditSales, updateSaleInPlace } from '@/services/sales'
 import type { SplitCreditData } from '@/components/modals/CreditModal'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
@@ -15,9 +15,10 @@ import { useClients, useCreateClient, useUpdateClient, useCompanies } from '@/ho
 import { useEmployees } from '@/hooks/useEmployees'
 import { useCreateSale } from '@/hooks/useSales'
 import { useActiveRegister } from '@/hooks/useCashRegister'
-import { useCartSorteo } from '@/hooks/useSorteos'
+import { useCartSorteo, useRaspaditaCards } from '@/hooks/useSorteos'
 import { RuletaModal } from '@/components/modals/RuletaModal'
-import { logSorteoEntry, handleSorteoWin } from '@/services/sorteos'
+import { RaspaditaModal } from '@/components/modals/RaspaditaModal'
+import { logSorteoEntry, handleSorteoWin, scratchCard } from '@/services/sorteos'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { sendReceiptEmail, sendSettledEmail, sendMixedCreditEmail, sendSplitCreditEmail, sendInvoiceReceiptEmail } from '@/services/emailReceipt'
@@ -181,6 +182,9 @@ export function POSPage() {
             return hit ? sum + item.quantity : sum
         }, 0)
         : 0
+    const isRaspadita = cartSorteo?.sorteo.type === 'RASPADITA'
+    const { data: raspaditaCards = [] } = useRaspaditaCards(isRaspadita ? (cartSorteo?.sorteo.id ?? null) : null)
+    const raspaditaSessionScratches = useRef(0)
 
     // ── Derived ───────────────────────────────────────────────────────────────
     const received = parseFloat(amountReceived) || 0
@@ -294,6 +298,23 @@ export function POSPage() {
         qc.invalidateQueries({ queryKey: ['sorteoStats', cartSorteo.sorteo.id] })
         qc.invalidateQueries({ queryKey: ['sorteoWinners', cartSorteo.sorteo.id] })
         qc.invalidateQueries({ queryKey: ['cartSorteo'] })
+        setSorteoDeclined(true)
+    }
+
+    function handleRaspaditaCardScratched(cardId: string) {
+        raspaditaSessionScratches.current++
+        scratchCard(cardId)
+        qc.invalidateQueries({ queryKey: ['raspaditaCards', cartSorteo?.sorteo.id] })
+        qc.invalidateQueries({ queryKey: ['sorteos'] })
+    }
+
+    async function handleRaspaditaClose() {
+        if (cartSorteo && raspaditaSessionScratches.current > 0) {
+            await logSorteoEntry({ sorteoId: cartSorteo.sorteo.id, didParticipate: true, unitCount: qualifyingCount })
+            qc.invalidateQueries({ queryKey: ['sorteoStats', cartSorteo.sorteo.id] })
+        }
+        raspaditaSessionScratches.current = 0
+        setSorteoOpen(false)
         setSorteoDeclined(true)
     }
 
@@ -709,7 +730,7 @@ export function POSPage() {
             const mainChange = isCredit ? 0
                 : capturedHasEfectivo ? Math.max(0, saleReceived - cashNeeded)
                     : (method === 'EFECTIVO' ? Math.max(0, saleReceived - paymentTotal) : 0)
-            const sale = await createSale.mutateAsync({
+            const saleInput = {
                 items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: mainTotal,
                 paymentMethod: mainPaymentMethod as any,
                 amountReceived: mainAmountReceived,
@@ -727,7 +748,24 @@ export function POSPage() {
                 consumerName: capturedInvoiceClient?.consumerName ?? null,
                 originalSaleSnapshot: pendingSaleLoad.originalSaleSnapshot ?? null,
                 physicalInvoiceNumber: capturedInvoiceClient?.physicalInvoiceNumber ?? null,
-            })
+            }
+
+            // When modifying a non-credit sale, update in place (keeps same saleNumber, no anulada record)
+            const capturedOriginalId = pendingSaleLoad.originalSaleId
+            let sale: any
+            if (capturedOriginalId && !isCredit) {
+                const updated = await updateSaleInPlace(capturedOriginalId, saleInput)
+                if (updated) {
+                    sale = { ...updated, ...saleInput }
+                    qc.invalidateQueries({ queryKey: ['products'] })
+                    qc.invalidateQueries({ queryKey: ['sales'] })
+                } else {
+                    // Original no longer exists (was a deleted credit sale) — create new
+                    sale = await createSale.mutateAsync(saleInput)
+                }
+            } else {
+                sale = await createSale.mutateAsync(saleInput)
+            }
 
             const resolvedCompanyId = capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null
             if (resolvedCompanyId) {
@@ -1354,16 +1392,27 @@ export function POSPage() {
                 onClose={() => setSaleSuccess(null)}
             />
 
-            <RuletaModal
-                isOpen={sorteoOpen}
-                onClose={() => setSorteoOpen(false)}
-                sorteoName={cartSorteo?.sorteo.name ?? ''}
-                options={cartSorteo?.options ?? []}
-                sorteoId={cartSorteo?.sorteo.id}
-                minSpinsBetweenPrizes={cartSorteo?.sorteo.minSpinsBetweenPrizes}
-                maxSpins={qualifyingCount}
-                onResult={handleSorteoResult}
-            />
+            {isRaspadita ? (
+                <RaspaditaModal
+                    isOpen={sorteoOpen}
+                    onClose={handleRaspaditaClose}
+                    sorteo={cartSorteo?.sorteo ?? null}
+                    cards={raspaditaCards}
+                    allowedScratchCount={qualifyingCount}
+                    onCardScratched={handleRaspaditaCardScratched}
+                />
+            ) : (
+                <RuletaModal
+                    isOpen={sorteoOpen}
+                    onClose={() => setSorteoOpen(false)}
+                    sorteoName={cartSorteo?.sorteo.name ?? ''}
+                    options={cartSorteo?.options ?? []}
+                    sorteoId={cartSorteo?.sorteo.id}
+                    minSpinsBetweenPrizes={cartSorteo?.sorteo.minSpinsBetweenPrizes}
+                    maxSpins={qualifyingCount}
+                    onResult={handleSorteoResult}
+                />
+            )}
 
             <HeldOrdersModal
                 isOpen={heldOrdersView !== null}

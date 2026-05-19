@@ -8,8 +8,11 @@ import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { CreateSorteoModal } from '@/components/modals/CreateSorteoModal'
 import { EditSorteoModal } from '@/components/modals/EditSorteoModal'
 import { RuletaModal } from '@/components/modals/RuletaModal'
+import { RaspaditaModal } from '@/components/modals/RaspaditaModal'
 import { cn } from '@/lib/utils'
-import { useSorteos, useUpdateSorteo, useDeleteSorteo, useSorteoStats, useSorteoOptions, useSorteoWinners } from '@/hooks/useSorteos'
+import { useSorteos, useUpdateSorteo, useDeleteSorteo, useSorteoStats, useSorteoOptions, useSorteoWinners, useRaspaditaCards } from '@/hooks/useSorteos'
+import { scratchCard, generateRaspaditaCards, getSorteoOptions, updateSorteo } from '@/services/sorteos'
+import { useQueryClient } from '@tanstack/react-query'
 import type { Sorteo, SorteoStatus } from '@/types'
 
 const STATUS_LABEL: Record<SorteoStatus, string> = {
@@ -168,19 +171,23 @@ function SorteoRow({
     sorteo,
     onDelete,
     onPreview,
+    onRaspadita,
     onStats,
     onEdit,
+    onActivate,
 }: {
     sorteo: Sorteo
     onDelete: (s: Sorteo) => void
     onPreview: (s: Sorteo) => void
+    onRaspadita: (s: Sorteo) => void
     onStats: (s: Sorteo) => void
     onEdit: (s: Sorteo) => void
+    onActivate: (s: Sorteo) => void
 }) {
-    const updateSorteo = useUpdateSorteo()
+    const updateMutation = useUpdateSorteo()
 
     function changeStatus(status: SorteoStatus) {
-        updateSorteo.mutate({ id: sorteo.id, status })
+        updateMutation.mutate({ id: sorteo.id, status })
     }
 
     return (
@@ -224,7 +231,7 @@ function SorteoRow({
                     {/* Status-changing action chips */}
                     {sorteo.status === 'DRAFT' && (
                         <button
-                            onClick={() => changeStatus('ACTIVE')}
+                            onClick={() => onActivate(sorteo)}
                             className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all cursor-pointer"
                         >
                             <Play size={10} />
@@ -234,11 +241,11 @@ function SorteoRow({
                     {sorteo.status === 'ACTIVE' && (
                         <>
                             <button
-                                onClick={() => onPreview(sorteo)}
+                                onClick={() => sorteo.type === 'RASPADITA' ? onRaspadita(sorteo) : onPreview(sorteo)}
                                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/20 active:scale-95 transition-all cursor-pointer"
                             >
                                 <Zap size={10} />
-                                Probar
+                                {sorteo.type === 'RASPADITA' ? 'Abrir' : 'Probar'}
                             </button>
                             <button
                                 onClick={() => changeStatus('PAUSED')}
@@ -309,6 +316,7 @@ function SorteoRow({
 export function SorteosPage() {
     const { data: sorteos = [], isLoading } = useSorteos()
     const deleteSorteo = useDeleteSorteo()
+    const qc = useQueryClient()
 
     const [createOpen, setCreateOpen] = useState(false)
     const [editSorteo, setEditSorteo] = useState<Sorteo | null>(null)
@@ -317,6 +325,24 @@ export function SorteosPage() {
     const [statsSorteo, setStatsSorteo] = useState<Sorteo | null>(null)
     const [spinsSince, setSpinsSince] = useState<Record<string, number>>({})
     const { data: previewOptions = [] } = useSorteoOptions(previewSorteo?.id ?? null)
+
+    const [raspaditaSorteo, setRaspaditaSorteo] = useState<Sorteo | null>(null)
+    const { data: raspaditaCards = [] } = useRaspaditaCards(raspaditaSorteo?.id ?? null)
+
+    async function activateSorteo(sorteo: Sorteo) {
+        await updateSorteo(sorteo.id, { status: 'ACTIVE' })
+        if (sorteo.type === 'RASPADITA' && sorteo.totalCards && sorteo.slotsPerCard) {
+            const options = await getSorteoOptions(sorteo.id)
+            const prizes = options.filter(o => !o.isFiller).map(o => ({
+                label: o.label,
+                description: o.description,
+                count: o.quantity ?? 1,
+            }))
+            await generateRaspaditaCards(sorteo.id, sorteo.totalCards, prizes, sorteo.slotsPerCard)
+        }
+        qc.invalidateQueries({ queryKey: ['sorteos'] })
+        qc.invalidateQueries({ queryKey: ['raspaditaCards', sorteo.id] })
+    }
 
     const active = sorteos.filter(s => s.status === 'ACTIVE').length
     const draft = sorteos.filter(s => s.status === 'DRAFT').length
@@ -378,7 +404,16 @@ export function SorteosPage() {
                         </thead>
                         <tbody>
                             {sorteos.map(s => (
-                                <SorteoRow key={s.id} sorteo={s} onDelete={setDeleteTarget} onPreview={setPreviewSorteo} onStats={setStatsSorteo} onEdit={setEditSorteo} />
+                                <SorteoRow
+                                    key={s.id}
+                                    sorteo={s}
+                                    onDelete={setDeleteTarget}
+                                    onPreview={setPreviewSorteo}
+                                    onRaspadita={setRaspaditaSorteo}
+                                    onStats={setStatsSorteo}
+                                    onEdit={setEditSorteo}
+                                    onActivate={activateSorteo}
+                                />
                             ))}
                         </tbody>
                     </table>
@@ -401,6 +436,20 @@ export function SorteosPage() {
                 externalSpinsSince={previewSorteo ? spinsSince[previewSorteo.id] : undefined}
                 onSpinCountChange={(n) => {
                     if (previewSorteo) setSpinsSince(prev => ({ ...prev, [previewSorteo.id]: n }))
+                }}
+            />
+
+            <RaspaditaModal
+                isOpen={!!raspaditaSorteo}
+                onClose={() => setRaspaditaSorteo(null)}
+                sorteo={raspaditaSorteo}
+                cards={raspaditaCards}
+                onCardScratched={async (cardId, isPrize) => {
+                    await scratchCard(cardId)
+                    qc.invalidateQueries({ queryKey: ['raspaditaCards', raspaditaSorteo?.id] })
+                    if (isPrize) {
+                        qc.invalidateQueries({ queryKey: ['sorteos'] })
+                    }
                 }}
             />
 

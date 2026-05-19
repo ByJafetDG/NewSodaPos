@@ -94,9 +94,9 @@ export function ReportsPage() {
         if (saleInfo?.isCredit) {
             // Credit sale: hard-delete so salesCredit on register stays correct
             await deleteCreditSale(saleId)
-        } else {
-            await voidSaleMutation.mutateAsync(saleId)
         }
+        // Non-credit sales: do NOT void here — the original stays COMPLETADA while editing.
+        // createSale voids it atomically at charge time, so no sale is lost if user cancels.
         pendingSaleLoad.set(
             items,
             saleInfo?.discount ?? 0,
@@ -185,7 +185,7 @@ export function ReportsPage() {
     const filteredSales = (sales as any[])
         .filter((s: any) => {
             if (!showAnuladas && s.status === 'ANULADA') return false
-            if (showSoloModificadas && !s.modifiedFromSaleId) return false
+            if (showSoloModificadas && !s.originalSaleSnapshot && !s.modifiedFromSaleId) return false
             if (filterCajero && extractCajero(s.notes) !== filterCajero) return false
             if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false
             if (timeActive) {
@@ -501,7 +501,7 @@ export function ReportsPage() {
                             <div className="space-y-0.5 overflow-y-auto max-h-[320px]">
                                 {filteredSales.map((s: any) => {
                                     const isAnulada = s.status === 'ANULADA'
-                                    const isModificada = !!s.modifiedFromSaleId
+                                    const isModificada = !!s.originalSaleSnapshot || !!s.modifiedFromSaleId
                                     const cfg = PM_CONFIG[s.paymentMethod] ?? PM_CONFIG['EFECTIVO']
                                     const time = new Date(s.paidAt ?? s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
                                     const isSplit = s.notes?.startsWith('Crédito dividido') ?? false

@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase'
-import type { Sorteo, SorteoOption, SorteoParticipant, SorteoEntry, SorteoStats, SorteoWinner } from '@/types'
+import type { Sorteo, SorteoOption, SorteoParticipant, SorteoEntry, SorteoStats, SorteoWinner, RaspaditaCard } from '@/types'
 
 // ─── Sorteo ──────────────────────────────────────────────────────────────────
 
@@ -36,21 +36,32 @@ export async function getActiveSorteos(): Promise<Sorteo[]> {
     return (data ?? []).map(mapSorteo) as Sorteo[]
 }
 
-export async function createSorteo(input: { name: string; type?: string; minSpinsBetweenPrizes?: number }): Promise<Sorteo> {
+export async function createSorteo(input: {
+    name: string; type?: string; minSpinsBetweenPrizes?: number
+    totalCards?: number; prizeCount?: number; slotsPerCard?: number; cardSkin?: string
+}): Promise<Sorteo> {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
-            `INSERT INTO Sorteo (id, name, type, status, minSpinsBetweenPrizes, syncStatus, updatedAt)
-             VALUES (?, ?, ?, 'DRAFT', ?, 'PENDING', ?)`,
-            [id, input.name, input.type ?? 'RULETA', input.minSpinsBetweenPrizes ?? 8, now]
+            `INSERT INTO Sorteo (id, name, type, status, minSpinsBetweenPrizes, totalCards, prizeCount, slotsPerCard, cardSkin, syncStatus, updatedAt)
+             VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, 'PENDING', ?)`,
+            [id, input.name, input.type ?? 'RULETA', input.minSpinsBetweenPrizes ?? 8,
+             input.totalCards ?? null, input.prizeCount ?? null,
+             input.slotsPerCard ?? null, input.cardSkin ?? null, now]
         )
         const rows = await window.electronAPI.dbQuery('SELECT * FROM Sorteo WHERE id = ?', [id])
         return mapSorteo(rows[0]) as Sorteo
     }
     const { data, error } = await supabase
         .from('Sorteo')
-        .insert({ id, name: input.name, type: input.type ?? 'RULETA', status: 'DRAFT', minSpinsBetweenPrizes: input.minSpinsBetweenPrizes ?? 8, syncStatus: 'SYNCED' })
+        .insert({
+            id, name: input.name, type: input.type ?? 'RULETA', status: 'DRAFT',
+            minSpinsBetweenPrizes: input.minSpinsBetweenPrizes ?? 8,
+            totalCards: input.totalCards ?? null, prizeCount: input.prizeCount ?? null,
+            slotsPerCard: input.slotsPerCard ?? null, cardSkin: input.cardSkin ?? null,
+            syncStatus: 'SYNCED',
+        })
         .select().single()
     if (error) throw error
     return mapSorteo(data) as Sorteo
@@ -368,14 +379,23 @@ export async function getSorteoStats(sorteoId: string): Promise<SorteoStats> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function mapSorteo(r: any): Partial<Sorteo> {
+function localISO(): string {
+    const tzOffset = new Date().getTimezoneOffset()
+    return new Date(Date.now() - tzOffset * 60000).toISOString().replace('Z', '')
+}
+
+function mapSorteo(r: Record<string, unknown>): Partial<Sorteo> {
     return {
-        ...r,
-        minSpinsBetweenPrizes: r.minSpinsBetweenPrizes ?? 8,
-        startAt: r.startAt ? new Date(r.startAt) : null,
-        endAt: r.endAt ? new Date(r.endAt) : null,
-        createdAt: new Date(r.createdAt),
-        updatedAt: new Date(r.updatedAt),
+        ...(r as object),
+        minSpinsBetweenPrizes: (r.minSpinsBetweenPrizes as number) ?? 8,
+        totalCards: r.totalCards != null ? (r.totalCards as number) : null,
+        prizeCount: r.prizeCount != null ? (r.prizeCount as number) : null,
+        slotsPerCard: r.slotsPerCard != null ? (r.slotsPerCard as number) : null,
+        cardSkin: r.cardSkin != null ? (r.cardSkin as string) : null,
+        startAt: r.startAt ? new Date(r.startAt as string) : null,
+        endAt: r.endAt ? new Date(r.endAt as string) : null,
+        createdAt: new Date(r.createdAt as string),
+        updatedAt: new Date(r.updatedAt as string),
     }
 }
 
@@ -397,11 +417,114 @@ export async function getSpinsSinceLastPrize(sorteoId: string): Promise<number> 
     return (countRows[0] as any)?.cnt ?? 0
 }
 
-function mapOption(r: any): Partial<SorteoOption> {
+function mapOption(r: Record<string, unknown>): Partial<SorteoOption> {
     return {
-        ...r,
+        ...(r as object),
         isFiller: !!r.isFiller,
-        quantity: r.quantity ?? null,
-        quantityRemaining: r.quantityRemaining ?? null,
+        quantity: r.quantity != null ? (r.quantity as number) : null,
+        quantityRemaining: r.quantityRemaining != null ? (r.quantityRemaining as number) : null,
     }
+}
+
+// ─── RaspaditaCard ────────────────────────────────────────────────────────────
+
+const SYMBOL_KEYS = ['diamond', 'star', 'coin', 'clover', 'bell', 'cherry', 'seven', 'crown']
+
+function mapRaspaditaCard(r: Record<string, unknown>): RaspaditaCard {
+    return {
+        id: r.id as string,
+        sorteoId: r.sorteoId as string,
+        position: r.position as number,
+        slots: JSON.parse(r.slots as string) as string[],
+        isPrize: !!(r.isPrize as number),
+        prizeLabel: r.prizeLabel != null ? (r.prizeLabel as string) : null,
+        prizeDescription: r.prizeDescription != null ? (r.prizeDescription as string) : null,
+        isScratched: !!(r.isScratched as number),
+        scratchedAt: r.scratchedAt ? new Date(r.scratchedAt as string) : null,
+    }
+}
+
+export async function getRaspaditaCards(sorteoId: string): Promise<RaspaditaCard[]> {
+    if (window.electronAPI) {
+        const rows = await window.electronAPI.dbQuery(
+            'SELECT * FROM RaspaditaCard WHERE sorteoId = ? ORDER BY position ASC',
+            [sorteoId]
+        )
+        return (rows as Record<string, unknown>[]).map(mapRaspaditaCard)
+    }
+    const { data, error } = await supabase
+        .from('RaspaditaCard').select('*').eq('sorteoId', sorteoId).order('position')
+    if (error) throw error
+    return ((data ?? []) as Record<string, unknown>[]).map(mapRaspaditaCard)
+}
+
+export async function generateRaspaditaCards(
+    sorteoId: string,
+    totalCards: number,
+    prizes: { label: string; description?: string | null; count: number }[],
+    slotsPerCard: number
+): Promise<void> {
+    type CardDraft = { id: string; sorteoId: string; position: number; slots: string[]; isPrize: boolean; prizeLabel: string | null; prizeDescription: string | null }
+    const cards: CardDraft[] = []
+
+    for (let pi = 0; pi < prizes.length; pi++) {
+        const prize = prizes[pi]
+        const symbol = SYMBOL_KEYS[pi % SYMBOL_KEYS.length]
+        for (let i = 0; i < prize.count; i++) {
+            cards.push({
+                id: crypto.randomUUID(),
+                sorteoId,
+                position: 0,
+                slots: Array(slotsPerCard).fill(symbol) as string[],
+                isPrize: true,
+                prizeLabel: prize.label,
+                prizeDescription: prize.description ?? null,
+            })
+        }
+    }
+
+    const remaining = totalCards - cards.length
+    for (let i = 0; i < remaining; i++) {
+        let slots: string[]
+        do {
+            slots = Array.from({ length: slotsPerCard }, () => SYMBOL_KEYS[Math.floor(Math.random() * SYMBOL_KEYS.length)])
+        } while (slots.every(s => s === slots[0]))
+        cards.push({ id: crypto.randomUUID(), sorteoId, position: 0, slots, isPrize: false, prizeLabel: null, prizeDescription: null })
+    }
+
+    for (let i = cards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cards[i], cards[j]] = [cards[j], cards[i]]
+    }
+    cards.forEach((c, idx) => { c.position = idx })
+
+    if (window.electronAPI) {
+        const ops = cards.map(c => ({
+            sql: `INSERT OR REPLACE INTO RaspaditaCard (id, sorteoId, position, slots, isPrize, prizeLabel, prizeDescription, isScratched)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+            params: [c.id, c.sorteoId, c.position, JSON.stringify(c.slots), c.isPrize ? 1 : 0, c.prizeLabel, c.prizeDescription],
+        }))
+        await window.electronAPI.dbTransaction(ops)
+        return
+    }
+    const rows = cards.map(c => ({
+        id: c.id, sorteoId: c.sorteoId, position: c.position,
+        slots: JSON.stringify(c.slots), isPrize: c.isPrize,
+        prizeLabel: c.prizeLabel, prizeDescription: c.prizeDescription, isScratched: false,
+    }))
+    const { error } = await supabase.from('RaspaditaCard').insert(rows)
+    if (error) throw error
+}
+
+export async function scratchCard(cardId: string): Promise<void> {
+    const now = localISO()
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            `UPDATE RaspaditaCard SET isScratched = 1, scratchedAt = ? WHERE id = ?`,
+            [now, cardId]
+        )
+        return
+    }
+    const { error } = await supabase.from('RaspaditaCard').update({ isScratched: true, scratchedAt: now }).eq('id', cardId)
+    if (error) throw error
 }

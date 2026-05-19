@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Check, AlertTriangle, DollarSign, Gift } from 'lucide-react'
+import { Plus, Trash2, Check, AlertTriangle, DollarSign, Gift, Info } from 'lucide-react'
 import { BaseModal } from '@/components/modals/BaseModal'
 import { Button } from '@/components/atoms/Button'
 import { cn } from '@/lib/utils'
@@ -57,7 +57,7 @@ function optionToDraft(o: SorteoOption, idx: number): DraftOption {
     let prizeValue = ''
     if (o.description) {
         if (isEfectivo) {
-            const stripped = o.description.replace(/[₡\s .,]/g, '').match(/\d+/)
+            const stripped = o.description.replace(/[₡\s ,]/g, '').match(/[\d.]+/)
             prizeValue = stripped ? stripped[0] : ''
         } else {
             prizeValue = o.description
@@ -191,6 +191,8 @@ function OptionRow({ o, onUpdate, onRemove }: {
 
 export function EditSorteoModal({ sorteo, onClose }: Props) {
     const qc = useQueryClient()
+    const isRaspadita = sorteo?.type === 'RASPADITA'
+
     const [name, setName] = useState('')
     const [options, setOptions] = useState<DraftOption[]>([])
     const [originalOptions, setOriginalOptions] = useState<SorteoOption[]>([])
@@ -223,13 +225,16 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
 
     const totalProb = options.reduce((s, o) => s + (parseFloat(o.baseProbability) || 0), 0)
     const probOver = totalProb > 100
-    const canSave = (
+
+    const canSaveRuleta = (
         name.trim().length > 0 &&
         options.length > 0 &&
         options.every(o => o.label.trim() && parseFloat(o.baseProbability) > 0) &&
         !probOver &&
         !submitting
     )
+    const canSaveRaspadita = name.trim().length > 0 && !submitting
+    const canSave = isRaspadita ? canSaveRaspadita : canSaveRuleta
 
     function updateOption(id: string, patch: Partial<DraftOption>) {
         setOptions(prev => prev.map(o => o._id === id ? { ...o, ...patch } : o))
@@ -256,79 +261,265 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
         setSubmitting(true)
         setError(null)
         try {
-            await updateSorteo(sorteo.id, {
-                name: name.trim(),
-                startAt: hasDates && startAt ? startAt : null,
-                endAt: hasDates && endAt ? endAt : null,
-                minSpinsBetweenPrizes: parseInt(minSpins) || 8,
-            })
+            if (isRaspadita) {
+                await updateSorteo(sorteo.id, {
+                    name: name.trim(),
+                    startAt: hasDates && startAt ? startAt : null,
+                    endAt: hasDates && endAt ? endAt : null,
+                })
+            } else {
+                await updateSorteo(sorteo.id, {
+                    name: name.trim(),
+                    startAt: hasDates && startAt ? startAt : null,
+                    endAt: hasDates && endAt ? endAt : null,
+                    minSpinsBetweenPrizes: parseInt(minSpins) || 8,
+                })
 
-            const originalNonFillerIds = new Set(
-                originalOptions.filter(o => !o.isFiller).map(o => o.id)
-            )
-            const keptIds = new Set(options.filter(o => o.existingId).map(o => o.existingId!))
+                const originalNonFillerIds = new Set(
+                    originalOptions.filter(o => !o.isFiller).map(o => o.id)
+                )
+                const keptIds = new Set(options.filter(o => o.existingId).map(o => o.existingId!))
 
-            for (const id of originalNonFillerIds) {
-                if (!keptIds.has(id)) await deleteSorteoOption(id)
-            }
+                for (const id of originalNonFillerIds) {
+                    if (!keptIds.has(id)) await deleteSorteoOption(id)
+                }
 
-            for (let i = 0; i < options.length; i++) {
-                const o = options[i]
-                const qty = o.quantity === '' ? null : parseInt(o.quantity) || null
-                const description = buildDescription(o.prizeType, o.prizeValue)
-                if (o.existingId) {
-                    await updateSorteoOption(o.existingId, {
-                        label: o.label.trim(),
-                        description: description ?? null,
-                        quantity: qty,
-                        baseProbability: parseFloat(o.baseProbability) || 0,
-                        color: o.color,
-                        sortOrder: i,
-                    })
-                } else {
+                for (let i = 0; i < options.length; i++) {
+                    const o = options[i]
+                    const qty = o.quantity === '' ? null : parseInt(o.quantity) || null
+                    const description = buildDescription(o.prizeType, o.prizeValue)
+                    if (o.existingId) {
+                        await updateSorteoOption(o.existingId, {
+                            label: o.label.trim(),
+                            description: description ?? null,
+                            quantity: qty,
+                            baseProbability: parseFloat(o.baseProbability) || 0,
+                            color: o.color,
+                            sortOrder: i,
+                        })
+                    } else {
+                        await createSorteoOption({
+                            sorteoId: sorteo.id,
+                            label: o.label.trim(),
+                            description: description ?? undefined,
+                            quantity: qty,
+                            baseProbability: parseFloat(o.baseProbability) || 0,
+                            isFiller: false,
+                            color: o.color,
+                            sortOrder: i,
+                        })
+                    }
+                }
+
+                const hasFiller = originalOptions.some(o => o.isFiller)
+                if (!hasFiller) {
                     await createSorteoOption({
                         sorteoId: sorteo.id,
-                        label: o.label.trim(),
-                        description: description ?? undefined,
-                        quantity: qty,
-                        baseProbability: parseFloat(o.baseProbability) || 0,
-                        isFiller: false,
-                        color: o.color,
-                        sortOrder: i,
+                        label: 'Sin premio',
+                        description: null,
+                        quantity: null,
+                        baseProbability: 0,
+                        isFiller: true,
+                        color: '#6B7280',
+                        sortOrder: options.length,
                     })
                 }
-            }
-
-            const hasFiller = originalOptions.some(o => o.isFiller)
-            if (!hasFiller) {
-                await createSorteoOption({
-                    sorteoId: sorteo.id,
-                    label: 'Sin premio',
-                    description: null,
-                    quantity: null,
-                    baseProbability: 0,
-                    isFiller: true,
-                    color: '#6B7280',
-                    sortOrder: options.length,
-                })
             }
 
             await qc.invalidateQueries({ queryKey: ['sorteos'] })
             await qc.invalidateQueries({ queryKey: ['sorteoOptions', sorteo.id] })
             await qc.invalidateQueries({ queryKey: ['cartSorteo'] })
             onClose()
-        } catch (e: any) {
-            setError(e?.message ?? 'Error al guardar')
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'Error al guardar')
         } finally {
             setSubmitting(false)
         }
+    }
+
+    // ─── Raspadita info display ───────────────────────────────────────────────
+
+    function RaspaditaContent() {
+        if (!sorteo) return null
+        const skinLabel = sorteo.cardSkin === 'neon' ? 'Neón' : 'Dorada'
+        const prizeOptions = options
+
+        return (
+            <div className="space-y-4">
+                {sorteo.status === 'ACTIVE' && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[12px] text-amber-400">
+                        <AlertTriangle size={13} />
+                        Este sorteo está activo. Los cambios aplican de inmediato.
+                    </div>
+                )}
+
+                {/* Name */}
+                <div className="space-y-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Nombre</p>
+                    <input
+                        {...nameKb}
+                        className="w-full h-10 px-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[14px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/40 transition-colors"
+                    />
+                </div>
+
+                {/* Config (read-only) */}
+                <div className="space-y-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Configuración</p>
+                    <div className="grid grid-cols-4 gap-2">
+                        {[
+                            { label: 'Raspas', value: sorteo.totalCards ?? '—' },
+                            { label: 'Premios', value: sorteo.prizeCount ?? '—' },
+                            { label: 'Slots', value: sorteo.slotsPerCard ?? '—' },
+                            { label: 'Diseño', value: skinLabel },
+                        ].map(c => (
+                            <div key={c.label} className="flex flex-col gap-0.5 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
+                                <span className="text-[9px] uppercase tracking-wider text-[#3D506A]">{c.label}</span>
+                                <span className="text-[13px] font-semibold text-[#E4ECF7]">{c.value}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
+                        <Info size={11} className="text-[#3D506A] flex-shrink-0" />
+                        <p className="text-[11px] text-[#3D506A]">Raspas y configuración no se pueden cambiar después de activar.</p>
+                    </div>
+                </div>
+
+                {/* Prize tiers (read-only) */}
+                {prizeOptions.length > 0 && (
+                    <div className="space-y-1.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Premios generados</p>
+                        <div className="space-y-1.5">
+                            {prizeOptions.map(o => (
+                                <div
+                                    key={o._id}
+                                    className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]"
+                                >
+                                    <div
+                                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                        style={{ background: o.color }}
+                                    />
+                                    <span className="text-[12px] font-medium text-[#E4ECF7] flex-1">{o.label}</span>
+                                    {o.prizeValue && (
+                                        <span className="text-[11px] text-[#7A8FAA]">
+                                            {o.prizeType === 'efectivo' ? formatColones(o.prizeValue) : o.prizeValue}
+                                        </span>
+                                    )}
+                                    <span className="text-[11px] text-[#3D506A] tabular-nums">×{o.quantity || '1'}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Dates */}
+                <DateSection
+                    hasDates={hasDates}
+                    setHasDates={setHasDates}
+                    startAt={startAt}
+                    setStartAt={setStartAt}
+                    endAt={endAt}
+                    setEndAt={setEndAt}
+                />
+            </div>
+        )
+    }
+
+    // ─── Ruleta content ───────────────────────────────────────────────────────
+
+    function RuletaContent() {
+        return (
+            <div className="space-y-4">
+                {sorteo?.status === 'ACTIVE' && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[12px] text-amber-400">
+                        <AlertTriangle size={13} />
+                        Este sorteo está activo. Los cambios aplican de inmediato.
+                    </div>
+                )}
+
+                {/* Name */}
+                <div className="space-y-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Nombre</p>
+                    <input
+                        {...nameKb}
+                        className="w-full h-10 px-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[14px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/40 transition-colors"
+                    />
+                </div>
+
+                {/* Probability bar */}
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
+                    <span className="text-[12px] text-[#3D506A]">
+                        {options.length} premio{options.length !== 1 ? 's' : ''}
+                    </span>
+                    <div className={cn(
+                        'ml-auto text-[11px] font-mono font-semibold px-2 py-0.5 rounded-lg',
+                        probOver ? 'text-red-400 bg-red-500/10' :
+                        totalProb === 100 ? 'text-emerald-400 bg-emerald-500/10' :
+                        'text-amber-400 bg-amber-500/10'
+                    )}>
+                        {totalProb.toFixed(1)}%
+                        {totalProb < 100 && <span className="text-[#3D506A] font-normal"> + relleno</span>}
+                    </div>
+                </div>
+
+                {probOver && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/15 text-[12px] text-red-400">
+                        <AlertTriangle size={13} />
+                        Las probabilidades superan 100%. Reduce algún valor.
+                    </div>
+                )}
+
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
+                    <span className="text-[12px] text-[#7A8FAA]">Giros sin premio tras ganar</span>
+                    <div className="relative ml-auto w-20">
+                        <KbInput
+                            value={minSpins}
+                            onChange={v => setMinSpins(v)}
+                            mode="numeric"
+                            placeholder="8"
+                            className="w-full h-7 pl-2 pr-8 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] text-right placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[#3D506A] pointer-events-none">giros</span>
+                    </div>
+                </div>
+
+                {/* Options */}
+                <div className="max-h-[42vh] overflow-y-auto pr-1 space-y-2">
+                    {options.map(o => (
+                        <OptionRow
+                            key={o._id}
+                            o={o}
+                            onUpdate={patch => updateOption(o._id, patch)}
+                            onRemove={() => removeOption(o._id)}
+                        />
+                    ))}
+
+                    <button
+                        onClick={addOption}
+                        className="w-full h-9 rounded-xl border border-dashed border-[#1E2A40] text-[12px] text-[#3D506A] hover:text-[#7A8FAA] hover:border-[#283A56] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                        <Plus size={13} />
+                        Agregar premio
+                    </button>
+                </div>
+
+                {/* Dates */}
+                <DateSection
+                    hasDates={hasDates}
+                    setHasDates={setHasDates}
+                    startAt={startAt}
+                    setStartAt={setStartAt}
+                    endAt={endAt}
+                    setEndAt={setEndAt}
+                />
+            </div>
+        )
     }
 
     return (
         <BaseModal
             isOpen={!!sorteo}
             onClose={onClose}
-            title="Editar sorteo"
+            title={`Editar ${isRaspadita ? 'raspadita' : 'ruleta'}`}
             description={sorteo?.name ?? ''}
             width="max-w-2xl"
         >
@@ -338,122 +529,8 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    {sorteo?.status === 'ACTIVE' && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[12px] text-amber-400">
-                            <AlertTriangle size={13} />
-                            Este sorteo está activo. Los cambios aplican de inmediato.
-                        </div>
-                    )}
-
-                    {/* Name */}
-                    <div className="space-y-1.5">
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Nombre</p>
-                        <input
-                            {...nameKb}
-                            className="w-full h-10 px-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[14px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/40 transition-colors"
-                        />
-                    </div>
-
-                    {/* Probability bar */}
-                    <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
-                        <span className="text-[12px] text-[#3D506A]">
-                            {options.length} premio{options.length !== 1 ? 's' : ''}
-                        </span>
-                        <div className={cn(
-                            'ml-auto text-[11px] font-mono font-semibold px-2 py-0.5 rounded-lg',
-                            probOver ? 'text-red-400 bg-red-500/10' :
-                            totalProb === 100 ? 'text-emerald-400 bg-emerald-500/10' :
-                            'text-amber-400 bg-amber-500/10'
-                        )}>
-                            {totalProb.toFixed(1)}%
-                            {totalProb < 100 && <span className="text-[#3D506A] font-normal"> + relleno</span>}
-                        </div>
-                    </div>
-
-                    {probOver && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/15 text-[12px] text-red-400">
-                            <AlertTriangle size={13} />
-                            Las probabilidades superan 100%. Reduce algún valor.
-                        </div>
-                    )}
-
-                    <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
-                        <span className="text-[12px] text-[#7A8FAA]">Giros sin premio tras ganar</span>
-                        <div className="relative ml-auto w-20">
-                            <KbInput
-                                value={minSpins}
-                                onChange={v => setMinSpins(v)}
-                                mode="numeric"
-                                placeholder="8"
-                                className="w-full h-7 pl-2 pr-8 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] text-right placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
-                            />
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[#3D506A] pointer-events-none">giros</span>
-                        </div>
-                    </div>
-
-                    {/* Options */}
-                    <div className="max-h-[42vh] overflow-y-auto pr-1 space-y-2">
-                        {options.map(o => (
-                            <OptionRow
-                                key={o._id}
-                                o={o}
-                                onUpdate={patch => updateOption(o._id, patch)}
-                                onRemove={() => removeOption(o._id)}
-                            />
-                        ))}
-
-                        <button
-                            onClick={addOption}
-                            className="w-full h-9 rounded-xl border border-dashed border-[#1E2A40] text-[12px] text-[#3D506A] hover:text-[#7A8FAA] hover:border-[#283A56] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                            <Plus size={13} />
-                            Agregar premio
-                        </button>
-                    </div>
-
-                    {/* Dates */}
-                    <div className="space-y-2">
-                        <button
-                            onClick={() => setHasDates(v => !v)}
-                            className={cn(
-                                'w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all cursor-pointer text-left',
-                                hasDates ? 'bg-amber-500/10 border-amber-500/25' : 'bg-[#101520] border-[#1E2A40] hover:border-[#283A56]'
-                            )}
-                        >
-                            <div className={cn(
-                                'w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border',
-                                hasDates ? 'bg-amber-500 border-amber-500' : 'border-[#283A56]'
-                            )}>
-                                {hasDates && <Check size={10} className="text-black" />}
-                            </div>
-                            <p className={cn('text-[13px] font-medium', hasDates ? 'text-amber-400' : 'text-[#7A8FAA]')}>
-                                {hasDates ? 'Fechas programadas' : 'Sin fecha límite'}
-                            </p>
-                        </button>
-
-                        {hasDates && (
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-1.5">Desde</p>
-                                    <input
-                                        type="datetime-local"
-                                        value={startAt}
-                                        onChange={e => setStartAt(e.target.value)}
-                                        className="w-full h-10 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] outline-none focus:border-amber-500/40 transition-colors"
-                                    />
-                                </div>
-                                <div>
-                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-1.5">Hasta</p>
-                                    <input
-                                        type="datetime-local"
-                                        value={endAt}
-                                        min={startAt}
-                                        onChange={e => setEndAt(e.target.value)}
-                                        className="w-full h-10 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] outline-none focus:border-amber-500/40 transition-colors"
-                                    />
-                                </div>
-                            </div>
-                        )}
+                    <div className="max-h-[58vh] overflow-y-auto pr-1">
+                        {isRaspadita ? <RaspaditaContent /> : <RuletaContent />}
                     </div>
 
                     {error && (
@@ -481,5 +558,62 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
                 </div>
             )}
         </BaseModal>
+    )
+}
+
+// ─── DateSection (shared) ─────────────────────────────────────────────────────
+
+function DateSection({ hasDates, setHasDates, startAt, setStartAt, endAt, setEndAt }: {
+    hasDates: boolean
+    setHasDates: (v: boolean | ((v: boolean) => boolean)) => void
+    startAt: string
+    setStartAt: (v: string) => void
+    endAt: string
+    setEndAt: (v: string) => void
+}) {
+    return (
+        <div className="space-y-2">
+            <button
+                onClick={() => setHasDates(v => !v)}
+                className={cn(
+                    'w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all cursor-pointer text-left',
+                    hasDates ? 'bg-amber-500/10 border-amber-500/25' : 'bg-[#101520] border-[#1E2A40] hover:border-[#283A56]'
+                )}
+            >
+                <div className={cn(
+                    'w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border',
+                    hasDates ? 'bg-amber-500 border-amber-500' : 'border-[#283A56]'
+                )}>
+                    {hasDates && <Check size={10} className="text-black" />}
+                </div>
+                <p className={cn('text-[13px] font-medium', hasDates ? 'text-amber-400' : 'text-[#7A8FAA]')}>
+                    {hasDates ? 'Fechas programadas' : 'Sin fecha límite'}
+                </p>
+            </button>
+
+            {hasDates && (
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-1.5">Desde</p>
+                        <input
+                            type="datetime-local"
+                            value={startAt}
+                            onChange={e => setStartAt(e.target.value)}
+                            className="w-full h-10 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] outline-none focus:border-amber-500/40 transition-colors"
+                        />
+                    </div>
+                    <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-1.5">Hasta</p>
+                        <input
+                            type="datetime-local"
+                            value={endAt}
+                            min={startAt}
+                            onChange={e => setEndAt(e.target.value)}
+                            className="w-full h-10 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] outline-none focus:border-amber-500/40 transition-colors"
+                        />
+                    </div>
+                </div>
+            )}
+        </div>
     )
 }

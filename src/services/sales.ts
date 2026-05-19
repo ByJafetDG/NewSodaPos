@@ -687,3 +687,136 @@ export async function getVoidedSales(): Promise<any[]> {
         .order('date', { ascending: false })
     return data ?? []
 }
+
+interface UpdateSaleInPlaceInput {
+    items: CartItem[]
+    subtotal: number
+    discount: number
+    total: number
+    paymentMethod: PaymentMethod
+    paymentMethod2?: PaymentMethod | null
+    amount2?: number | null
+    amountReceived: number | null
+    change: number | null
+    isCredit: boolean
+    clientId: string | null
+    cashRegisterId: string | null
+    companyId?: string | null
+    consumerName?: string | null
+    physicalInvoiceNumber?: string | null
+    notes: string | null
+    originalSaleSnapshot?: string | null
+    creditPart?: { clientId: string; amount: number } | null
+}
+
+/**
+ * Update an existing sale in-place (modify flow for non-credit sales).
+ * Keeps same saleNumber and date. Returns null if original no longer exists (caller must create new).
+ */
+export async function updateSaleInPlace(
+    saleId: string,
+    input: UpdateSaleInPlaceInput
+): Promise<{ id: string; saleNumber: number; date: string } | null> {
+    const now = localISO()
+
+    if (window.electronAPI) {
+        const orig = await window.electronAPI.dbGet(
+            'SELECT id, saleNumber, date FROM Sale WHERE id = ? AND status = \'COMPLETADA\'',
+            [saleId]
+        )
+        if (!orig) return null
+
+        const origItems: any[] = await window.electronAPI.dbQuery(
+            'SELECT productId, quantity FROM SaleItem WHERE saleId = ?',
+            [saleId]
+        )
+
+        const ops: Array<{ sql: string; params: any[] }> = []
+
+        // Update the sale record in place (keep id, saleNumber, date, cashRegisterId)
+        ops.push({
+            sql: `UPDATE Sale SET subtotal=?, discount=?, total=?, paymentMethod=?, paymentMethod2=?, amount2=?, amountReceived=?, "change"=?, isCredit=?, clientId=?, companyId=?, consumerName=?, physicalInvoiceNumber=?, notes=?, originalSaleSnapshot=?, cashRegisterId=?, syncStatus='PENDING', updatedAt=? WHERE id=?`,
+            params: [input.subtotal, input.discount, input.total, input.paymentMethod, input.paymentMethod2 ?? null, input.amount2 ?? null, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.companyId ?? null, input.consumerName ?? null, input.physicalInvoiceNumber ?? null, input.notes, input.originalSaleSnapshot ?? null, input.cashRegisterId, now, saleId]
+        })
+
+        // Replace items
+        ops.push({ sql: 'DELETE FROM SaleItem WHERE saleId = ?', params: [saleId] })
+        for (const item of input.items) {
+            ops.push({
+                sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                params: [crypto.randomUUID(), saleId, item.product.id, item.quantity, item.unitPrice, item.subtotal, item.notes]
+            })
+        }
+
+        // Stock: restore original items, decrement new items
+        for (const oi of origItems) {
+            ops.push({
+                sql: `UPDATE Product SET stockQty = stockQty + ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
+                params: [oi.quantity, now, oi.productId]
+            })
+        }
+        for (const item of input.items) {
+            ops.push({
+                sql: `UPDATE Product SET stockQty = stockQty - ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
+                params: [item.quantity, now, item.product.id]
+            })
+        }
+
+        // Credit part (mixed payment)
+        if (input.creditPart && input.creditPart.amount > 0) {
+            const creditId = crypto.randomUUID()
+            const creditSaleNumber = orig.saleNumber + 1
+            const creditAmt = input.creditPart.amount
+            ops.push({
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [creditId, creditSaleNumber, now, creditAmt, 0, creditAmt, 'CREDITO', null, null, 1, input.creditPart.clientId, input.cashRegisterId, 'COMPLETADA', `Cargo a cuenta. Ref. venta #${orig.saleNumber}`, 'PENDING', null, null]
+            })
+            ops.push({
+                sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                params: [crypto.randomUUID(), creditId, 'credit-charge', 1, creditAmt, creditAmt, `Ref. venta #${orig.saleNumber}`]
+            })
+        }
+
+        await window.electronAPI.dbTransaction(ops)
+        window.electronAPI.triggerSyncPush?.().catch(() => {})
+        return { id: saleId, saleNumber: orig.saleNumber, date: orig.date }
+    }
+
+    // Cloud fallback
+    const { data: orig, error: origErr } = await supabase
+        .from('Sale')
+        .select('id, saleNumber, date, items:SaleItem(productId, quantity)')
+        .eq('id', saleId)
+        .eq('status', 'COMPLETADA')
+        .single()
+    if (origErr || !orig) return null
+
+    await supabase.from('Sale').update({
+        subtotal: input.subtotal, discount: input.discount, total: input.total,
+        paymentMethod: input.paymentMethod, paymentMethod2: input.paymentMethod2 ?? null,
+        amount2: input.amount2 ?? null, amountReceived: input.amountReceived,
+        change: input.change, isCredit: input.isCredit,
+        clientId: input.clientId, companyId: input.companyId ?? null,
+        consumerName: input.consumerName ?? null, physicalInvoiceNumber: input.physicalInvoiceNumber ?? null,
+        notes: input.notes, originalSaleSnapshot: input.originalSaleSnapshot ?? null,
+        cashRegisterId: input.cashRegisterId, syncStatus: 'SYNCED', updatedAt: now,
+    }).eq('id', saleId)
+
+    await supabase.from('SaleItem').delete().eq('saleId', saleId)
+    if (input.items.length > 0) {
+        await supabase.from('SaleItem').insert(input.items.map(item => ({
+            id: crypto.randomUUID(), saleId, productId: item.product.id,
+            quantity: item.quantity, unitPrice: item.unitPrice, subtotal: item.subtotal,
+            notes: item.notes, createdAt: now,
+        })))
+    }
+
+    for (const oi of (orig.items ?? []) as any[]) {
+        await updateProductStock(oi.productId, oi.quantity)
+    }
+    for (const item of input.items) {
+        await updateProductStock(item.product.id, -item.quantity)
+    }
+
+    return { id: saleId, saleNumber: orig.saleNumber, date: orig.date }
+}
