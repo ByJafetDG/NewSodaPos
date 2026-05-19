@@ -118,8 +118,26 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
     if (!readOnly) {
         setInterval(pushSync, 5000);  // Push every 5s
     }
-    setInterval(pullSync, 300000); // Pull every 5m (Safety fallback only)
+    setInterval(pullSync, readOnly ? 3000 : 300000); // Dev: 3s | Prod: 5m fallback
     setInterval(processEmailQueue, 60000); // Retry emails every 1m
+
+    // Auto-end sorteos when endAt is reached
+    setInterval(() => {
+        try {
+            const now = new Date().toISOString()
+            const expired = query(
+                `SELECT id FROM Sorteo WHERE status = 'ACTIVE' AND endAt IS NOT NULL AND endAt < ?`,
+                [now]
+            ) as { id: string }[]
+            if (expired.length > 0) {
+                for (const s of expired) {
+                    execute(`UPDATE Sorteo SET status = 'ENDED', updatedAt = ? WHERE id = ?`, [now, s.id])
+                }
+                notifyUI('Sorteo')
+                console.log(`[SyncEngine] Auto-ended ${expired.length} sorteo(s) past endAt.`)
+            }
+        } catch {}
+    }, 30000)
 
     // Poll Supabase every 3s for new SinpeMessages (Realtime is unreliable)
     let lastSinpeCheck = new Date().toISOString()

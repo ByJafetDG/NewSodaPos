@@ -569,9 +569,11 @@ interface Props {
     maxSpins?: number
     onResult?: (resultOptionId: string, didParticipate: boolean) => void
     onDecline?: () => void
+    externalSpinsSince?: number
+    onSpinCountChange?: (n: number) => void
 }
 
-export function RuletaModal({ isOpen, onClose, sorteoName, options, sorteoId, minSpinsBetweenPrizes = 0, maxSpins = 1, onResult, onDecline }: Props) {
+export function RuletaModal({ isOpen, onClose, sorteoName, options, sorteoId, minSpinsBetweenPrizes = 0, maxSpins = 1, onResult, onDecline, externalSpinsSince, onSpinCountChange }: Props) {
     const controls = useAnimation()
     const segs         = useMemo(() => buildSegments(options), [options])
     const visualSlots  = useMemo(() => buildVisualSlots(options), [options])
@@ -597,8 +599,12 @@ export function RuletaModal({ isOpen, onClose, sorteoName, options, sorteoId, mi
 
     useEffect(() => {
         if (!sorteoId || minSpinsBetweenPrizes <= 0) return
+        if (externalSpinsSince !== undefined) {
+            spinsSinceLastPrize.current = externalSpinsSince
+            return
+        }
         getSpinsSinceLastPrize(sorteoId).then(n => { spinsSinceLastPrize.current = n })
-    }, [sorteoId, minSpinsBetweenPrizes])
+    }, [sorteoId, minSpinsBetweenPrizes, externalSpinsSince])
 
     useEffect(() => {
         return () => { clearTicks(); clearZoom() }
@@ -667,6 +673,7 @@ export function RuletaModal({ isOpen, onClose, sorteoName, options, sorteoId, mi
         } else {
             spinsSinceLastPrize.current = 0
         }
+        onSpinCountChange?.(spinsSinceLastPrize.current)
 
         setZoomed(false)
         setRotation(target)

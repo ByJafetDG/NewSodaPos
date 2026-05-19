@@ -60,6 +60,10 @@ function invalidateForTable(qc: QueryClient, table: string) {
         case 'BusinessConfig':
             qc.invalidateQueries({ queryKey: ['business-config'] })
             break
+        case 'Sorteo':
+            qc.invalidateQueries({ queryKey: ['sorteos'] })
+            qc.invalidateQueries({ queryKey: ['cartSorteo'] })
+            break
     }
 }
 

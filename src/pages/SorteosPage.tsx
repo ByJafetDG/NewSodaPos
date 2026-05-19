@@ -315,6 +315,7 @@ export function SorteosPage() {
     const [deleteTarget, setDeleteTarget] = useState<Sorteo | null>(null)
     const [previewSorteo, setPreviewSorteo] = useState<Sorteo | null>(null)
     const [statsSorteo, setStatsSorteo] = useState<Sorteo | null>(null)
+    const [spinsSince, setSpinsSince] = useState<Record<string, number>>({})
     const { data: previewOptions = [] } = useSorteoOptions(previewSorteo?.id ?? null)
 
     const active = sorteos.filter(s => s.status === 'ACTIVE').length
@@ -397,6 +398,10 @@ export function SorteosPage() {
                 options={previewOptions}
                 sorteoId={previewSorteo?.id}
                 minSpinsBetweenPrizes={previewSorteo?.minSpinsBetweenPrizes}
+                externalSpinsSince={previewSorteo ? spinsSince[previewSorteo.id] : undefined}
+                onSpinCountChange={(n) => {
+                    if (previewSorteo) setSpinsSince(prev => ({ ...prev, [previewSorteo.id]: n }))
+                }}
             />
 
             <DeleteConfirmModal
