@@ -107,7 +107,9 @@ export function ReportsPage() {
             saleInfo?.clientName ?? saleInfo?.client?.name ?? null,
             snapshot,
             null,
-            saleInfo?.clientId ?? saleInfo?.client?.id ?? null
+            saleInfo?.clientId ?? saleInfo?.client?.id ?? null,
+            saleInfo?.consumerName ?? null,
+            saleInfo?.physicalInvoiceNumber ?? null
         )
         setSelectedSale(null)
         setCurrentPage('pos')

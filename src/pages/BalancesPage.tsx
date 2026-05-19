@@ -663,7 +663,7 @@ function CompanyDetailView({ company, onBack, onEdit }: {
             date: sale.date ?? null,
             cashier: sale.notes?.match(/Cajero:\s*(.+)/)?.[1]?.trim() ?? null,
         })
-        pendingSaleLoad.set(items, sale.discount ?? 0, sale.id, sale.saleNumber, company.name, snapshot, sale.companyId ?? company.id)
+        pendingSaleLoad.set(items, sale.discount ?? 0, sale.id, sale.saleNumber, company.name, snapshot, sale.companyId ?? company.id, null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null)
         setCurrentPage('pos')
     }
 

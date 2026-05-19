@@ -158,8 +158,18 @@ export function POSPage() {
     const pendingSaleLoad = usePendingSaleLoadStore()
     useEffect(() => {
         if (pendingSaleLoad.items && pendingSaleLoad.items.length > 0) {
+            clearCart()
             loadOrder(pendingSaleLoad.items, pendingSaleLoad.discount)
             if (pendingSaleLoad.originalClientId) setSelectedClientId(pendingSaleLoad.originalClientId)
+            if (pendingSaleLoad.originalConsumerName || pendingSaleLoad.originalPhysicalInvoiceNumber) {
+                setInvoiceClient({
+                    name: pendingSaleLoad.originalConsumerName ?? '',
+                    cedula: '', email: '',
+                    consumerName: pendingSaleLoad.originalConsumerName ?? undefined,
+                    physicalInvoiceNumber: pendingSaleLoad.originalPhysicalInvoiceNumber ?? undefined,
+                    companyId: pendingSaleLoad.originalCompanyId ?? undefined,
+                })
+            }
             pendingSaleLoad.clear()
             toast.info('Venta cargada — realiza los cambios y confirma')
         }
@@ -279,6 +289,9 @@ export function POSPage() {
         setSorteoDeclined(false)
         pendingDebt.clear()
         setInvoiceClient(null)
+        // Cancel modification context so a re-charge creates a NEW sale instead of updating the original
+        pendingSaleLoad.clearModifying()
+        setSelectedClientId(null)
     }
 
     const handleClearDebt = () => {
@@ -746,9 +759,9 @@ export function POSPage() {
                     : null,
                 modifiedFromSaleId: pendingSaleLoad.originalSaleId ?? null,
                 companyId: capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? pendingSaleLoad.originalCompanyId ?? null,
-                consumerName: capturedInvoiceClient?.consumerName ?? null,
+                consumerName: capturedInvoiceClient?.consumerName ?? pendingSaleLoad.originalConsumerName ?? null,
                 originalSaleSnapshot: pendingSaleLoad.originalSaleSnapshot ?? null,
-                physicalInvoiceNumber: capturedInvoiceClient?.physicalInvoiceNumber ?? null,
+                physicalInvoiceNumber: capturedInvoiceClient?.physicalInvoiceNumber ?? pendingSaleLoad.originalPhysicalInvoiceNumber ?? null,
             }
 
             // When modifying any sale (including company credit), update in place
