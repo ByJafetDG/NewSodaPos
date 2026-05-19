@@ -40,11 +40,14 @@ interface CreditModalProps {
     onConfirmCompany: (companyId: string) => void
     onSplitConfirm: (data: SplitCreditData) => void
     isPending: boolean
+    defaultCompanyId?: string | null
+    defaultClientId?: string | null
 }
 
 export function CreditModal({
     isOpen, onClose, total, subtotal, discount, itemCount,
-    clients, companies = [], cartItems, selectedClientId, onSelectClient, onConfirm, onConfirmCompany, onSplitConfirm, isPending
+    clients, companies = [], cartItems, selectedClientId, onSelectClient, onConfirm, onConfirmCompany, onSplitConfirm, isPending,
+    defaultCompanyId, defaultClientId,
 }: CreditModalProps) {
     // Single mode
     const [search, setSearch] = useState('')
@@ -66,6 +69,10 @@ export function CreditModal({
     const [perProductAmounts, setPerProductAmounts] = useState<Record<string, Record<string, string>>>({})
 
     useEffect(() => {
+        if (isOpen && defaultCompanyId) {
+            setMode('company')
+            setSelectedCompanyId(defaultCompanyId)
+        }
         if (!isOpen) {
             setMode('single')
             setSearch('')
@@ -78,12 +85,15 @@ export function CreditModal({
             setTotalAmounts({})
             setPerProductAmounts({})
         }
-    }, [isOpen])
+    }, [isOpen, defaultCompanyId])
 
     // Single mode derived
-    const filtered = clients.filter(c =>
-        c.isActive && (!search || normalizeStr(c.name).includes(normalizeStr(search)) || fuzzyMatch(search, c.name))
-    )
+    const filtered = clients.filter(c => {
+        if (!c.isActive) return false
+        if (defaultClientId && !search) return c.id === defaultClientId
+        if (!search) return true
+        return normalizeStr(c.name).includes(normalizeStr(search)) || fuzzyMatch(search, c.name)
+    })
     const selected = clients.find(c => c.id === selectedClientId)
 
     // Company mode derived
@@ -255,6 +265,12 @@ export function CreditModal({
             {/* ── SINGLE MODE ─────────────────────────────────────────── */}
             {mode === 'single' && (
                 <div className="space-y-4">
+                    {defaultClientId && selectedClientId !== defaultClientId && selectedClientId !== null && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-400 text-[12px]">
+                            <span className="shrink-0">⚠</span>
+                            <span>Estás cambiando el cliente de esta venta. Si es un error, selecciona <strong>{clients.find(c => c.id === defaultClientId)?.name ?? 'el cliente original'}</strong> nuevamente.</span>
+                        </div>
+                    )}
                     <div className="relative">
                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A]" />
                         <input
@@ -266,6 +282,9 @@ export function CreditModal({
                         />
                     </div>
 
+                    {defaultClientId && !search && (
+                        <p className="text-[11px] text-[#3D506A] text-center -mt-2">Escribe para buscar otro cliente</p>
+                    )}
                     <div className="space-y-1.5 max-h-52 overflow-y-auto">
                         {filtered.map(client => {
                             const isSelected = selectedClientId === client.id
@@ -314,6 +333,12 @@ export function CreditModal({
             {/* ── COMPANY MODE ────────────────────────────────────────── */}
             {mode === 'company' && (
                 <div className="space-y-4">
+                    {defaultCompanyId && selectedCompanyId !== defaultCompanyId && selectedCompanyId !== null && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-400 text-[12px]">
+                            <span className="shrink-0">⚠</span>
+                            <span>Estás cambiando la empresa de esta factura. Si es un error, selecciona <strong>{companies.find(c => c.id === defaultCompanyId)?.name ?? 'la empresa original'}</strong> nuevamente.</span>
+                        </div>
+                    )}
                     <div className="relative">
                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A]" />
                         <input

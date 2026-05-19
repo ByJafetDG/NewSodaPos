@@ -516,12 +516,12 @@ function CompanyDetailView({ company, onBack, onEdit }: {
     const [isPrinting, setIsPrinting] = useState(false)
     const [invoiceSearch, setInvoiceSearch] = useState('')
     const [coCompareTarget, setCoCompareTarget] = useState<any | null>(null)
-    const [coCompareOriginal, setCoCompareOriginal] = useState<any | null>(null)
-    const [coCompareLoading, setCoCompareLoading] = useState(false)
 
     const { data: sales = [], isLoading } = useCompanySales(company.id)
     const { data: config } = useBusinessConfig()
     const qc = useQueryClient()
+    const pendingSaleLoad = usePendingSaleLoadStore()
+    const setCurrentPage = useUIStore(s => s.setCurrentPage)
     const invoiceSearchKb = useKeyboardInput(invoiceSearch, setInvoiceSearch, { mode: 'alpha' })
 
     const pendingSales = (sales as any[]).filter(s => s.isCredit && !s.paidAt)
@@ -648,20 +648,27 @@ function CompanyDetailView({ company, onBack, onEdit }: {
         catch { return String(d) }
     }
 
-    async function openCoCompare(sale: any) {
-        const origId = sale.modifiedFromSaleId
-        if (!origId) return
-        setCoCompareTarget(sale)
-        setCoCompareOriginal(null)
-        setCoCompareLoading(true)
-        try {
-            const orig = await getSaleDetails(origId)
-            setCoCompareOriginal(orig)
-        } catch {
-            toast.error('No se pudo cargar la factura original')
-        } finally {
-            setCoCompareLoading(false)
+    async function handleModifyInPOS(sale: any) {
+        const items = await getSaleItemsForCart(sale.id)
+        if (items.length === 0) {
+            toast.error('No se pudieron recuperar los productos de esta factura')
+            return
         }
+        const snapshot = JSON.stringify({
+            saleNumber: sale.saleNumber,
+            items: items.map((i: any) => ({ name: i.product.name, quantity: i.quantity, unitPrice: i.unitPrice, subtotal: i.subtotal })),
+            subtotal: sale.subtotal ?? 0,
+            discount: sale.discount ?? 0,
+            total: sale.total ?? 0,
+            date: sale.date ?? null,
+            cashier: sale.notes?.match(/Cajero:\s*(.+)/)?.[1]?.trim() ?? null,
+        })
+        pendingSaleLoad.set(items, sale.discount ?? 0, sale.id, sale.saleNumber, company.name, snapshot, sale.companyId ?? company.id)
+        setCurrentPage('pos')
+    }
+
+    function openHistory(sale: any) {
+        setCoCompareTarget(sale)
     }
 
     return (
@@ -886,10 +893,23 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                                                             {s.consumerName && (
                                                                 <span className="text-[11px] text-orange-400/80 truncate">· {s.consumerName}</span>
                                                             )}
+                                                            {(s.originalSaleSnapshot || s.modifiedFromSaleId) && (
+                                                                <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/25 px-1.5 py-0.5 rounded-md">Modificada</span>
+                                                            )}
                                                         </div>
-                                                        <p className="text-[11px] text-[#3D506A] truncate">
-                                                            {(s.items ?? []).map((it: any) => `${it.quantity}× ${it.productName ?? it.product?.name ?? 'Producto'}`).join(', ') || 'Sin detalles'}
-                                                        </p>
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <p className="text-[11px] text-[#3D506A] truncate">
+                                                                {(s.items ?? []).map((it: any) => `${it.quantity}× ${it.productName ?? it.product?.name ?? 'Producto'}`).join(', ') || 'Sin detalles'}
+                                                            </p>
+                                                            {(s.originalSaleSnapshot || s.modifiedFromSaleId) && (
+                                                                <button
+                                                                    onClick={e => { e.stopPropagation(); openHistory(s) }}
+                                                                    className="text-[10px] text-amber-400/70 hover:text-amber-400 transition-colors cursor-pointer shrink-0"
+                                                                >
+                                                                    Ver historial →
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                     <div className="text-right shrink-0">
                                                         <p className="text-[15px] font-bold text-[#E4ECF7]">{formatCurrency(s.total)}</p>
@@ -919,14 +939,23 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                                                             <span className="text-[#E4ECF7]">{formatCurrency(s.total)}</span>
                                                         </div>
                                                     </div>
-                                                    <button
-                                                        onClick={() => setConfirmSettle([s.id])}
-                                                        disabled={isSettling}
-                                                        className="w-full flex items-center justify-center gap-1.5 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[12px] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-60"
-                                                    >
-                                                        <CheckCircle2 size={13} />
-                                                        Marcar como pagada
-                                                    </button>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => handleModifyInPOS(s)}
+                                                            className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[12px] font-medium hover:text-[#E4ECF7] hover:border-[#283A56] transition-all cursor-pointer"
+                                                        >
+                                                            <Pencil size={12} />
+                                                            Modificar
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmSettle([s.id])}
+                                                            disabled={isSettling}
+                                                            className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[12px] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-60"
+                                                        >
+                                                            <CheckCircle2 size={13} />
+                                                            Marcar como pagada
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
@@ -954,7 +983,7 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                             const isVoided = s.status === 'ANULADA'
                             const isPending = !isVoided && s.isCredit && !s.paidAt
                             const isExpanded = expandedId === s.id
-                            const isModified = !!s.modifiedFromSaleId
+                            const isModified = !!s.originalSaleSnapshot || !!s.modifiedFromSaleId
                             return (
                                 <div
                                     key={s.id}
@@ -983,10 +1012,10 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                                                 </p>
                                                 {isModified && (
                                                     <button
-                                                        onClick={e => { e.stopPropagation(); openCoCompare(s) }}
+                                                        onClick={e => { e.stopPropagation(); openHistory(s) }}
                                                         className="text-[10px] text-amber-400/70 hover:text-amber-400 transition-colors cursor-pointer shrink-0"
                                                     >
-                                                        Ver cambios →
+                                                        Ver historial →
                                                     </button>
                                                 )}
                                             </div>
@@ -1021,6 +1050,15 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                                             {!isPending && s.paidAt && (
                                                 <p className="text-[11px] text-[#3D506A] pt-1">Pagado el {fmtDate(s.paidAt)}</p>
                                             )}
+                                            {!isVoided && (
+                                                <button
+                                                    onClick={() => handleModifyInPOS(s)}
+                                                    className="w-full mt-1 flex items-center justify-center gap-1.5 h-9 rounded-lg bg-[#101828] border border-[#1E2A40] text-[#7A8FAA] text-[12px] font-medium hover:text-[#E4ECF7] hover:border-[#283A56] transition-all cursor-pointer"
+                                                >
+                                                    <Pencil size={12} />
+                                                    Modificar en POS
+                                                </button>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -1030,69 +1068,101 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                 )}
             </div>
 
-            {/* Compare modal */}
-            <BaseModal
-                isOpen={coCompareTarget !== null}
-                onClose={() => { setCoCompareTarget(null); setCoCompareOriginal(null) }}
-                title={`Cambios · Factura #${coCompareTarget?.saleNumber}`}
-                width="max-w-2xl"
-            >
-                {coCompareLoading ? (
-                    <p className="text-center text-[12px] text-[#3D506A] py-8">Cargando factura original...</p>
-                ) : (
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <p className="text-[11px] text-[#3D506A] uppercase tracking-wider font-semibold">Factura original</p>
-                            <div className="rounded-xl bg-[#0F1623] border border-[#192030] p-3 space-y-1">
-                                {coCompareOriginal ? (coCompareOriginal.items ?? []).map((it: any, i: number) => (
-                                    <div key={i} className="flex items-center justify-between text-[12px]">
-                                        <span className="text-[#7A8FAA]">{it.quantity}× {it.product?.name ?? it.productName ?? 'Producto'}</span>
-                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(it.subtotal)}</span>
-                                    </div>
-                                )) : <p className="text-[12px] text-[#3D506A]">No disponible</p>}
-                                {(coCompareOriginal?.discount ?? 0) > 0 && (
-                                    <div className="flex items-center justify-between text-[12px] text-emerald-400 border-t border-[#192030] pt-1">
-                                        <span>Descuento</span><span>-{formatCurrency(coCompareOriginal.discount)}</span>
-                                    </div>
-                                )}
-                                {coCompareOriginal && (
-                                    <div className="flex items-center justify-between text-[13px] font-bold border-t border-[#192030] pt-2">
-                                        <span className="text-[#7A8FAA]">Total</span>
-                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(coCompareOriginal.total)}</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            <p className="text-[11px] text-amber-400/70 uppercase tracking-wider font-semibold">Factura modificada</p>
-                            <div className="rounded-xl bg-amber-500/5 border border-amber-500/15 p-3 space-y-1">
-                                {(coCompareTarget?.items ?? []).map((it: any, i: number) => (
-                                    <div key={i} className="flex items-center justify-between text-[12px]">
-                                        <span className="text-[#7A8FAA]">{it.quantity}× {it.productName ?? it.product?.name ?? 'Producto'}</span>
-                                        <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(it.subtotal)}</span>
-                                    </div>
-                                ))}
-                                {(coCompareTarget?.discount ?? 0) > 0 && (
-                                    <div className="flex items-center justify-between text-[12px] text-emerald-400 border-t border-amber-500/15 pt-1">
-                                        <span>Descuento</span><span>-{formatCurrency(coCompareTarget?.discount ?? 0)}</span>
-                                    </div>
-                                )}
-                                <div className="flex items-center justify-between text-[13px] font-bold border-t border-amber-500/15 pt-2">
-                                    <span className="text-[#7A8FAA]">Total</span>
-                                    <span className={cn('tabular-nums', coCompareOriginal && coCompareTarget && coCompareTarget.total !== coCompareOriginal.total ? 'text-amber-400' : 'text-[#E4ECF7]')}>
-                                        {formatCurrency(coCompareTarget?.total ?? 0)}
-                                        {coCompareOriginal && coCompareTarget && coCompareTarget.total !== coCompareOriginal.total && (
-                                            <span className="text-[11px] ml-1 opacity-70">
-                                                ({coCompareTarget.total > coCompareOriginal.total ? '+' : ''}{formatCurrency(coCompareTarget.total - coCompareOriginal.total)})
-                                            </span>
-                                        )}
-                                    </span>
+            {/* History timeline modal */}
+            {coCompareTarget !== null && (() => {
+                const historyEntries: any[] = (() => {
+                    if (!coCompareTarget.originalSaleSnapshot) return []
+                    try {
+                        const parsed = JSON.parse(coCompareTarget.originalSaleSnapshot)
+                        return Array.isArray(parsed) ? parsed : [parsed]
+                    } catch { return [] }
+                })()
+                const currentCashier = coCompareTarget.notes?.match(/Cajero:\s*(.+)/)?.[1]?.trim() ?? null
+                const totalEntries = historyEntries.length + 1
+                function fmtDateTime(d: any) {
+                    if (!d) return null
+                    try { return new Date(d).toLocaleString('es-CR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) } catch { return String(d) }
+                }
+                function SnapshotCard({ entry, label, isLast, prevTotal }: { entry: any; label: string; isLast: boolean; prevTotal?: number }) {
+                    const delta = prevTotal != null ? entry.total - prevTotal : null
+                    return (
+                        <div className={cn('rounded-xl border p-3 space-y-1.5', isLast ? 'bg-amber-500/5 border-amber-500/20' : 'bg-[#0F1623] border-[#192030]')}>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className={cn('text-[11px] font-semibold uppercase tracking-wider', isLast ? 'text-amber-400' : 'text-[#3D506A]')}>{label}</span>
+                                <div className="text-right">
+                                    {entry.cashier && <p className="text-[10px] text-[#3D506A]">Cajero: {entry.cashier}</p>}
+                                    {entry.date && <p className="text-[10px] text-[#3D506A]">{fmtDateTime(entry.date)}</p>}
                                 </div>
                             </div>
+                            {(entry.items ?? []).map((it: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between text-[12px]">
+                                    <span className="text-[#7A8FAA]">{it.quantity}× {it.name ?? it.productName ?? it.product?.name ?? 'Producto'}</span>
+                                    <span className="text-[#E4ECF7] tabular-nums">{formatCurrency(it.subtotal)}</span>
+                                </div>
+                            ))}
+                            {(entry.discount ?? 0) > 0 && (
+                                <div className="flex items-center justify-between text-[12px] text-emerald-400 border-t border-[#192030]/60 pt-1">
+                                    <span>Descuento</span><span>-{formatCurrency(entry.discount)}</span>
+                                </div>
+                            )}
+                            <div className="flex items-center justify-between text-[13px] font-bold border-t border-[#192030]/60 pt-1.5 mt-1">
+                                <span className="text-[#7A8FAA]">Total</span>
+                                <span className="flex items-center gap-1.5">
+                                    <span className={cn('tabular-nums', delta !== null && delta !== 0 ? (delta > 0 ? 'text-red-400' : 'text-emerald-400') : 'text-[#E4ECF7]')}>
+                                        {formatCurrency(entry.total ?? 0)}
+                                    </span>
+                                    {delta !== null && delta !== 0 && (
+                                        <span className={cn('text-[10px] font-normal', delta > 0 ? 'text-red-400/70' : 'text-emerald-400/70')}>
+                                            ({delta > 0 ? '+' : ''}{formatCurrency(delta)})
+                                        </span>
+                                    )}
+                                </span>
+                            </div>
                         </div>
-                    </div>
-                )}
-            </BaseModal>
+                    )
+                }
+                return (
+                    <BaseModal
+                        isOpen
+                        onClose={() => setCoCompareTarget(null)}
+                        title={`Historial de modificaciones · #${coCompareTarget.saleNumber}`}
+                        description={`${totalEntries} versión${totalEntries !== 1 ? 'es' : ''}`}
+                        width="max-w-lg"
+                    >
+                        <div className="space-y-1 max-h-[65vh] overflow-y-auto pr-1">
+                            {historyEntries.map((entry: any, i: number) => (
+                                <div key={i}>
+                                    <SnapshotCard
+                                        entry={entry}
+                                        label={i === 0 ? 'Original' : `Modificación ${i}`}
+                                        isLast={false}
+                                        prevTotal={i > 0 ? historyEntries[i - 1].total : undefined}
+                                    />
+                                    <div className="flex items-center gap-2 py-1.5 px-1">
+                                        <div className="w-px h-4 bg-[#1E2A40] mx-auto" />
+                                        {entry.modifiedAt && (
+                                            <p className="text-[10px] text-[#3D506A] whitespace-nowrap mx-auto">Modificado el {fmtDateTime(entry.modifiedAt)}</p>
+                                        )}
+                                        <div className="w-px h-4 bg-[#1E2A40] mx-auto" />
+                                    </div>
+                                </div>
+                            ))}
+                            <SnapshotCard
+                                entry={{
+                                    items: (coCompareTarget.items ?? []).map((it: any) => ({ name: it.productName ?? it.product?.name ?? 'Producto', quantity: it.quantity, subtotal: it.subtotal })),
+                                    discount: coCompareTarget.discount,
+                                    total: coCompareTarget.total,
+                                    cashier: currentCashier,
+                                    date: coCompareTarget.updatedAt ?? coCompareTarget.date,
+                                }}
+                                label={`Estado actual`}
+                                isLast
+                                prevTotal={historyEntries.length > 0 ? historyEntries[historyEntries.length - 1].total : undefined}
+                            />
+                        </div>
+                    </BaseModal>
+                )
+            })()}
 
             {/* Settle payment method modal */}
             <BaseModal

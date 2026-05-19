@@ -90,6 +90,8 @@ export function ReportsPage() {
             subtotal: saleInfo?.subtotal ?? 0,
             discount: saleInfo?.discount ?? 0,
             total: saleInfo?.total ?? 0,
+            date: saleInfo?.date ?? null,
+            cashier: saleInfo?.notes?.match(/Cajero:\s*(.+)/)?.[1]?.trim() ?? null,
         })
         if (saleInfo?.isCredit) {
             // Credit sale: hard-delete so salesCredit on register stays correct
@@ -103,7 +105,9 @@ export function ReportsPage() {
             saleId,
             saleInfo?.saleNumber ?? 0,
             saleInfo?.clientName ?? saleInfo?.client?.name ?? null,
-            snapshot
+            snapshot,
+            null,
+            saleInfo?.clientId ?? saleInfo?.client?.id ?? null
         )
         setSelectedSale(null)
         setCurrentPage('pos')

@@ -721,7 +721,7 @@ export async function updateSaleInPlace(
 
     if (window.electronAPI) {
         const orig = await window.electronAPI.dbGet(
-            'SELECT id, saleNumber, date FROM Sale WHERE id = ? AND status = \'COMPLETADA\'',
+            'SELECT id, saleNumber, date, originalSaleSnapshot FROM Sale WHERE id = ? AND status = \'COMPLETADA\'',
             [saleId]
         )
         if (!orig) return null
@@ -731,12 +731,26 @@ export async function updateSaleInPlace(
             [saleId]
         )
 
+        // Merge snapshot history: append new entry with modifiedAt timestamp
+        let existingHistory: any[] = []
+        if (orig.originalSaleSnapshot) {
+            try {
+                const parsed = JSON.parse(orig.originalSaleSnapshot)
+                existingHistory = Array.isArray(parsed) ? parsed : [parsed]
+            } catch {}
+        }
+        let newEntry: any = {}
+        if (input.originalSaleSnapshot) {
+            try { newEntry = JSON.parse(input.originalSaleSnapshot) } catch {}
+        }
+        newEntry.modifiedAt = now
+        const mergedSnapshot = JSON.stringify([...existingHistory, newEntry])
+
         const ops: Array<{ sql: string; params: any[] }> = []
 
-        // Update the sale record in place (keep id, saleNumber, date, cashRegisterId)
         ops.push({
             sql: `UPDATE Sale SET subtotal=?, discount=?, total=?, paymentMethod=?, paymentMethod2=?, amount2=?, amountReceived=?, "change"=?, isCredit=?, clientId=?, companyId=?, consumerName=?, physicalInvoiceNumber=?, notes=?, originalSaleSnapshot=?, cashRegisterId=?, syncStatus='PENDING', updatedAt=? WHERE id=?`,
-            params: [input.subtotal, input.discount, input.total, input.paymentMethod, input.paymentMethod2 ?? null, input.amount2 ?? null, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.companyId ?? null, input.consumerName ?? null, input.physicalInvoiceNumber ?? null, input.notes, input.originalSaleSnapshot ?? null, input.cashRegisterId, now, saleId]
+            params: [input.subtotal, input.discount, input.total, input.paymentMethod, input.paymentMethod2 ?? null, input.amount2 ?? null, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.companyId ?? null, input.consumerName ?? null, input.physicalInvoiceNumber ?? null, input.notes, mergedSnapshot, input.cashRegisterId, now, saleId]
         })
 
         // Replace items
@@ -785,11 +799,25 @@ export async function updateSaleInPlace(
     // Cloud fallback
     const { data: orig, error: origErr } = await supabase
         .from('Sale')
-        .select('id, saleNumber, date, items:SaleItem(productId, quantity)')
+        .select('id, saleNumber, date, originalSaleSnapshot, items:SaleItem(productId, quantity)')
         .eq('id', saleId)
         .eq('status', 'COMPLETADA')
         .single()
     if (origErr || !orig) return null
+
+    let existingHistoryCloud: any[] = []
+    if ((orig as any).originalSaleSnapshot) {
+        try {
+            const parsed = JSON.parse((orig as any).originalSaleSnapshot)
+            existingHistoryCloud = Array.isArray(parsed) ? parsed : [parsed]
+        } catch {}
+    }
+    let newEntryCloud: any = {}
+    if (input.originalSaleSnapshot) {
+        try { newEntryCloud = JSON.parse(input.originalSaleSnapshot) } catch {}
+    }
+    newEntryCloud.modifiedAt = now
+    const mergedSnapshotCloud = JSON.stringify([...existingHistoryCloud, newEntryCloud])
 
     await supabase.from('Sale').update({
         subtotal: input.subtotal, discount: input.discount, total: input.total,
@@ -798,7 +826,7 @@ export async function updateSaleInPlace(
         change: input.change, isCredit: input.isCredit,
         clientId: input.clientId, companyId: input.companyId ?? null,
         consumerName: input.consumerName ?? null, physicalInvoiceNumber: input.physicalInvoiceNumber ?? null,
-        notes: input.notes, originalSaleSnapshot: input.originalSaleSnapshot ?? null,
+        notes: input.notes, originalSaleSnapshot: mergedSnapshotCloud,
         cashRegisterId: input.cashRegisterId, syncStatus: 'SYNCED', updatedAt: now,
     }).eq('id', saleId)
 

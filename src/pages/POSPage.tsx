@@ -159,6 +159,7 @@ export function POSPage() {
     useEffect(() => {
         if (pendingSaleLoad.items && pendingSaleLoad.items.length > 0) {
             loadOrder(pendingSaleLoad.items, pendingSaleLoad.discount)
+            if (pendingSaleLoad.originalClientId) setSelectedClientId(pendingSaleLoad.originalClientId)
             pendingSaleLoad.clear()
             toast.info('Venta cargada — realiza los cambios y confirma')
         }
@@ -744,16 +745,16 @@ export function POSPage() {
                     ? { clientId: capturedCreditClientId, amount: capturedCreditAmt }
                     : null,
                 modifiedFromSaleId: pendingSaleLoad.originalSaleId ?? null,
-                companyId: capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null,
+                companyId: capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? pendingSaleLoad.originalCompanyId ?? null,
                 consumerName: capturedInvoiceClient?.consumerName ?? null,
                 originalSaleSnapshot: pendingSaleLoad.originalSaleSnapshot ?? null,
                 physicalInvoiceNumber: capturedInvoiceClient?.physicalInvoiceNumber ?? null,
             }
 
-            // When modifying a non-credit sale, update in place (keeps same saleNumber, no anulada record)
+            // When modifying any sale (including company credit), update in place
             const capturedOriginalId = pendingSaleLoad.originalSaleId
             let sale: any
-            if (capturedOriginalId && !isCredit) {
+            if (capturedOriginalId) {
                 const updated = await updateSaleInPlace(capturedOriginalId, saleInput)
                 if (updated) {
                     sale = { ...updated, ...saleInput }
@@ -767,7 +768,7 @@ export function POSPage() {
                 sale = await createSale.mutateAsync(saleInput)
             }
 
-            const resolvedCompanyId = capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? null
+            const resolvedCompanyId = capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? pendingSaleLoad.originalCompanyId ?? null
             if (resolvedCompanyId) {
                 qc.invalidateQueries({ queryKey: ['company-sales', resolvedCompanyId] })
                 qc.invalidateQueries({ queryKey: ['all-company-sales'] })
@@ -1366,6 +1367,8 @@ export function POSPage() {
                 onConfirmCompany={(cid) => processSale({ isCredit: true, clientId: null, companyId: cid })}
                 onSplitConfirm={handleSplitCreditConfirm}
                 isPending={createSale.isPending || splitCreditPending}
+                defaultCompanyId={pendingSaleLoad.originalCompanyId ?? null}
+                defaultClientId={pendingSaleLoad.originalClientId ?? null}
             />
 
             <MixedPaymentModal
