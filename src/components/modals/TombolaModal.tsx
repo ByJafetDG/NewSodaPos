@@ -106,7 +106,7 @@ export function TombolaModal({ sorteo, onClose }: Props) {
     const canSubmit = pName.trim().length > 0 && pCedula.trim().length > 0 && !submitting
 
     async function handleSell() {
-        if (!canSubmit || !selectedNum) return
+        if (!canSubmit || !selectedNum || !sorteo) return
         setSubmitting(true); setSellError(null)
         try {
             await createTombolaEntry({
@@ -138,7 +138,7 @@ export function TombolaModal({ sorteo, onClose }: Props) {
     }
 
     async function confirmWinner() {
-        if (!drawnEntry) return
+        if (!drawnEntry || !sorteo) return
         setConfirming(true); setDrawError(null)
         try {
             await setTombolaWinner(drawnEntry.id, prizeIdx)
@@ -171,6 +171,7 @@ export function TombolaModal({ sorteo, onClose }: Props) {
     }
 
     async function finalizeSorteo() {
+        if (!sorteo) return
         setFinalizing(true); setDrawError(null)
         try {
             await updateSorteo(sorteo.id, { status: 'ENDED' })
@@ -470,7 +471,9 @@ export function TombolaModal({ sorteo, onClose }: Props) {
                                             {prize && <p className="text-[10px] text-[#3D506A] truncate">{prize.name}</p>}
                                         </div>
                                         {e.participantEmail && (
-                                            <Mail size={11} className="text-[#3D506A] flex-shrink-0" title={e.participantEmail} />
+                                            <span title={e.participantEmail}>
+                                                <Mail size={11} className="text-[#3D506A] flex-shrink-0" />
+                                            </span>
                                         )}
                                     </div>
                                 )

@@ -76,7 +76,7 @@ export async function updateSorteo(
     id: string,
     input: Partial<{
         name: string; status: string; startAt: string | null; endAt: string | null
-        minSpinsBetweenPrizes: number; totalNumbers: number; pricePerNumber: number
+        minSpinsBetweenPrizes: number; totalNumbers: number | null; pricePerNumber: number | null
         drawDate: string | null; tombPrizes: string | null
     }>
 ): Promise<void> {
