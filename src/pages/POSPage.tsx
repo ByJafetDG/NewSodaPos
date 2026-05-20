@@ -1,5 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { Search, UserCircle2, ChevronDown, Pencil, X } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
 import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
 import { useKeyboardStore } from '@/store/keyboardStore'
@@ -7,6 +6,7 @@ import { usePendingSettleStore } from '@/store/pendingSettleStore'
 import { usePendingSaleLoadStore } from '@/store/pendingSaleLoadStore'
 import { settleSaleDirect } from '@/services/clients'
 import { createCreditNote, createSplitCreditSales, updateSaleInPlace } from '@/services/sales'
+import { logSorteoEntry } from '@/services/sorteos'
 import type { SplitCreditData } from '@/components/modals/CreditModal'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
@@ -15,16 +15,17 @@ import { useClients, useCreateClient, useUpdateClient, useCompanies } from '@/ho
 import { useEmployees } from '@/hooks/useEmployees'
 import { useCreateSale } from '@/hooks/useSales'
 import { useActiveRegister } from '@/hooks/useCashRegister'
-import { useCartSorteo, useRaspaditaCards } from '@/hooks/useSorteos'
-import { RuletaModal } from '@/components/modals/RuletaModal'
-import { RaspaditaModal } from '@/components/modals/RaspaditaModal'
-import { logSorteoEntry, handleSorteoWin, scratchCard } from '@/services/sorteos'
+import { usePOSSorteo } from '@/hooks/usePOSSorteo'
+import { usePOSScanModals } from '@/hooks/usePOSScanModals'
+import { useCashierSelection } from '@/hooks/useCashierSelection'
 import { useQueryClient } from '@tanstack/react-query'
 import { useBusinessConfig } from '@/hooks/useConfig'
+import { ModifyingSaleBanner } from '@/components/molecules/ModifyingSaleBanner'
+import { POSTopBar } from '@/components/organisms/pos/POSTopBar'
+import { POSSorteoModals } from '@/components/organisms/pos/POSSorteoModals'
 import { sendReceiptEmail, sendSettledEmail, sendMixedCreditEmail, sendSplitCreditEmail, sendInvoiceReceiptEmail } from '@/services/emailReceipt'
 import { MixedPaymentModal, type MixedModalView } from '@/components/modals/MixedPaymentModal'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
-import { SearchDropdown } from '@/components/molecules/SearchDropdown'
 import { ProductCatalog } from '@/components/organisms/pos/ProductCatalog'
 import { SegmentedCatalog } from '@/components/organisms/pos/SegmentedCatalog'
 import { useSubcategories } from '@/hooks/useSubcategories'
@@ -42,7 +43,7 @@ import { QuickStockModal } from '@/components/modals/QuickStockModal'
 import { ProductFormModal } from '@/components/modals/ProductFormModal'
 import { InvoiceNameModal } from '@/components/modals/InvoiceNameModal'
 import { Spinner } from '@/components/atoms/Spinner'
-import { cn, formatCurrency, normalizeStr, fuzzyMatch } from '@/lib/utils'
+import { normalizeStr, fuzzyMatch } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import type { PaymentMethod, Product, Employee, CartItem, HeldOrder } from '@/types'
 
@@ -104,11 +105,7 @@ export function POSPage() {
     }, [amountReceived])
 
     // ── Cashier ──────────────────────────────────────────────────────────────
-    const [showCashierModal, setShowCashierModal] = useState(false)
-    const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(() => {
-        try { return JSON.parse(localStorage.getItem('pos_cashier_v2') ?? 'null') }
-        catch { return null }
-    })
+    const { showCashierModal, setShowCashierModal, selectedEmployee, selectEmployee } = useCashierSelection()
 
     // ── Sale success ──────────────────────────────────────────────────────────
     const [saleSuccess, setSaleSuccess] = useState<SaleSuccessData | null>(null)
@@ -144,15 +141,9 @@ export function POSPage() {
     const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
     const [editingItem, setEditingItem] = useState<CartItem | null>(null)
     const [editPriceValue, setEditPriceValue] = useState('')
-    const [sorteoOpen, setSorteoOpen] = useState(false)
-    const [sorteoDeclined, setSorteoDeclined] = useState(false)
 
     // ── Scan modals ──────────────────────────────────────────────────────────
-    const [scanBuffer, setScanBuffer] = useState<string | null>(null)
-    const [scanNotFound, setScanNotFound] = useState<string | null>(null)
-    const [scanOutOfStock, setScanOutOfStock] = useState<Product | null>(null)
-    const [showCreateProduct, setShowCreateProduct] = useState(false)
-    const [createProductBarcode, setCreateProductBarcode] = useState('')
+    const { scanBuffer, setScanBuffer, scanNotFound, setScanNotFound, scanOutOfStock, setScanOutOfStock, showCreateProduct, setShowCreateProduct, createProductBarcode, setCreateProductBarcode } = usePOSScanModals()
 
     // ── Pending sale load (from Reports page modify flow) ────────────────────
     const pendingSaleLoad = usePendingSaleLoadStore()
@@ -180,22 +171,7 @@ export function POSPage() {
 
     // ── Sorteos ──────────────────────────────────────────────────────────────
     const qc = useQueryClient()
-    const cartProductIds = items.map(i => i.product.id)
-    const cartCategoryIds = [...new Set(items.map(i => i.product.categoryId))]
-    const { data: cartSorteo } = useCartSorteo(cartProductIds, cartCategoryIds)
-    const showSorteoButton = !!cartSorteo && !sorteoDeclined && items.length > 0
-    const qualifyingCount = cartSorteo
-        ? items.reduce((sum, item) => {
-            const hit = cartSorteo.participants.some(p =>
-                (p.type === 'PRODUCT' && p.refId === item.product.id) ||
-                (p.type === 'CATEGORY' && p.refId === item.product.categoryId)
-            )
-            return hit ? sum + item.quantity : sum
-        }, 0)
-        : 0
-    const isRaspadita = cartSorteo?.sorteo.type === 'RASPADITA'
-    const { data: raspaditaCards = [] } = useRaspaditaCards(isRaspadita ? (cartSorteo?.sorteo.id ?? null) : null)
-    const raspaditaSessionScratches = useRef(0)
+    const { cartSorteo, showSorteoButton, qualifyingCount, isRaspadita, raspaditaCards, sorteoOpen, setSorteoOpen, sorteoDeclined, setSorteoDeclined, handleSorteoResult, handleRaspaditaCardScratched, handleRaspaditaClose } = usePOSSorteo(items)
 
     // ── Derived ───────────────────────────────────────────────────────────────
     const received = parseFloat(amountReceived) || 0
@@ -299,37 +275,6 @@ export function POSPage() {
         if (activeOrderId) {
             updateHeldOrder(activeOrderId, items, discount, undefined)
         }
-    }
-
-    async function handleSorteoResult(resultOptionId: string) {
-        if (!cartSorteo) return
-        const winOption = cartSorteo.options.find(o => o.id === resultOptionId)
-        await logSorteoEntry({ sorteoId: cartSorteo.sorteo.id, didParticipate: true, unitCount: qualifyingCount, resultOptionId })
-        if (winOption && !winOption.isFiller) {
-            await handleSorteoWin(cartSorteo.sorteo.id, resultOptionId)
-        }
-        qc.invalidateQueries({ queryKey: ['sorteos'] })
-        qc.invalidateQueries({ queryKey: ['sorteoStats', cartSorteo.sorteo.id] })
-        qc.invalidateQueries({ queryKey: ['sorteoWinners', cartSorteo.sorteo.id] })
-        qc.invalidateQueries({ queryKey: ['cartSorteo'] })
-        setSorteoDeclined(true)
-    }
-
-    function handleRaspaditaCardScratched(cardId: string) {
-        raspaditaSessionScratches.current++
-        scratchCard(cardId)
-        qc.invalidateQueries({ queryKey: ['raspaditaCards', cartSorteo?.sorteo.id] })
-        qc.invalidateQueries({ queryKey: ['sorteos'] })
-    }
-
-    async function handleRaspaditaClose() {
-        if (cartSorteo && raspaditaSessionScratches.current > 0) {
-            await logSorteoEntry({ sorteoId: cartSorteo.sorteo.id, didParticipate: true, unitCount: qualifyingCount })
-            qc.invalidateQueries({ queryKey: ['sorteoStats', cartSorteo.sorteo.id] })
-        }
-        raspaditaSessionScratches.current = 0
-        setSorteoOpen(false)
-        setSorteoDeclined(true)
     }
 
     const handleSaveHeldOrder = (name: string) => {
@@ -1111,54 +1056,17 @@ export function POSPage() {
         <div className="flex flex-col h-full">
 
             {/* ── Top bar ──────────────────────────────────────────────────── */}
-            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-[#192030] shrink-0">
-                {/* Search — barcode / product name */}
-                <form onSubmit={handleSearchSubmit} className="flex-1 relative">
-                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none z-10" />
-                    <input
-                        type="text"
-                        {...searchKb}
-                        placeholder={viewMode === 'scan'
-                            ? 'Escanea código de barras o busca por nombre...'
-                            : 'Filtrar productos en la grilla...'
-                        }
-                        className="w-full h-10 pl-10 pr-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
-                    />
-                    {/* Autocomplete dropdown — scan mode only */}
-                    {viewMode === 'scan' && (
-                        <SearchDropdown
-                            products={products}
-                            categories={categories}
-                            search={search}
-                            cartItems={items}
-                            onSelect={(product) => {
-                                tryAddProduct(product)
-                                setSearch('')
-                            }}
-                        />
-                    )}
-                </form>
-
-                {/* Cashier selector */}
-                <button
-                    onClick={() => setShowCashierModal(true)}
-                    className={cn(
-                        'flex items-center gap-2 px-3 py-2 rounded-xl border transition-all cursor-pointer shrink-0',
-                        selectedEmployee
-                            ? 'bg-orange-500/8 border-orange-500/20 text-orange-400 hover:bg-orange-500/12'
-                            : 'bg-[#101520] border-[#1E2A40] text-[#3D506A] hover:text-[#7A8FAA] hover:bg-[#161D2E]'
-                    )}
-                >
-                    <UserCircle2 size={16} />
-                    <div className="text-left hidden sm:block">
-                        <p className="text-[9px] uppercase tracking-widest opacity-60 leading-none">Cajero</p>
-                        <p className="text-[12px] font-semibold leading-tight mt-0.5 max-w-[90px] truncate">
-                            {selectedEmployee?.name ?? 'Sin cajero'}
-                        </p>
-                    </div>
-                    <ChevronDown size={11} className="opacity-40" />
-                </button>
-            </div>
+            <POSTopBar
+                viewMode={viewMode}
+                searchKb={searchKb}
+                onSubmit={handleSearchSubmit}
+                products={products}
+                categories={categories}
+                cartItems={items}
+                onSelectProduct={(p) => { tryAddProduct(p); setSearch('') }}
+                selectedEmployee={selectedEmployee}
+                onOpenCashierModal={() => setShowCashierModal(true)}
+            />
 
             {/* ── View mode bar (scan/grid toggle + category pills) ─────────── */}
             <ViewModeBar
@@ -1184,23 +1092,11 @@ export function POSPage() {
 
             {/* ── Modifying sale banner ────────────────────────────────────── */}
             {pendingSaleLoad.originalSaleNumber !== null && (
-                <div className="flex items-center gap-2.5 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 shrink-0">
-                    <Pencil size={12} className="text-amber-400 shrink-0" />
-                    <span className="text-[12px] font-semibold text-amber-300 shrink-0">
-                        Modificando venta #{pendingSaleLoad.originalSaleNumber}
-                    </span>
-                    {pendingSaleLoad.originalClientName && (
-                        <span className="text-[11px] text-amber-400/70 truncate">
-                            — {pendingSaleLoad.originalClientName}
-                        </span>
-                    )}
-                    <button
-                        onClick={() => pendingSaleLoad.clearModifying()}
-                        className="ml-auto w-5 h-5 flex items-center justify-center rounded-full bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-all cursor-pointer shrink-0"
-                    >
-                        <X size={9} />
-                    </button>
-                </div>
+                <ModifyingSaleBanner
+                    saleNumber={pendingSaleLoad.originalSaleNumber}
+                    clientName={pendingSaleLoad.originalClientName}
+                    onCancel={() => pendingSaleLoad.clearModifying()}
+                />
             )}
 
             {/* ── Main content ─────────────────────────────────────────────── */}
@@ -1358,10 +1254,7 @@ export function POSPage() {
                 onClose={() => setShowCashierModal(false)}
                 employees={employees}
                 selected={selectedEmployee}
-                onSelect={(emp) => {
-                    setSelectedEmployee(emp)
-                    try { localStorage.setItem('pos_cashier_v2', JSON.stringify(emp)) } catch { }
-                }}
+                onSelect={selectEmployee}
             />
 
             <CreditModal
@@ -1408,27 +1301,17 @@ export function POSPage() {
                 onClose={() => setSaleSuccess(null)}
             />
 
-            {isRaspadita ? (
-                <RaspaditaModal
-                    isOpen={sorteoOpen}
-                    onClose={handleRaspaditaClose}
-                    sorteo={cartSorteo?.sorteo ?? null}
-                    cards={raspaditaCards}
-                    allowedScratchCount={qualifyingCount}
-                    onCardScratched={handleRaspaditaCardScratched}
-                />
-            ) : (
-                <RuletaModal
-                    isOpen={sorteoOpen}
-                    onClose={() => setSorteoOpen(false)}
-                    sorteoName={cartSorteo?.sorteo.name ?? ''}
-                    options={cartSorteo?.options ?? []}
-                    sorteoId={cartSorteo?.sorteo.id}
-                    minSpinsBetweenPrizes={cartSorteo?.sorteo.minSpinsBetweenPrizes}
-                    maxSpins={qualifyingCount}
-                    onResult={handleSorteoResult}
-                />
-            )}
+            <POSSorteoModals
+                isRaspadita={isRaspadita}
+                sorteoOpen={sorteoOpen}
+                setSorteoOpen={setSorteoOpen}
+                cartSorteo={cartSorteo}
+                raspaditaCards={raspaditaCards}
+                qualifyingCount={qualifyingCount}
+                handleSorteoResult={handleSorteoResult}
+                handleRaspaditaCardScratched={handleRaspaditaCardScratched}
+                handleRaspaditaClose={handleRaspaditaClose}
+            />
 
             <HeldOrdersModal
                 isOpen={heldOrdersView !== null}

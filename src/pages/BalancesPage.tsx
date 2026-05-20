@@ -5,7 +5,7 @@ import {
     Phone, Mail, ChevronLeft, CheckCircle2, Receipt, Banknote,
     Check, ChevronDown, CreditCard, History, IdCard,
     Building2, X, Pencil, Send, FileDown, ChevronRight, Printer,
-    Smartphone, Banknote as BanknoteIcon, ArrowLeft, Landmark,
+    Smartphone, Banknote as BanknoteIcon, ArrowLeft, Landmark, Ban,
 } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
@@ -23,7 +23,7 @@ import {
     useAllCompanySales, useCompanySales,
 } from '@/hooks/useClients'
 import { useActiveRegister } from '@/hooks/useCashRegister'
-import { getSaleItemsForCart, getSaleDetails } from '@/services/sales'
+import { getSaleItemsForCart, getSaleDetails, voidSale } from '@/services/sales'
 import { deleteCreditSale, settleSaleDirect } from '@/services/clients'
 import { sendCompanyStatementPDFEmail } from '@/services/emailReceipt'
 import { generateCompanyStatementPDF } from '@/services/generateCompanyPDF'
@@ -113,8 +113,8 @@ export function BalancesPage() {
         return matchSearch && matchType
     })
 
-    function pendingSalesFor(clientId: string): Sale[] {
-        return allCreditSales.filter((s: Sale) => s.clientId === clientId)
+    function pendingSalesFor(clientId: string) {
+        return allCreditSales.filter(s => s.clientId === clientId)
     }
 
     function pendingTotalFor(clientId: string) {
@@ -510,6 +510,8 @@ function CompanyDetailView({ company, onBack, onEdit }: {
     const [expandedId, setExpandedId] = useState<string | null>(null)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [confirmSettle, setConfirmSettle] = useState<string[] | null>(null)
+    const [confirmVoid, setConfirmVoid] = useState<any | null>(null)
+    const [isVoiding, setIsVoiding] = useState(false)
     const [settleMethod, setSettleMethod] = useState<'EFECTIVO' | 'SINPE' | 'DEPOSITO'>('EFECTIVO')
     const [isSettling, setIsSettling] = useState(false)
     const [isSending, setIsSending] = useState(false)
@@ -665,6 +667,21 @@ function CompanyDetailView({ company, onBack, onEdit }: {
         })
         pendingSaleLoad.set(items, sale.discount ?? 0, sale.id, sale.saleNumber, company.name, snapshot, sale.companyId ?? company.id, null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null)
         setCurrentPage('pos')
+    }
+
+    async function handleVoidSale(sale: any) {
+        setIsVoiding(true)
+        try {
+            await voidSale(sale.id)
+            qc.invalidateQueries({ queryKey: ['company-sales', company.id] })
+            qc.invalidateQueries({ queryKey: ['all-company-sales'] })
+            toast.success(`Factura #${sale.saleNumber} anulada`)
+        } catch (e: any) {
+            toast.error(e?.message ?? 'Error al anular')
+        } finally {
+            setIsVoiding(false)
+            setConfirmVoid(null)
+        }
     }
 
     function openHistory(sale: any) {
@@ -948,6 +965,12 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                                                             Modificar
                                                         </button>
                                                         <button
+                                                            onClick={() => setConfirmVoid(s)}
+                                                            className="h-9 px-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[12px] font-medium hover:bg-red-500/20 transition-all cursor-pointer"
+                                                        >
+                                                            <Ban size={13} />
+                                                        </button>
+                                                        <button
                                                             onClick={() => setConfirmSettle([s.id])}
                                                             disabled={isSettling}
                                                             className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[12px] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-60"
@@ -1210,6 +1233,17 @@ function CompanyDetailView({ company, onBack, onEdit }: {
                     </div>
                 </div>
             </BaseModal>
+
+            <DeleteConfirmModal
+                isOpen={confirmVoid !== null}
+                onClose={() => setConfirmVoid(null)}
+                onConfirm={() => confirmVoid && handleVoidSale(confirmVoid)}
+                title="Anular factura"
+                description={`¿Anular la factura #${confirmVoid?.saleNumber} por ${confirmVoid ? formatCurrency(confirmVoid.total) : ''}? Esta acción revierte el stock y no se puede deshacer.`}
+                confirmLabel="Anular"
+                confirmVariant="danger"
+                isPending={isVoiding}
+            />
         </div>
     )
 }
@@ -1345,7 +1379,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
     const pendingSaleLoad = usePendingSaleLoadStore()
     const setCurrentPage = useUIStore(s => s.setCurrentPage)
 
-    function toSaleInfo(s: Sale) {
+    function toSaleInfo(s: any) {
         return {
             saleNumber: s.saleNumber,
             date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
@@ -1378,7 +1412,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
         else setSelectedIds(new Set(pendingSales.map(s => s.id)))
     }
 
-    async function handleSettleSingleSale(sale: Sale) {
+    async function handleSettleSingleSale(sale: any) {
         await settleSale.mutateAsync(sale.id)
         if (client.email) {
             sendSettledEmail({
@@ -1391,7 +1425,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
     }
 
     async function handleSettleSelected() {
-        const salesToSettle = pendingSales.filter((s: Sale) => selectedIds.has(s.id))
+        const salesToSettle = pendingSales.filter(s => selectedIds.has(s.id))
         for (const id of selectedIds) await settleSale.mutateAsync(id)
         setSelectedIds(new Set())
         if (client.email && salesToSettle.length > 0) {
@@ -1411,19 +1445,19 @@ function ClientDetailView({ client, onBack, onEdit }: {
                 to: client.email,
                 clientName: client.name,
                 businessName: config?.name ?? '',
-                sales: (pendingSales as Sale[]).map(toSaleInfo),
+                sales: pendingSales.map(toSaleInfo),
             }).catch(() => {})
         }
     }
 
     function handleChargeInPOS() {
-        const selectedSales = pendingSales.filter((s: Sale) => selectedIds.has(s.id))
-        pendingStore.set(client.id, client.name, Array.from(selectedIds), selectedTotal, selectedSales)
+        const selectedSales = pendingSales.filter(s => selectedIds.has(s.id))
+        pendingStore.set(client.id, client.name, Array.from(selectedIds), selectedTotal, selectedSales as unknown as Sale[])
         setCurrentPage('pos')
     }
 
-    function openEditSale(sale: Sale) {
-        setEditingSale(sale)
+    function openEditSale(sale: any) {
+        setEditingSale(sale as unknown as Sale)
         setEditStep('main')
     }
 
@@ -1433,10 +1467,10 @@ function ClientDetailView({ client, onBack, onEdit }: {
         setEditingInPOS(false)
     }
 
-    async function openCompare(sale: Sale) {
-        const origId = (sale as any).modifiedFromSaleId
+    async function openCompare(sale: any) {
+        const origId = sale.modifiedFromSaleId
         if (!origId) return
-        setCompareTarget(sale)
+        setCompareTarget(sale as unknown as Sale)
         setCompareOriginal(null)
         setCompareLoading(true)
         try {
@@ -1669,7 +1703,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                 </div>
 
                                 {/* Sale cards */}
-                                {pendingSales.map((s: Sale) => {
+                                {pendingSales.map((s: any) => {
                                     const sDate = s.date instanceof Date ? s.date : new Date(s.date)
                                     const dateStr = sDate.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
                                     const isSelected = selectedIds.has(s.id)
@@ -1806,7 +1840,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                 description="Aún no hay ventas registradas para este cliente"
                             />
                         ) : (
-                            allSales.map((s: Sale) => {
+                            allSales.map((s: any) => {
                                 const sDate = s.date instanceof Date ? s.date : new Date(s.date)
                                 const dateStr = sDate.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
                                 const isPending = s.isCredit

@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import { updateProductStock } from './products'
-import type { CartItem, PaymentMethod } from '@/types'
+import type { CartItem, PaymentMethod, ProductUnit, SyncStatus } from '@/types'
+import type { SqlParam, DbSaleRow, DbSaleRowForUpdate, DbSaleItemRow, DbProductRow, SaleSnapshotEntry, CompanySaleView } from '@/types/db'
 
 function localISO(): string {
     const d = new Date()
@@ -74,19 +75,19 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
         const ids = input.items.map(i => i.id)
         if (ids.length > 0) {
             const placeholders = ids.map(() => '?').join(',')
-            const stocks: any[] = await window.electronAPI.dbQuery(
+            const stocks = await window.electronAPI.dbQuery(
                 `SELECT id, name, stockQty, isInfinite FROM Product WHERE id IN (${placeholders})`,
                 ids
-            )
+            ) as Pick<DbProductRow, 'id' | 'name' | 'stockQty' | 'isInfinite'>[]
             for (const item of input.items) {
-                const prod = stocks.find((s: any) => s.id === item.id)
+                const prod = stocks.find(s => s.id === item.id)
                 if (prod && !prod.isInfinite && prod.stockQty < item.quantity) {
                     throw new Error(`Stock insuficiente para "${prod.name}": disponible ${prod.stockQty}, solicitado ${item.quantity}`)
                 }
             }
         }
 
-        const ops: Array<{ sql: string; params: any[] }> = [
+        const ops: Array<{ sql: string; params: SqlParam[] }> = [
             {
                 sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2, modifiedFromSaleId, companyId, consumerName, originalSaleSnapshot, physicalInvoiceNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING', input.paymentMethod2 ?? null, input.amount2 ?? null, input.modifiedFromSaleId ?? null, input.companyId ?? null, input.consumerName ?? null, input.originalSaleSnapshot ?? null, input.physicalInvoiceNumber ?? null]
@@ -253,12 +254,12 @@ export async function voidSale(saleId: string): Promise<void> {
         if (!sale) throw new Error('Venta no encontrada')
         if (sale.status === 'ANULADA') return
 
-        const items: any[] = await window.electronAPI.dbQuery(
+        const items = await window.electronAPI.dbQuery(
             'SELECT productId, quantity FROM SaleItem WHERE saleId = ?',
             [saleId]
-        )
+        ) as Pick<DbSaleItemRow, 'productId' | 'quantity'>[]
 
-        const ops: Array<{ sql: string; params: any[] }> = []
+        const ops: Array<{ sql: string; params: SqlParam[] }> = []
         ops.push({
             sql: `UPDATE Sale SET status = 'ANULADA', isCredit = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
             params: [now, saleId]
@@ -322,7 +323,8 @@ export async function voidSale(saleId: string): Promise<void> {
  */
 export async function getSaleItemsForCart(saleId: string): Promise<import('@/types').CartItem[]> {
     if (window.electronAPI) {
-        const rows: any[] = await window.electronAPI.dbQuery(
+        type SaleItemJoinRow = DbSaleItemRow & Pick<DbProductRow, 'name' | 'barcode' | 'categoryId' | 'price' | 'cost' | 'unit' | 'stockQty' | 'minStock' | 'isActive' | 'isInfinite' | 'imageUrl' | 'syncStatus'>
+        const rows = await window.electronAPI.dbQuery(
             `SELECT si.productId, si.quantity, si.unitPrice, si.subtotal, si.notes,
                     p.name, p.barcode, p.categoryId, p.price, p.cost, p.unit,
                     p.stockQty, p.minStock, p.isActive, p.isInfinite, p.imageUrl, p.syncStatus
@@ -330,7 +332,7 @@ export async function getSaleItemsForCart(saleId: string): Promise<import('@/typ
              LEFT JOIN Product p ON p.id = si.productId
              WHERE si.saleId = ? AND si.productId != 'credit-charge'`,
             [saleId]
-        )
+        ) as SaleItemJoinRow[]
         return rows
             .filter(r => r.name)
             .map(r => ({
@@ -342,13 +344,13 @@ export async function getSaleItemsForCart(saleId: string): Promise<import('@/typ
                     categoryId: r.categoryId,
                     price: r.price,
                     cost: r.cost,
-                    unit: r.unit,
+                    unit: r.unit as ProductUnit,
                     stockQty: r.stockQty,
                     minStock: r.minStock,
                     isActive: r.isActive === 1,
                     isInfinite: r.isInfinite === 1,
                     imageUrl: r.imageUrl ?? null,
-                    syncStatus: r.syncStatus,
+                    syncStatus: r.syncStatus as SyncStatus,
                     createdAt: new Date(),
                     updatedAt: new Date(),
                 },
@@ -364,11 +366,12 @@ export async function getSaleItemsForCart(saleId: string): Promise<import('@/typ
         .eq('saleId', saleId)
         .neq('productId', 'credit-charge')
     if (error) throw error
-    return ((data ?? []) as any[])
-        .filter((r: any) => r.product)
-        .map((r: any) => ({
+    type SupabaseSaleItemRow = { productId: string; quantity: number; unitPrice: number; subtotal: number; notes: string | null; product: import('@/types').Product | null }
+    return ((data ?? []) as unknown as SupabaseSaleItemRow[])
+        .filter(r => r.product)
+        .map(r => ({
             id: r.productId,
-            product: r.product,
+            product: r.product!,
             quantity: r.quantity,
             unitPrice: r.unitPrice,
             subtotal: r.subtotal,
@@ -385,7 +388,7 @@ export async function updateCreditSaleItems(
     const newTotal = updatedItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
 
     if (window.electronAPI) {
-        const ops: Array<{ sql: string; params: any[] }> = []
+        const ops: Array<{ sql: string; params: SqlParam[] }> = []
 
         for (const item of updatedItems) {
             ops.push({
@@ -439,7 +442,7 @@ export async function createSplitCreditSales(input: CreateSplitCreditSalesInput)
     const baseSaleNumber = await getNextSaleNumber()
 
     if (window.electronAPI) {
-        const ops: Array<{ sql: string; params: any[] }> = []
+        const ops: Array<{ sql: string; params: SqlParam[] }> = []
 
         const allNames = input.clientAssignments.map(c => c.clientName)
         input.clientAssignments.forEach((client, idx) => {
@@ -538,7 +541,7 @@ export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ 
     const now = new Date().toISOString()
 
     if (window.electronAPI) {
-        const ops: Array<{ sql: string; params: any[] }> = [
+        const ops: Array<{ sql: string; params: SqlParam[] }> = [
             {
                 sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 params: [id, saleNumber, now, input.subtotal, input.discount, input.total, 'CREDITO', null, null, 1, input.clientId, null, 'COMPLETADA', input.notes ?? null, 'PENDING', null, null]
@@ -586,25 +589,25 @@ export async function createCreditNote(input: CreateCreditNoteInput): Promise<{ 
 /**
  * Get all sales linked to a company (with items)
  */
-export async function getSalesForCompany(companyId: string): Promise<any[]> {
+export async function getSalesForCompany(companyId: string): Promise<CompanySaleView[]> {
     if (window.electronAPI) {
-        const sales: any[] = await window.electronAPI.dbQuery(
+        const sales = await window.electronAPI.dbQuery(
             `SELECT * FROM Sale WHERE companyId = ? ORDER BY date DESC`,
             [companyId]
-        )
-        const result: any[] = []
+        ) as DbSaleRow[]
+        const result: CompanySaleView[] = []
         for (const sale of sales) {
-            const items: any[] = await window.electronAPI.dbQuery(
+            const items = await window.electronAPI.dbQuery(
                 `SELECT si.id, si.quantity, si.unitPrice, si.subtotal, si.notes,
                         COALESCE(p.name, 'Producto eliminado') as productName
                  FROM SaleItem si LEFT JOIN Product p ON p.id = si.productId
                  WHERE si.saleId = ?`,
                 [sale.id]
-            )
+            ) as (Pick<DbSaleItemRow, 'quantity' | 'unitPrice' | 'subtotal' | 'notes'> & { productName: string })[]
             result.push({
                 ...sale,
                 isCredit: !!sale.isCredit,
-                items: items.map((i: any) => ({ ...i, product: { name: i.productName } })),
+                items: items.map(i => ({ ...i, product: { name: i.productName } })),
             })
         }
         return result
@@ -623,41 +626,41 @@ export async function getSalesForCompany(companyId: string): Promise<any[]> {
  */
 export async function getAllCompanySales(): Promise<{ id: string; companyId: string; total: number; isCredit: boolean; status: string; paidAt: string | null }[]> {
     if (window.electronAPI) {
-        const data: any[] = await window.electronAPI.dbQuery(
+        const data = await window.electronAPI.dbQuery(
             `SELECT id, companyId, total, isCredit, status, paidAt FROM Sale WHERE companyId IS NOT NULL`,
             []
-        )
-        return data.map((s: any) => ({ ...s, isCredit: !!s.isCredit }))
+        ) as Pick<DbSaleRow, 'id' | 'companyId' | 'total' | 'isCredit' | 'status' | 'paidAt'>[]
+        return data.map(s => ({ ...s, isCredit: !!s.isCredit, companyId: s.companyId! }))
     }
     const { data, error } = await supabase
         .from('Sale')
         .select('id, companyId, total, isCredit, status, paidAt')
         .not('companyId', 'is', null)
     if (error) throw error
-    return (data ?? []).map((s: any) => ({ ...s }))
+    return (data ?? []).map(s => ({ ...s }))
 }
 
 /**
  * Fetch a single sale with items for comparison view
  */
-export async function getSaleDetails(saleId: string): Promise<any | null> {
+export async function getSaleDetails(saleId: string): Promise<(DbSaleRow & { clientName: string | null; items: (DbSaleItemRow & { product: { name: string } })[] }) | null> {
     if (window.electronAPI) {
         const sale = await window.electronAPI.dbGet(
             `SELECT s.*, c.name as clientName FROM Sale s LEFT JOIN Client c ON s.clientId = c.id WHERE s.id = ?`,
             [saleId]
-        )
+        ) as (DbSaleRow & { clientName: string | null }) | null
         if (!sale) return null
-        const items: any[] = await window.electronAPI.dbQuery(
+        const items = await window.electronAPI.dbQuery(
             `SELECT si.productId, si.quantity, si.unitPrice, si.subtotal, si.notes,
                     COALESCE(p.name, 'Producto eliminado') as productName
              FROM SaleItem si LEFT JOIN Product p ON si.productId = p.id
              WHERE si.saleId = ?`,
             [saleId]
-        )
+        ) as (DbSaleItemRow & { productName: string })[]
         return {
             ...sale,
             isCredit: !!sale.isCredit,
-            items: items.map((i: any) => ({ ...i, product: { name: i.productName } })),
+            items: items.map(i => ({ ...i, product: { name: i.productName } })),
         }
     }
     const { data, error } = await supabase
@@ -717,36 +720,39 @@ export async function updateSaleInPlace(
     saleId: string,
     input: UpdateSaleInPlaceInput
 ): Promise<{ id: string; saleNumber: number; date: string } | null> {
+    if (!input.items.length) throw new Error('La venta no puede quedar sin productos')
+    if (input.total <= 0) throw new Error('El total debe ser mayor a 0')
+
     const now = localISO()
 
     if (window.electronAPI) {
         const orig = await window.electronAPI.dbGet(
-            'SELECT id, saleNumber, date, originalSaleSnapshot FROM Sale WHERE id = ? AND status = \'COMPLETADA\'',
+            'SELECT id, saleNumber, date, originalSaleSnapshot, total AS origTotal, isCredit AS origIsCredit FROM Sale WHERE id = ? AND status = \'COMPLETADA\'',
             [saleId]
-        )
+        ) as DbSaleRowForUpdate | null
         if (!orig) return null
 
-        const origItems: any[] = await window.electronAPI.dbQuery(
+        const origItems = await window.electronAPI.dbQuery(
             'SELECT productId, quantity FROM SaleItem WHERE saleId = ?',
             [saleId]
-        )
+        ) as Pick<DbSaleItemRow, 'productId' | 'quantity'>[]
 
         // Merge snapshot history: append new entry with modifiedAt timestamp
-        let existingHistory: any[] = []
+        let existingHistory: SaleSnapshotEntry[] = []
         if (orig.originalSaleSnapshot) {
             try {
                 const parsed = JSON.parse(orig.originalSaleSnapshot)
                 existingHistory = Array.isArray(parsed) ? parsed : [parsed]
             } catch {}
         }
-        let newEntry: any = {}
+        let newEntry: Partial<SaleSnapshotEntry> = {}
         if (input.originalSaleSnapshot) {
             try { newEntry = JSON.parse(input.originalSaleSnapshot) } catch {}
         }
         newEntry.modifiedAt = now
         const mergedSnapshot = JSON.stringify([...existingHistory, newEntry])
 
-        const ops: Array<{ sql: string; params: any[] }> = []
+        const ops: Array<{ sql: string; params: SqlParam[] }> = []
 
         ops.push({
             sql: `UPDATE Sale SET subtotal=?, discount=?, total=?, paymentMethod=?, paymentMethod2=?, amount2=?, amountReceived=?, "change"=?, isCredit=?, clientId=?, companyId=?, consumerName=?, physicalInvoiceNumber=?, notes=?, originalSaleSnapshot=?, cashRegisterId=?, syncStatus='PENDING', updatedAt=? WHERE id=?`,
@@ -776,6 +782,17 @@ export async function updateSaleInPlace(
             })
         }
 
+        // CashRegister: adjust salesCredit if credit amount changed
+        if (orig.origIsCredit && input.isCredit && input.cashRegisterId) {
+            const delta = input.total - orig.origTotal
+            if (delta !== 0) {
+                ops.push({
+                    sql: `UPDATE CashRegister SET salesCredit = salesCredit + ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+                    params: [delta, now, input.cashRegisterId]
+                })
+            }
+        }
+
         // Credit part (mixed payment)
         if (input.creditPart && input.creditPart.amount > 0) {
             const creditId = crypto.randomUUID()
@@ -797,27 +814,43 @@ export async function updateSaleInPlace(
     }
 
     // Cloud fallback
+    type SupabaseSaleForUpdate = Pick<DbSaleRow, 'id' | 'saleNumber' | 'date' | 'originalSaleSnapshot' | 'total' | 'isCredit'> & {
+        items: Pick<DbSaleItemRow, 'id' | 'productId' | 'quantity'>[]
+    }
     const { data: orig, error: origErr } = await supabase
         .from('Sale')
-        .select('id, saleNumber, date, originalSaleSnapshot, items:SaleItem(productId, quantity)')
+        .select('id, saleNumber, date, originalSaleSnapshot, total, isCredit, items:SaleItem(id, productId, quantity)')
         .eq('id', saleId)
         .eq('status', 'COMPLETADA')
         .single()
     if (origErr || !orig) return null
+    const origCloud = orig as unknown as SupabaseSaleForUpdate
 
-    let existingHistoryCloud: any[] = []
-    if ((orig as any).originalSaleSnapshot) {
+    let existingHistoryCloud: SaleSnapshotEntry[] = []
+    if (origCloud.originalSaleSnapshot) {
         try {
-            const parsed = JSON.parse((orig as any).originalSaleSnapshot)
+            const parsed = JSON.parse(origCloud.originalSaleSnapshot)
             existingHistoryCloud = Array.isArray(parsed) ? parsed : [parsed]
         } catch {}
     }
-    let newEntryCloud: any = {}
+    let newEntryCloud: Partial<SaleSnapshotEntry> = {}
     if (input.originalSaleSnapshot) {
         try { newEntryCloud = JSON.parse(input.originalSaleSnapshot) } catch {}
     }
     newEntryCloud.modifiedAt = now
     const mergedSnapshotCloud = JSON.stringify([...existingHistoryCloud, newEntryCloud])
+
+    const oldItemIds = origCloud.items.map(i => i.id).filter(Boolean)
+
+    // Atomicity order: INSERT new items first, then UPDATE sale, then DELETE old items by ID
+    // If DELETE fails after INSERT, duplicates exist (recoverable). If INSERT had failed, sale is untouched.
+    if (input.items.length > 0) {
+        await supabase.from('SaleItem').insert(input.items.map(item => ({
+            id: crypto.randomUUID(), saleId, productId: item.product.id,
+            quantity: item.quantity, unitPrice: item.unitPrice, subtotal: item.subtotal,
+            notes: item.notes, createdAt: now,
+        })))
+    }
 
     await supabase.from('Sale').update({
         subtotal: input.subtotal, discount: input.discount, total: input.total,
@@ -830,16 +863,28 @@ export async function updateSaleInPlace(
         cashRegisterId: input.cashRegisterId, syncStatus: 'SYNCED', updatedAt: now,
     }).eq('id', saleId)
 
-    await supabase.from('SaleItem').delete().eq('saleId', saleId)
-    if (input.items.length > 0) {
-        await supabase.from('SaleItem').insert(input.items.map(item => ({
-            id: crypto.randomUUID(), saleId, productId: item.product.id,
-            quantity: item.quantity, unitPrice: item.unitPrice, subtotal: item.subtotal,
-            notes: item.notes, createdAt: now,
-        })))
+    if (oldItemIds.length > 0) {
+        await supabase.from('SaleItem').delete().in('id', oldItemIds)
     }
 
-    for (const oi of (orig.items ?? []) as any[]) {
+    // CashRegister: adjust salesCredit if credit amount changed
+    if (origCloud.isCredit && input.isCredit && input.cashRegisterId) {
+        const delta = input.total - origCloud.total
+        if (delta !== 0) {
+            const { data: reg } = await supabase
+                .from('CashRegister')
+                .select('salesCredit')
+                .eq('id', input.cashRegisterId)
+                .single()
+            if (reg) {
+                await supabase.from('CashRegister')
+                    .update({ salesCredit: (reg.salesCredit ?? 0) + delta, syncStatus: 'SYNCED', updatedAt: now })
+                    .eq('id', input.cashRegisterId)
+            }
+        }
+    }
+
+    for (const oi of origCloud.items) {
         await updateProductStock(oi.productId, oi.quantity)
     }
     for (const item of input.items) {

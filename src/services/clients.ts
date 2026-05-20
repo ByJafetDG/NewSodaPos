@@ -1,16 +1,52 @@
 import { supabase } from '@/lib/supabase'
 import { updateProductStock } from './products'
 import type { Client, Company } from '@/types'
+import type { SqlParam, DbClientRow, DbCompanyRow, DbSaleRow, DbPaymentRow, DbSaleItemRow } from '@/types/db'
 
 type ClientInput = Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>
 type CompanyInput = Omit<Company, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>
+
+type SaleJoinRow = DbSaleRow & {
+    createdAt?: string
+    item_id: string | null
+    productId: string | null
+    quantity: number | null
+    unitPrice: number | null
+    item_subtotal: number | null
+    product_name: string | null
+}
+
+type GroupedSaleItem = {
+    id: string; saleId: string; productId: string
+    quantity: number; unitPrice: number; subtotal: number
+    product: { id: string; name: string | null }
+}
+
+type GroupedSale = {
+    id: string; saleNumber: number; date: Date; subtotal: number
+    discount: number; total: number; paymentMethod: string; isCredit: boolean
+    clientId: string | null; status: string; notes: string | null; syncStatus: string
+    modifiedFromSaleId: string | null; originalSaleSnapshot: string | null
+    createdAt: Date | undefined; updatedAt: Date; items: GroupedSaleItem[]
+}
+
+type SupabaseSaleWithItems = Omit<DbSaleRow, 'isCredit'> & {
+    isCredit: boolean
+    items: ({ id: string; productId: string; quantity: number; unitPrice: number; subtotal: number; product: { id: string; name: string } | null } | null)[] | null
+}
+
+type SaleSettleFields = {
+    isCredit: boolean; paidAt: string; updatedAt: string; syncStatus: string
+    paymentMethod?: string; cashRegisterId?: string | null
+    amountReceived?: number | null; change?: number | null
+}
 
 // ─── Company CRUD ─────────────────────────────────────────────────────────────
 
 export async function getCompanies(): Promise<Company[]> {
     if (window.electronAPI) {
         const data = await window.electronAPI.dbQuery('SELECT * FROM Company ORDER BY name ASC')
-        return data.map((c: any) => ({ ...c, isActive: !!c.isActive })) as unknown as Company[]
+        return (data as DbCompanyRow[]).map(c => ({ ...c, isActive: !!c.isActive })) as unknown as Company[]
     }
     const { data, error } = await supabase.from('Company').select('*').order('name')
     if (error) throw error
@@ -83,7 +119,7 @@ export async function settleClientSalesWithMethod(clientId: string, method: stri
 export async function getClients(): Promise<Client[]> {
     if (window.electronAPI) {
         const data = await window.electronAPI.dbQuery('SELECT * FROM Client ORDER BY name ASC')
-        return data.map((c: any) => ({ ...c, isActive: !!c.isActive })) as unknown as Client[]
+        return (data as DbClientRow[]).map(c => ({ ...c, isActive: !!c.isActive })) as unknown as Client[]
     }
     const { data, error } = await supabase.from('Client').select('*').order('name')
     if (error) throw error
@@ -152,14 +188,15 @@ export async function deleteClient(id: string): Promise<void> {
     if (error) throw error
 }
 
-export async function getDeletedClients(): Promise<any[]> {
+export async function getDeletedClients(): Promise<Client[]> {
     if (window.electronAPI) {
-        return await window.electronAPI.dbQuery(
+        const data = await window.electronAPI.dbQuery(
             "SELECT * FROM Client WHERE isActive = 0 ORDER BY name ASC"
-        )
+        ) as DbClientRow[]
+        return data.map(c => ({ ...c, isActive: !!c.isActive })) as unknown as Client[]
     }
     const { data } = await supabase.from('Client').select('*').eq('isActive', false).order('name')
-    return data ?? []
+    return (data ?? []) as unknown as Client[]
 }
 
 export async function restoreClient(id: string): Promise<void> {
@@ -192,7 +229,7 @@ export async function hardDeleteClient(id: string): Promise<void> {
     if (error) throw error
 }
 
-export async function getCreditSales(clientId?: string): Promise<any[]> {
+export async function getCreditSales(clientId?: string): Promise<GroupedSale[]> {
     if (window.electronAPI) {
         let sql = `
             SELECT s.*, si.id as item_id, si.productId, si.quantity, si.unitPrice, si.subtotal as item_subtotal,
@@ -202,7 +239,7 @@ export async function getCreditSales(clientId?: string): Promise<any[]> {
             LEFT JOIN Product p ON p.id = si.productId
             WHERE s.isCredit = 1 AND s.status = 'COMPLETADA'
         `
-        const params: any[] = []
+        const params: SqlParam[] = []
         if (clientId) { sql += ' AND s.clientId = ?'; params.push(clientId) }
         sql += ' ORDER BY s.date DESC'
         const rows = await window.electronAPI.dbQuery(sql, params)
@@ -242,7 +279,7 @@ export async function settleSale(saleId: string): Promise<void> {
     const { data: sale, error: saleErr } = await supabase.from('Sale').select('total, clientId').eq('id', saleId).single()
     if (saleErr) throw saleErr
     const { data: payments } = await supabase.from('Payment').select('amount').eq('clientId', sale.clientId)
-    const paid = (payments ?? []).reduce((sum: number, p: any) => sum + p.amount, 0)
+    const paid = (payments ?? []).reduce((sum: number, p: Pick<DbPaymentRow, 'amount'>) => sum + p.amount, 0)
     if (paid < sale.total) {
         throw new Error(`Pago insuficiente: el cliente tiene ₡${paid} en abonos pero la venta es de ₡${sale.total}`)
     }
@@ -265,7 +302,7 @@ export async function settleClientSales(clientId: string): Promise<void> {
     if (error) throw error
 }
 
-export async function getSalesByClient(clientId: string): Promise<any[]> {
+export async function getSalesByClient(clientId: string): Promise<GroupedSale[]> {
     if (window.electronAPI) {
         const sql = `
             SELECT s.*, si.id as item_id, si.productId, si.quantity, si.unitPrice, si.subtotal as item_subtotal,
@@ -286,15 +323,19 @@ export async function getSalesByClient(clientId: string): Promise<any[]> {
         .eq('status', 'COMPLETADA')
         .order('date', { ascending: false })
     if (error) throw error
-    return (data ?? []).map((s: any) => ({
+    return (data ?? []).map((s: SupabaseSaleWithItems) => ({
         ...s,
-        items: s.items ?? [],
+        items: (s.items ?? []).filter(Boolean) as GroupedSaleItem[],
         date: new Date(s.date),
+        createdAt: undefined,
+        updatedAt: new Date(s.updatedAt),
+        modifiedFromSaleId: null,
+        originalSaleSnapshot: s.originalSaleSnapshot ?? null,
     }))
 }
 
-function groupSaleRows(rows: any[]): any[] {
-    const map = new Map<string, any>()
+function groupSaleRows(rows: SaleJoinRow[]): GroupedSale[] {
+    const map = new Map<string, GroupedSale>()
     for (const row of rows) {
         if (!map.has(row.id)) {
             map.set(row.id, {
@@ -306,16 +347,16 @@ function groupSaleRows(rows: any[]): any[] {
                 notes: row.notes, syncStatus: row.syncStatus,
                 modifiedFromSaleId: row.modifiedFromSaleId ?? null,
                 originalSaleSnapshot: row.originalSaleSnapshot ?? null,
-                createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt),
+                createdAt: row.createdAt ? new Date(row.createdAt) : undefined, updatedAt: new Date(row.updatedAt),
                 items: [],
             })
         }
         if (row.item_id) {
             map.get(row.id)!.items.push({
                 id: row.item_id, saleId: row.id,
-                productId: row.productId, quantity: row.quantity,
-                unitPrice: row.unitPrice, subtotal: row.item_subtotal,
-                product: { id: row.productId, name: row.product_name },
+                productId: row.productId!, quantity: row.quantity!,
+                unitPrice: row.unitPrice!, subtotal: row.item_subtotal!,
+                product: { id: row.productId!, name: row.product_name },
             })
         }
     }
@@ -336,7 +377,7 @@ export async function deleteCreditSale(saleId: string): Promise<void> {
         `, [saleId])
 
         const now = new Date().toISOString()
-        const ops: Array<{ sql: string; params: any[] }> = []
+        const ops: Array<{ sql: string; params: SqlParam[] }> = []
 
         for (const item of items) {
             if (!item.isInfinite) {
@@ -370,7 +411,7 @@ export async function deleteCreditSale(saleId: string): Promise<void> {
     const { data: saleItems } = await supabase
         .from('SaleItem').select('productId, quantity').eq('saleId', saleId)
 
-    for (const item of (saleItems ?? []) as any[]) {
+    for (const item of (saleItems ?? []) as Pick<DbSaleItemRow, 'productId' | 'quantity'>[]) {
         await updateProductStock(item.productId, item.quantity)
     }
 
@@ -408,7 +449,7 @@ export async function settleSaleDirect(
             : null
 
         const sets = ["isCredit = 0", "paidAt = ?", "syncStatus = 'PENDING'", "updatedAt = ?"]
-        const params: any[] = [now, now]
+        const params: SqlParam[] = [now, now]
         if (opts?.paymentMethod)              { sets.push('paymentMethod = ?');   params.push(opts.paymentMethod) }
         if (opts?.cashRegisterId !== undefined){ sets.push('cashRegisterId = ?'); params.push(opts.cashRegisterId) }
         if (opts?.amountReceived !== undefined){ sets.push('amountReceived = ?'); params.push(opts.amountReceived) }
@@ -436,7 +477,7 @@ export async function settleSaleDirect(
         ? await supabase.from('Sale').select('total, cashRegisterId').eq('id', saleId).single()
         : { data: null }
 
-    const update: Record<string, any> = { isCredit: false, paidAt: now, updatedAt: now, syncStatus: 'SYNCED' }
+    const update: SaleSettleFields = { isCredit: false, paidAt: now, updatedAt: now, syncStatus: 'SYNCED' }
     if (opts?.paymentMethod)               update.paymentMethod   = opts.paymentMethod
     if (opts?.cashRegisterId !== undefined) update.cashRegisterId = opts.cashRegisterId
     if (opts?.amountReceived !== undefined) update.amountReceived = opts.amountReceived

@@ -1,6 +1,12 @@
 import { BrowserWindow } from 'electron';
 import { supabase } from '../src/lib/supabase'; // We'll need to make sure this is compatible with Node.js
 import db, { query, execute, get, transaction } from './db';
+import type {
+    DbEmployeeRow, DbCategoryRow, DbCompanyRow, DbClientRow, DbProductRow,
+    DbProductSubcategoryRow, DbSinpeMessageRow, DbCashRegisterRow, DbSaleRow,
+    DbSaleItemRow, DbExpenseRow, DbInventoryMovementRow, DbPaymentRow,
+    DbEmailQueueRow, DbSubcategoryRow, DbBusinessConfigRow,
+} from '../src/types/db';
 
 let windowRef: BrowserWindow | null = null;
 let isPushing = false;
@@ -176,7 +182,7 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
  */
 async function processEmailQueue() {
     try {
-        const pendingEmails = query(`SELECT * FROM EmailQueue WHERE status = 'PENDING' AND attempts < 5`) as any[];
+        const pendingEmails = query(`SELECT * FROM EmailQueue WHERE status = 'PENDING' AND attempts < 5`) as DbEmailQueueRow[];
         if (pendingEmails.length === 0) return;
 
         console.log(`[SyncEngine] Retrying ${pendingEmails.length} queued emails...`);
@@ -278,7 +284,29 @@ async function pullSync() {
             });
         }
 
-        // 3. Sync Clients
+        // 3. Sync Companies
+        const { data: companies, error: companyError } = await supabase.from('Company').select('*');
+        if (companyError) throw companyError;
+        if (companies) {
+            transaction(() => {
+                for (const co of companies) {
+                    execute(`
+            INSERT INTO Company (id, name, billingEmail, phone, notes, isActive, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+            ON CONFLICT(id) DO UPDATE SET
+              name =         CASE WHEN Company.syncStatus = 'PENDING' THEN Company.name         ELSE excluded.name         END,
+              billingEmail = CASE WHEN Company.syncStatus = 'PENDING' THEN Company.billingEmail ELSE excluded.billingEmail END,
+              phone =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.phone        ELSE excluded.phone        END,
+              notes =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.notes        ELSE excluded.notes        END,
+              isActive =     CASE WHEN Company.syncStatus = 'PENDING' THEN Company.isActive     ELSE excluded.isActive     END,
+              syncStatus =   CASE WHEN Company.syncStatus = 'PENDING' THEN 'PENDING'            ELSE 'SYNCED'              END,
+              updatedAt =    CASE WHEN Company.syncStatus = 'PENDING' THEN Company.updatedAt    ELSE excluded.updatedAt    END
+          `, [co.id, co.name, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.updatedAt]);
+                }
+            });
+        }
+
+        // 3b. Sync Clients
         const { data: clients, error: clientError } = await supabase.from('Client').select('*');
         if (clientError) throw clientError;
 
@@ -496,7 +524,7 @@ async function pullSync() {
 
         // 11. Sync Expenses (depends on CashRegister, ExpenseCategory)
         const { data: expenses, error: expError } = await supabase.from('Expense').select('*');
-        if (expError && (expError as any).code !== 'PGRST205') throw expError;
+        if (expError && expError.code !== 'PGRST205') throw expError;
         if (expenses) {
             transaction(() => {
                 for (const exp of expenses) {
@@ -569,7 +597,7 @@ async function pullSync() {
         console.log('[SyncEngine] Pull items success.');
 
         // Notificar UI para que React Query invalide todas las queries afectadas
-        for (const table of ['Product', 'Category', 'Subcategory', 'Client', 'Employee', 'BusinessConfig', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment']) {
+        for (const table of ['Product', 'Category', 'Subcategory', 'Client', 'Company', 'Employee', 'BusinessConfig', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment']) {
             notifyUI(table);
         }
     } catch (err) {
@@ -613,22 +641,23 @@ export async function pushSync(): Promise<string[]> {
 }
 
 async function _pushSync(): Promise<string[]> {
-    const pendingSales = query(`SELECT * FROM Sale WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingExpenses = query(`SELECT * FROM Expense WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingMovements = query(`SELECT * FROM InventoryMovement WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingRegisters = query(`SELECT * FROM CashRegister WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingPayments = query(`SELECT * FROM Payment WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingEmployees = query(`SELECT * FROM Employee WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingClients = query(`SELECT * FROM Client WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingProducts = query(`SELECT * FROM Product WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingCategories = query(`SELECT * FROM Category WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingSubcategories = query(`SELECT * FROM Subcategory WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingConfig = query(`SELECT * FROM BusinessConfig WHERE syncStatus = 'PENDING'`) as any[];
-    const pendingSinpe = query(`SELECT * FROM SinpeMessage WHERE syncStatus = 'PENDING'`) as any[];
+    const pendingSales = query(`SELECT * FROM Sale WHERE syncStatus = 'PENDING'`) as DbSaleRow[];
+    const pendingExpenses = query(`SELECT * FROM Expense WHERE syncStatus = 'PENDING'`) as DbExpenseRow[];
+    const pendingMovements = query(`SELECT * FROM InventoryMovement WHERE syncStatus = 'PENDING'`) as DbInventoryMovementRow[];
+    const pendingRegisters = query(`SELECT * FROM CashRegister WHERE syncStatus = 'PENDING'`) as DbCashRegisterRow[];
+    const pendingPayments = query(`SELECT * FROM Payment WHERE syncStatus = 'PENDING'`) as DbPaymentRow[];
+    const pendingEmployees = query(`SELECT * FROM Employee WHERE syncStatus = 'PENDING'`) as DbEmployeeRow[];
+    const pendingCompanies = query(`SELECT * FROM Company WHERE syncStatus = 'PENDING'`) as DbCompanyRow[];
+    const pendingClients = query(`SELECT * FROM Client WHERE syncStatus = 'PENDING'`) as DbClientRow[];
+    const pendingProducts = query(`SELECT * FROM Product WHERE syncStatus = 'PENDING'`) as DbProductRow[];
+    const pendingCategories = query(`SELECT * FROM Category WHERE syncStatus = 'PENDING'`) as DbCategoryRow[];
+    const pendingSubcategories = query(`SELECT * FROM Subcategory WHERE syncStatus = 'PENDING'`) as DbSubcategoryRow[];
+    const pendingConfig = query(`SELECT * FROM BusinessConfig WHERE syncStatus = 'PENDING'`) as DbBusinessConfigRow[];
+    const pendingSinpe = query(`SELECT * FROM SinpeMessage WHERE syncStatus = 'PENDING'`) as DbSinpeMessageRow[];
 
     const totalPending = pendingSales.length + pendingExpenses.length + pendingMovements.length +
         pendingRegisters.length + pendingPayments.length + pendingEmployees.length +
-        pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length +
+        pendingCompanies.length + pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length +
         pendingConfig.length + pendingSinpe.length;
 
     if (totalPending === 0) return [];
@@ -690,7 +719,30 @@ async function _pushSync(): Promise<string[]> {
         }
     }
 
-    // 3. Clients — referenced by Sale and Payment
+    // 3. Companies — referenced by Client and Sale
+    for (const co of pendingCompanies) {
+        try {
+            const { error } = await supabase.from('Company').upsert({
+                id: co.id,
+                name: co.name,
+                billingEmail: co.billingEmail ?? null,
+                phone: co.phone ?? null,
+                notes: co.notes ?? null,
+                isActive: !!co.isActive,
+                syncStatus: 'SYNCED',
+                updatedAt: new Date().toISOString(),
+            });
+            if (error) throw error;
+            execute(`UPDATE Company SET syncStatus = 'SYNCED' WHERE id = ?`, [co.id]);
+        } catch (err: any) {
+            const msg = `Company ${co.id}: ${err?.message ?? err}`;
+            logError(msg);
+            errors.push(msg);
+            persistSyncError('Company', co.id, msg);
+        }
+    }
+
+    // 3b. Clients — referenced by Sale and Payment
     for (const client of pendingClients) {
         try {
             const { error } = await supabase.from('Client').upsert({
@@ -854,7 +906,7 @@ async function _pushSync(): Promise<string[]> {
         }
         // Sync ProductSubcategory for this product
         try {
-            const subcatRows = query('SELECT subcategoryId FROM ProductSubcategory WHERE productId = ?', [prod.id]) as any[];
+            const subcatRows = query('SELECT subcategoryId FROM ProductSubcategory WHERE productId = ?', [prod.id]) as { subcategoryId: string }[];
             await supabase.from('ProductSubcategory').delete().eq('productId', prod.id);
             if (subcatRows.length > 0) {
                 await supabase.from('ProductSubcategory').insert(
@@ -891,7 +943,7 @@ async function _pushSync(): Promise<string[]> {
                 consumerName: sale.consumerName ?? null,
             });
             if (saleError) throw saleError;
-            for (const item of items as any[]) {
+            for (const item of items as DbSaleItemRow[]) {
                 const { error: itemError } = await supabase.from('SaleItem').upsert({
                     id: item.id,
                     saleId: item.saleId,
@@ -1019,7 +1071,7 @@ function setupRealtimeSubscriptions() {
         .channel('db-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Employee' }, (payload) => {
             console.log('[SyncRealtime] Employee change detected:', payload.eventType);
-            const emp = payload.new as any;
+            const emp = payload.new as DbEmployeeRow;
             if (!emp || !emp.id) return;
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
@@ -1043,7 +1095,7 @@ function setupRealtimeSubscriptions() {
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Category' }, (payload) => {
             console.log('[SyncRealtime] Category change detected:', payload.eventType);
-            const cat = payload.new as any;
+            const cat = payload.new as DbCategoryRow;
             if (!cat || !cat.id) return;
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
@@ -1061,9 +1113,28 @@ function setupRealtimeSubscriptions() {
                 notifyUI('Category');
             }
         })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'Company' }, (payload) => {
+            const co = payload.new as DbCompanyRow;
+            if (!co?.id) return;
+            if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+                execute(`
+          INSERT INTO Company (id, name, billingEmail, phone, notes, isActive, syncStatus, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name =         excluded.name,
+            billingEmail = excluded.billingEmail,
+            phone =        excluded.phone,
+            notes =        excluded.notes,
+            isActive =     excluded.isActive,
+            syncStatus =   'SYNCED',
+            updatedAt =    excluded.updatedAt
+        `, [co.id, co.name, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.updatedAt]);
+                notifyUI('Company');
+            }
+        })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Client' }, (payload) => {
             console.log('[SyncRealtime] Client change detected:', payload.eventType);
-            const client = payload.new as any;
+            const client = payload.new as DbClientRow;
             if (!client || !client.id) return;
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
@@ -1089,7 +1160,7 @@ function setupRealtimeSubscriptions() {
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Product' }, (payload) => {
             console.log('[SyncRealtime] Product change detected:', payload.eventType);
-            const prod = payload.new as any;
+            const prod = payload.new as DbProductRow;
             if (!prod || !prod.id) return;
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
@@ -1118,14 +1189,14 @@ function setupRealtimeSubscriptions() {
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ProductSubcategory' }, (payload) => {
             if (payload.eventType === 'INSERT') {
-                const ps = payload.new as any;
+                const ps = payload.new as DbProductSubcategoryRow;
                 if (!ps?.productId || !ps?.subcategoryId) return;
                 try {
                     execute('INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId) VALUES (?, ?)', [ps.productId, ps.subcategoryId]);
                 } catch {}
                 notifyUI('Product');
             } else if (payload.eventType === 'DELETE') {
-                const ps = payload.old as any;
+                const ps = payload.old as DbProductSubcategoryRow;
                 if (!ps?.productId || !ps?.subcategoryId) return;
                 try {
                     execute('DELETE FROM ProductSubcategory WHERE productId = ? AND subcategoryId = ?', [ps.productId, ps.subcategoryId]);
@@ -1134,7 +1205,7 @@ function setupRealtimeSubscriptions() {
             }
         })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'SinpeMessage' }, (payload) => {
-            const msg = payload.new as any;
+            const msg = payload.new as DbSinpeMessageRow;
             if (!msg?.id) return;
             try {
                 execute(`
@@ -1151,7 +1222,7 @@ function setupRealtimeSubscriptions() {
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'CashRegister' }, (payload) => {
-            const reg = payload.new as any;
+            const reg = payload.new as DbCashRegisterRow;
             if (!reg?.id) return;
             try {
                 execute(`
@@ -1177,7 +1248,7 @@ function setupRealtimeSubscriptions() {
             notifyUI('CashRegister');
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Sale' }, (payload) => {
-            const sale = payload.new as any;
+            const sale = payload.new as DbSaleRow;
             if (!sale?.id) return;
             try {
                 execute(`
@@ -1206,7 +1277,7 @@ function setupRealtimeSubscriptions() {
             notifyUI('Sale');
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'SaleItem' }, (payload) => {
-            const item = payload.new as any;
+            const item = payload.new as DbSaleItemRow;
             if (!item?.id) return;
             try {
                 execute(`
@@ -1224,7 +1295,7 @@ function setupRealtimeSubscriptions() {
             notifyUI('Sale');
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Expense' }, (payload) => {
-            const exp = payload.new as any;
+            const exp = payload.new as DbExpenseRow;
             if (!exp?.id) return;
             try {
                 execute(`
@@ -1245,7 +1316,7 @@ function setupRealtimeSubscriptions() {
             notifyUI('Expense');
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'InventoryMovement' }, (payload) => {
-            const mov = payload.new as any;
+            const mov = payload.new as DbInventoryMovementRow;
             if (!mov?.id) return;
             try {
                 execute(`
@@ -1265,7 +1336,7 @@ function setupRealtimeSubscriptions() {
             notifyUI('InventoryMovement');
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Payment' }, (payload) => {
-            const pay = payload.new as any;
+            const pay = payload.new as DbPaymentRow;
             if (!pay?.id) return;
             try {
                 execute(`
