@@ -42,8 +42,11 @@ export async function getReportData(from: string, to: string) {
         `, [from, to, from, to])
 
         const rawItems = await window.electronAPI.dbQuery(`
-            SELECT si.saleId, si.productId, si.quantity, si.unitPrice, si.subtotal,
-                   COALESCE(p.name, 'Producto') as productName
+            SELECT si.saleId, si.productId, si.quantity, si.unitPrice, si.subtotal, si.notes as itemNotes,
+                   CASE WHEN si.productId = 'tombola-entry'
+                        THEN COALESCE(si.notes, 'Tómbola')
+                        ELSE COALESCE(p.name, 'Producto')
+                   END as productName
             FROM SaleItem si
             INNER JOIN Sale s ON si.saleId = s.id
             LEFT JOIN Product p ON si.productId = p.id
@@ -60,6 +63,7 @@ export async function getReportData(from: string, to: string) {
                 unitPrice: item.unitPrice,
                 subtotal: item.subtotal,
                 product: { name: item.productName },
+                notes: item.productId === 'tombola-entry' ? null : item.itemNotes,
             })
         }
 

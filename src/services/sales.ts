@@ -248,16 +248,16 @@ export async function voidSale(saleId: string): Promise<void> {
 
     if (window.electronAPI) {
         const sale = await window.electronAPI.dbGet(
-            'SELECT status, total, paymentMethod, paymentMethod2, amount2, cashRegisterId FROM Sale WHERE id = ?',
+            'SELECT status, date, total, paymentMethod, paymentMethod2, amount2, cashRegisterId FROM Sale WHERE id = ?',
             [saleId]
         )
         if (!sale) throw new Error('Venta no encontrada')
         if (sale.status === 'ANULADA') return
 
         const items = await window.electronAPI.dbQuery(
-            'SELECT productId, quantity FROM SaleItem WHERE saleId = ?',
+            'SELECT productId, quantity, notes FROM SaleItem WHERE saleId = ?',
             [saleId]
-        ) as Pick<DbSaleItemRow, 'productId' | 'quantity'>[]
+        ) as Pick<DbSaleItemRow, 'productId' | 'quantity' | 'notes'>[]
 
         const ops: Array<{ sql: string; params: SqlParam[] }> = []
         ops.push({
@@ -269,6 +269,15 @@ export async function voidSale(saleId: string): Promise<void> {
                 sql: `UPDATE Product SET stockQty = stockQty + ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
                 params: [item.quantity, now, item.productId]
             })
+            if (item.productId === 'tombola-entry' && item.notes) {
+                const m = item.notes.match(/^Número (\d+)/)
+                if (m) {
+                    ops.push({
+                        sql: `DELETE FROM TombolaEntry WHERE number = ? AND saleRegisteredAt = ?`,
+                        params: [parseInt(m[1]), sale.date],
+                    })
+                }
+            }
         }
         if (sale.cashRegisterId) {
             const reg = await window.electronAPI.dbGet(
@@ -598,16 +607,23 @@ export async function getSalesForCompany(companyId: string): Promise<CompanySale
         const result: CompanySaleView[] = []
         for (const sale of sales) {
             const items = await window.electronAPI.dbQuery(
-                `SELECT si.id, si.quantity, si.unitPrice, si.subtotal, si.notes,
-                        COALESCE(p.name, 'Producto eliminado') as productName
+                `SELECT si.id, si.productId, si.quantity, si.unitPrice, si.subtotal, si.notes,
+                        CASE WHEN si.productId = 'tombola-entry'
+                             THEN COALESCE(si.notes, 'Tómbola')
+                             ELSE COALESCE(p.name, 'Producto eliminado')
+                        END as productName
                  FROM SaleItem si LEFT JOIN Product p ON p.id = si.productId
                  WHERE si.saleId = ?`,
                 [sale.id]
-            ) as (Pick<DbSaleItemRow, 'quantity' | 'unitPrice' | 'subtotal' | 'notes'> & { productName: string })[]
+            ) as (Pick<DbSaleItemRow, 'productId' | 'quantity' | 'unitPrice' | 'subtotal' | 'notes'> & { productName: string })[]
             result.push({
                 ...sale,
                 isCredit: !!sale.isCredit,
-                items: items.map(i => ({ ...i, product: { name: i.productName } })),
+                items: items.map(i => ({
+                    ...i,
+                    product: { name: i.productName },
+                    notes: i.productId === 'tombola-entry' ? null : i.notes,
+                })),
             })
         }
         return result
@@ -652,7 +668,10 @@ export async function getSaleDetails(saleId: string): Promise<(DbSaleRow & { cli
         if (!sale) return null
         const items = await window.electronAPI.dbQuery(
             `SELECT si.productId, si.quantity, si.unitPrice, si.subtotal, si.notes,
-                    COALESCE(p.name, 'Producto eliminado') as productName
+                    CASE WHEN si.productId = 'tombola-entry'
+                         THEN COALESCE(si.notes, 'Tómbola')
+                         ELSE COALESCE(p.name, 'Producto eliminado')
+                    END as productName
              FROM SaleItem si LEFT JOIN Product p ON si.productId = p.id
              WHERE si.saleId = ?`,
             [saleId]
@@ -660,7 +679,11 @@ export async function getSaleDetails(saleId: string): Promise<(DbSaleRow & { cli
         return {
             ...sale,
             isCredit: !!sale.isCredit,
-            items: items.map(i => ({ ...i, product: { name: i.productName } })),
+            items: items.map(i => ({
+                ...i,
+                product: { name: i.productName },
+                notes: i.productId === 'tombola-entry' ? null : i.notes,
+            })),
         }
     }
     const { data, error } = await supabase
@@ -674,21 +697,52 @@ export async function getSaleDetails(saleId: string): Promise<(DbSaleRow & { cli
 
 export async function getVoidedSales(): Promise<any[]> {
     if (window.electronAPI) {
-        return await window.electronAPI.dbQuery(`
+        const rows = await window.electronAPI.dbQuery(`
             SELECT s.id, s.saleNumber, s.date, s.total, s.paymentMethod, s.consumerName,
-                   c.name as clientName
+                   s.updatedAt, s.notes,
+                   c.name as clientName,
+                   si.id as item_id, si.quantity, si.unitPrice, si.subtotal as item_subtotal,
+                   p.name as product_name
             FROM Sale s
             LEFT JOIN Client c ON s.clientId = c.id
+            LEFT JOIN SaleItem si ON si.saleId = s.id
+            LEFT JOIN Product p ON p.id = si.productId
             WHERE s.status = 'ANULADA'
             ORDER BY s.date DESC
-        `)
+        `) as any[]
+        const map = new Map<string, any>()
+        for (const row of rows) {
+            if (!map.has(row.id)) {
+                map.set(row.id, {
+                    id: row.id, saleNumber: row.saleNumber, date: row.date,
+                    total: row.total, paymentMethod: row.paymentMethod,
+                    consumerName: row.consumerName, clientName: row.clientName,
+                    updatedAt: row.updatedAt, notes: row.notes, items: [],
+                })
+            }
+            if (row.item_id && row.product_name) {
+                map.get(row.id).items.push({
+                    id: row.item_id, name: row.product_name,
+                    quantity: row.quantity, unitPrice: row.unitPrice, subtotal: row.item_subtotal,
+                })
+            }
+        }
+        return Array.from(map.values())
     }
     const { data } = await supabase
         .from('Sale')
-        .select('id, saleNumber, date, total, paymentMethod, consumerName, client:Client(name)')
+        .select('id, saleNumber, date, total, paymentMethod, consumerName, updatedAt, notes, client:Client(name), items:SaleItem(id, quantity, unitPrice, subtotal, product:Product(name))')
         .eq('status', 'ANULADA')
         .order('date', { ascending: false })
-    return data ?? []
+    return (data ?? []).map((s: any) => ({
+        ...s,
+        clientName: Array.isArray(s.client) ? s.client[0]?.name : s.client?.name ?? null,
+        items: (s.items ?? []).map((i: any) => ({
+            id: i.id,
+            name: Array.isArray(i.product) ? i.product[0]?.name : i.product?.name ?? 'Producto',
+            quantity: i.quantity, unitPrice: i.unitPrice, subtotal: i.subtotal,
+        })),
+    }))
 }
 
 interface UpdateSaleInPlaceInput {

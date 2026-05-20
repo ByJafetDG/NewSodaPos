@@ -4,6 +4,7 @@ import {
     getSorteoOptions, getSorteoParticipants, getSorteoStats, getOccupiedParticipants,
     getSorteoWinners, getRaspaditaCards,
 } from '@/services/sorteos'
+import { getTombolaEntries } from '@/services/tombola'
 import type { Sorteo, SorteoOption, SorteoParticipant } from '@/types'
 
 interface CartSorteoResult {
@@ -114,6 +115,15 @@ export function useRaspaditaCards(sorteoId: string | null) {
     return useQuery({
         queryKey: ['raspaditaCards', sorteoId],
         queryFn: () => getRaspaditaCards(sorteoId!),
+        enabled: !!sorteoId,
+        staleTime: 0,
+    })
+}
+
+export function useTombolaEntries(sorteoId: string | null) {
+    return useQuery({
+        queryKey: ['tombola-entries', sorteoId],
+        queryFn: () => getTombolaEntries(sorteoId!),
         enabled: !!sorteoId,
         staleTime: 0,
     })

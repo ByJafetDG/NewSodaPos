@@ -28,6 +28,13 @@ interface DraftOption {
     color: string
 }
 
+interface DraftTomboPrize {
+    _id: string
+    name: string
+    type: 'efectivo' | 'otro'
+    amount: string
+}
+
 const COLORS = [
     '#F59E0B', '#EF4444', '#3B82F6', '#10B981',
     '#8B5CF6', '#EC4899', '#06B6D4', '#F97316',
@@ -189,9 +196,64 @@ function OptionRow({ o, onUpdate, onRemove }: {
     )
 }
 
+function EditTomboPrizeRow({ p, onUpdate, onRemove }: {
+    p: DraftTomboPrize
+    onUpdate: (patch: Partial<DraftTomboPrize>) => void
+    onRemove: () => void
+}) {
+    const nameKb = useKeyboardInput(p.name, v => onUpdate({ name: v }), { mode: 'alpha' })
+    const amountKb = useKeyboardInput(p.amount, v => onUpdate({ amount: v.replace(/[^\d.]/g, '') }), { mode: 'numeric' })
+    return (
+        <div className="flex items-center gap-2 p-2.5 rounded-xl border bg-[#101520] border-[#1E2A40]">
+            <div className="flex p-0.5 bg-[#0B0E19] rounded-lg border border-[#1E2A40] flex-shrink-0">
+                <button
+                    onClick={() => onUpdate({ type: 'efectivo', amount: '' })}
+                    className={cn(
+                        'flex items-center gap-1 px-2 h-6 rounded-md text-[11px] font-medium transition-all cursor-pointer',
+                        p.type === 'efectivo' ? 'bg-amber-500/20 text-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                    )}
+                >
+                    <DollarSign size={10} />₡
+                </button>
+                <button
+                    onClick={() => onUpdate({ type: 'otro', amount: '' })}
+                    className={cn(
+                        'flex items-center gap-1 px-2 h-6 rounded-md text-[11px] font-medium transition-all cursor-pointer',
+                        p.type === 'otro' ? 'bg-amber-500/20 text-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                    )}
+                >
+                    <Gift size={10} />Otro
+                </button>
+            </div>
+            <input
+                {...nameKb}
+                placeholder="Premio"
+                className="flex-1 min-w-0 h-7 px-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+            />
+            {p.type === 'efectivo' && (
+                <div className="relative w-24 flex-shrink-0">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-400 text-[11px] pointer-events-none">₡</span>
+                    <input
+                        {...amountKb}
+                        placeholder="0"
+                        className="w-full h-7 pl-5 pr-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                    />
+                </div>
+            )}
+            <button
+                onClick={onRemove}
+                className="w-6 h-6 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer flex-shrink-0"
+            >
+                <Trash2 size={12} />
+            </button>
+        </div>
+    )
+}
+
 export function EditSorteoModal({ sorteo, onClose }: Props) {
     const qc = useQueryClient()
     const isRaspadita = sorteo?.type === 'RASPADITA'
+    const isTombola = sorteo?.type === 'TOMBOLA'
 
     const [name, setName] = useState('')
     const [options, setOptions] = useState<DraftOption[]>([])
@@ -200,25 +262,47 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
     const [startAt, setStartAt] = useState('')
     const [endAt, setEndAt] = useState('')
     const [minSpins, setMinSpins] = useState('8')
+    const [tombNumbers, setTombNumbers] = useState('')
+    const [tombPrice, setTombPrice] = useState('')
+    const [tombDrawDate, setTombDrawDate] = useState('')
+    const [tombPrizes, setTombPrizes] = useState<DraftTomboPrize[]>([])
     const [submitting, setSubmitting] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
     const nameKb = useKeyboardInput(name, setName, { mode: 'alpha' })
+    const tombNumbersKb = useKeyboardInput(tombNumbers, setTombNumbers, { mode: 'numeric' })
+    const tombPriceKb = useKeyboardInput(tombPrice, setTombPrice, { mode: 'numeric' })
+    const tombNumbersNum = parseFloat(tombNumbers) || 0
+    const tombPriceNum = parseFloat(tombPrice) || 0
 
     useEffect(() => {
         if (!sorteo) return
+        setName(sorteo.name)
+        setHasDates(!!(sorteo.startAt || sorteo.endAt))
+        setStartAt(dateToInput(sorteo.startAt))
+        setEndAt(dateToInput(sorteo.endAt))
+        setMinSpins(String(sorteo.minSpinsBetweenPrizes ?? 8))
+        if (sorteo.type === 'TOMBOLA') {
+            setTombNumbers(sorteo.totalNumbers != null ? String(sorteo.totalNumbers) : '')
+            setTombPrice(sorteo.pricePerNumber != null ? String(sorteo.pricePerNumber) : '')
+            setTombDrawDate(sorteo.drawDate ?? '')
+            setTombPrizes(
+                (sorteo.tombPrizes ?? []).map(p => ({
+                    _id: crypto.randomUUID(),
+                    name: p.name,
+                    type: p.type === 'EFECTIVO' ? 'efectivo' : 'otro',
+                    amount: p.amount != null ? String(p.amount) : '',
+                }))
+            )
+            return
+        }
         setLoading(true)
         setError(null)
         getSorteoOptions(sorteo.id)
             .then(opts => {
                 setOriginalOptions(opts)
                 setOptions(opts.filter(o => !o.isFiller).map(optionToDraft))
-                setName(sorteo.name)
-                setHasDates(!!(sorteo.startAt || sorteo.endAt))
-                setStartAt(dateToInput(sorteo.startAt))
-                setEndAt(dateToInput(sorteo.endAt))
-                setMinSpins(String(sorteo.minSpinsBetweenPrizes ?? 8))
             })
             .finally(() => setLoading(false))
     }, [sorteo?.id]) // eslint-disable-line
@@ -234,7 +318,8 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
         !submitting
     )
     const canSaveRaspadita = name.trim().length > 0 && !submitting
-    const canSave = isRaspadita ? canSaveRaspadita : canSaveRuleta
+    const canSaveTombola = name.trim().length > 0 && tombPriceNum > 0 && !submitting
+    const canSave = isTombola ? canSaveTombola : isRaspadita ? canSaveRaspadita : canSaveRuleta
 
     function updateOption(id: string, patch: Partial<DraftOption>) {
         setOptions(prev => prev.map(o => o._id === id ? { ...o, ...patch } : o))
@@ -261,7 +346,24 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
         setSubmitting(true)
         setError(null)
         try {
-            if (isRaspadita) {
+            if (isTombola) {
+                await updateSorteo(sorteo.id, {
+                    name: name.trim(),
+                    totalNumbers: tombNumbersNum > 0 ? tombNumbersNum : null,
+                    pricePerNumber: tombPriceNum > 0 ? tombPriceNum : null,
+                    drawDate: tombDrawDate || null,
+                    tombPrizes: JSON.stringify(
+                        tombPrizes
+                            .filter(p => p.name.trim())
+                            .map(p => ({
+                                id: crypto.randomUUID(),
+                                name: p.name.trim(),
+                                type: p.type === 'efectivo' ? 'EFECTIVO' : 'OTRO',
+                                amount: p.type === 'efectivo' && p.amount ? parseFloat(p.amount) : null,
+                            }))
+                    ),
+                })
+            } else if (isRaspadita) {
                 await updateSorteo(sorteo.id, {
                     name: name.trim(),
                     startAt: hasDates && startAt ? startAt : null,
@@ -515,11 +617,94 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
         )
     }
 
+    function TombolaContent() {
+        if (!sorteo) return null
+        return (
+            <div className="space-y-4">
+                {sorteo.status === 'ACTIVE' && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[12px] text-amber-400">
+                        <AlertTriangle size={13} />
+                        Este sorteo está activo. Los cambios aplican de inmediato.
+                    </div>
+                )}
+                <div className="space-y-1.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Nombre</p>
+                    <input
+                        {...nameKb}
+                        className="w-full h-10 px-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[14px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/40 transition-colors"
+                    />
+                </div>
+                <div className="space-y-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Configuración</p>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <p className="text-[10px] text-[#3D506A] mb-1">Números totales <span className="text-[#283A56]">(máx. 100)</span></p>
+                            <input
+                                {...tombNumbersKb}
+                                placeholder="100"
+                                className={cn('w-full h-9 px-3 rounded-lg bg-[#101520] border text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30',
+                                    tombNumbersNum > 100 ? 'border-red-500/50' : 'border-[#1E2A40]')}
+                            />
+                            {tombNumbersNum > 100 && (
+                                <p className="text-[10px] text-red-400 mt-0.5">Máximo 100</p>
+                            )}
+                        </div>
+                        <div>
+                            <p className="text-[10px] text-[#3D506A] mb-1">Precio por número</p>
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-400 text-[12px] pointer-events-none">₡</span>
+                                <input
+                                    {...tombPriceKb}
+                                    placeholder="0"
+                                    className="w-full h-9 pl-7 pr-3 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <p className="text-[10px] text-[#3D506A] mb-1">Fecha del sorteo</p>
+                        <input
+                            type="date"
+                            value={tombDrawDate}
+                            onChange={e => setTombDrawDate(e.target.value)}
+                            className="w-full h-9 px-3 rounded-lg bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] outline-none focus:border-amber-500/30"
+                        />
+                    </div>
+                    {tombNumbersNum > 0 && tombPriceNum > 0 && (
+                        <div className="px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[12px] text-[#7A8FAA]">
+                            Recaudación máxima: <span className="text-emerald-400 font-semibold">₡{(tombNumbersNum * tombPriceNum).toLocaleString('es-CR')}</span>
+                        </div>
+                    )}
+                </div>
+                <div className="space-y-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Premios</p>
+                    <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
+                        {tombPrizes.map(p => (
+                            <EditTomboPrizeRow
+                                key={p._id}
+                                p={p}
+                                onUpdate={patch => setTombPrizes(prev => prev.map(x => x._id === p._id ? { ...x, ...patch } : x))}
+                                onRemove={() => setTombPrizes(prev => prev.filter(x => x._id !== p._id))}
+                            />
+                        ))}
+                        <button
+                            onClick={() => setTombPrizes(prev => [...prev, { _id: crypto.randomUUID(), name: '', type: 'efectivo', amount: '' }])}
+                            className="w-full h-9 rounded-xl border border-dashed border-[#1E2A40] text-[12px] text-[#3D506A] hover:text-[#7A8FAA] hover:border-[#283A56] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                            <Plus size={13} />
+                            Agregar premio
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
     return (
         <BaseModal
             isOpen={!!sorteo}
             onClose={onClose}
-            title={`Editar ${isRaspadita ? 'raspadita' : 'ruleta'}`}
+            title={isTombola ? 'Editar tómbola' : `Editar ${isRaspadita ? 'raspadita' : 'ruleta'}`}
             description={sorteo?.name ?? ''}
             width="max-w-2xl"
         >
@@ -530,7 +715,7 @@ export function EditSorteoModal({ sorteo, onClose }: Props) {
             ) : (
                 <div className="space-y-4">
                     <div className="max-h-[58vh] overflow-y-auto pr-1">
-                        {isRaspadita ? <RaspaditaContent /> : <RuletaContent />}
+                        {isTombola ? <TombolaContent /> : isRaspadita ? <RaspaditaContent /> : <RuletaContent />}
                     </div>
 
                     {error && (

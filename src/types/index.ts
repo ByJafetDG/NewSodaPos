@@ -143,7 +143,7 @@ export interface ReturnRecord {
     items: ReturnItem[]; date: Date; syncStatus: string
 }
 
-export type SorteoType = 'RULETA' | 'RASPADITA'
+export type SorteoType = 'RULETA' | 'RASPADITA' | 'TOMBOLA'
 export type SorteoStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'ENDED'
 export interface Sorteo {
     id: string; name: string; type: SorteoType; status: SorteoStatus
@@ -151,7 +151,25 @@ export interface Sorteo {
     minSpinsBetweenPrizes: number
     totalCards: number | null; prizeCount: number | null
     slotsPerCard: number | null; cardSkin: string | null
+    totalNumbers: number | null; pricePerNumber: number | null
+    sellStartDate: string | null; sellEndDate: string | null; drawDate: string | null
+    tombPrizes: TomboPrize[] | null
     syncStatus: SyncStatus; createdAt: Date; updatedAt: Date
+}
+
+export interface TomboPrize {
+    id: string
+    name: string
+    type: 'EFECTIVO' | 'OTRO'
+    amount: number | null
+}
+
+export interface TombolaEntry {
+    id: string; sorteoId: string; number: number
+    participantName: string; participantCedula: string; participantEmail: string | null
+    paymentMethod: 'EFECTIVO' | 'SINPE'; price: number
+    saleRegisteredAt: string | null; isWinner: boolean; prizePosition: number | null
+    syncStatus: SyncStatus; createdAt: string; updatedAt: string
 }
 
 export interface RaspaditaCard {

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
     Settings2, Store, Receipt, Printer, Users, Cloud,
-    Monitor, Save, Plus, Trash2, ChevronRight, Wifi, WifiOff,
+    Monitor, Save, Plus, Trash2, ChevronRight, ChevronDown, Wifi, WifiOff,
     RefreshCw, HardDrive, Zap, LogOut, Minimize2, Maximize2,
     CheckCircle2, Search, Info, Edit2, Download, AlertTriangle, X,
     Mail, Upload, RotateCcw, Package, MessageSquare, Server, Copy,
@@ -20,7 +20,7 @@ import { useKeyboardStore } from '@/store/keyboardStore'
 import { useEmployees, useDeactivateEmployee } from '@/hooks/useEmployees'
 import { useBusinessConfig, useUpdateConfig } from '@/hooks/useConfig'
 import { useUIStore } from '@/store/uiStore'
-import { cn } from '@/lib/utils'
+import { cn, crDateTime, crDateStr } from '@/lib/utils'
 import type { Employee } from '@/types'
 
 type Section = 'business' | 'ticket' | 'email' | 'printer' | 'employees' | 'sync' | 'system' | 'updates' | 'trash' | 'sinpe'
@@ -1332,6 +1332,7 @@ function TrashSection() {
     const [confirmHard, setConfirmHard] = useState<{ type: 'client' | 'product'; id: string; name: string } | null>(null)
     const [confirmRestore, setConfirmRestore] = useState<{ type: 'client' | 'product'; id: string; name: string } | null>(null)
     const [isActing, setIsActing] = useState(false)
+    const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null)
     const qc = useQueryClient()
 
     // SINPE trash state
@@ -1379,10 +1380,7 @@ function TrashSection() {
         toast.success('Papelera SINPE vaciada')
     }
 
-    function fmtSinpeDate(iso: string) {
-        try { return new Date(iso).toLocaleString('es-CR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Costa_Rica' }) }
-        catch { return iso }
-    }
+    function fmtSinpeDate(iso: string) { return crDateTime(iso) }
 
     async function handleRestoreConfirmed() {
         if (!confirmRestore) return
@@ -1428,9 +1426,12 @@ function TrashSection() {
         }
     }
 
-    function fmtDate(d: any) {
-        try { return new Date(d).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) }
-        catch { return String(d) }
+    function fmtDate(d: any) { return crDateStr(d) }
+
+    function parseCashier(notes: string | null): string | null {
+        if (!notes) return null
+        const m = notes.match(/Cajero:\s*(.+?)(?:\n|$)/)
+        return m ? m[1].trim() : null
     }
 
     const tabs = [
@@ -1473,6 +1474,7 @@ function TrashSection() {
                             <div>
                                 <p className="text-[13px] text-[#E4ECF7] font-medium">{c.name}</p>
                                 <p className="text-[11px] text-[#3D506A]">{c.phone || c.email || 'Sin contacto'}</p>
+                                {c.updatedAt && <p className="text-[10px] text-[#3D506A]">Eliminado {crDateTime(c.updatedAt)}</p>}
                             </div>
                             <div className="flex items-center gap-2">
                                 <button onClick={() => setConfirmRestore({ type: 'client', id: c.id, name: c.name })} disabled={isActing} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50">
@@ -1502,6 +1504,7 @@ function TrashSection() {
                                 <div>
                                     <p className="text-[13px] text-[#E4ECF7] font-medium">{p.name}</p>
                                     <p className="text-[11px] text-[#3D506A]">{p.cat_name || p.category?.name || 'Sin categoría'}</p>
+                                    {p.updatedAt && <p className="text-[10px] text-[#3D506A]">Eliminado {crDateTime(p.updatedAt)}</p>}
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1523,23 +1526,52 @@ function TrashSection() {
                         <p className="text-[12px] text-[#3D506A] text-center py-8">Cargando...</p>
                     ) : (voidedSales as any[]).length === 0 ? (
                         <p className="text-[12px] text-[#3D506A] text-center py-8">No hay ventas anuladas</p>
-                    ) : (voidedSales as any[]).map((s: any) => (
-                        <div key={s.id} className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#0B0E19] border border-[#192030]">
-                            <div className="flex items-center gap-3">
-                                <span className="px-2 py-0.5 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] font-mono shrink-0">#{s.saleNumber}</span>
-                                <div>
-                                    <p className="text-[12px] text-[#E4ECF7]">{fmtDate(s.date)}</p>
-                                    {(s.clientName || s.consumerName) && (
-                                        <p className="text-[11px] text-[#3D506A]">{s.clientName || s.consumerName}</p>
-                                    )}
-                                </div>
+                    ) : (voidedSales as any[]).map((s: any) => {
+                        const isExpanded = expandedSaleId === s.id
+                        const cashier = parseCashier(s.notes)
+                        return (
+                            <div key={s.id} className="rounded-xl bg-[#0B0E19] border border-[#192030] overflow-hidden">
+                                <button
+                                    onClick={() => setExpandedSaleId(isExpanded ? null : s.id)}
+                                    className="w-full flex items-center justify-between px-4 py-3 text-left active:bg-[#141C2E] transition-colors cursor-pointer"
+                                >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <span className="px-2 py-0.5 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] font-mono shrink-0">#{s.saleNumber}</span>
+                                        <div className="min-w-0">
+                                            <p className="text-[12px] text-[#E4ECF7]">{fmtDate(s.date)}</p>
+                                            {s.updatedAt && (
+                                                <p className="text-[10px] text-[#3D506A]">
+                                                    Anulada {crDateTime(s.updatedAt)}{cashier && ` · ${cashier}`}
+                                                </p>
+                                            )}
+                                            {(s.clientName || s.consumerName) && (
+                                                <p className="text-[11px] text-[#3D506A] truncate">{s.clientName || s.consumerName}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                                        <div className="text-right">
+                                            <p className="text-[13px] font-semibold text-[#E4ECF7]">₡{(s.total ?? 0).toLocaleString('es-CR')}</p>
+                                            <p className="text-[10px] text-[#3D506A]">{s.paymentMethod}</p>
+                                        </div>
+                                        <ChevronDown size={14} className={cn('text-[#3D506A] transition-transform duration-150 shrink-0', isExpanded && 'rotate-180')} />
+                                    </div>
+                                </button>
+                                {isExpanded && (
+                                    <div className="border-t border-[#192030] px-4 py-2.5 space-y-1.5">
+                                        {(s.items ?? []).length === 0 ? (
+                                            <p className="text-[11px] text-[#3D506A]">Sin productos registrados</p>
+                                        ) : (s.items as any[]).map((item: any) => (
+                                            <div key={item.id} className="flex items-center justify-between">
+                                                <span className="text-[11px] text-[#7A8FAA]">{item.name} <span className="text-[#3D506A]">× {item.quantity}</span></span>
+                                                <span className="text-[11px] text-[#3D506A] font-mono">₡{(item.subtotal ?? 0).toLocaleString('es-CR')}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                            <div className="text-right">
-                                <p className="text-[13px] font-semibold text-[#E4ECF7]">₡{(s.total ?? 0).toLocaleString('es-CR')}</p>
-                                <p className="text-[10px] text-[#3D506A]">{s.paymentMethod}</p>
-                            </div>
-                        </div>
-                    ))}
+                        )
+                    })}
                 </div>
             )}
 

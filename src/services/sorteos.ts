@@ -39,16 +39,19 @@ export async function getActiveSorteos(): Promise<Sorteo[]> {
 export async function createSorteo(input: {
     name: string; type?: string; minSpinsBetweenPrizes?: number
     totalCards?: number; prizeCount?: number; slotsPerCard?: number; cardSkin?: string
+    totalNumbers?: number; pricePerNumber?: number; drawDate?: string | null; tombPrizes?: string | null
 }): Promise<Sorteo> {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
-            `INSERT INTO Sorteo (id, name, type, status, minSpinsBetweenPrizes, totalCards, prizeCount, slotsPerCard, cardSkin, syncStatus, updatedAt)
-             VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, 'PENDING', ?)`,
+            `INSERT INTO Sorteo (id, name, type, status, minSpinsBetweenPrizes, totalCards, prizeCount, slotsPerCard, cardSkin, totalNumbers, pricePerNumber, drawDate, tombPrizes, syncStatus, updatedAt)
+             VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
             [id, input.name, input.type ?? 'RULETA', input.minSpinsBetweenPrizes ?? 8,
              input.totalCards ?? null, input.prizeCount ?? null,
-             input.slotsPerCard ?? null, input.cardSkin ?? null, now]
+             input.slotsPerCard ?? null, input.cardSkin ?? null,
+             input.totalNumbers ?? null, input.pricePerNumber ?? null,
+             input.drawDate ?? null, input.tombPrizes ?? null, now]
         )
         const rows = await window.electronAPI.dbQuery('SELECT * FROM Sorteo WHERE id = ?', [id])
         return mapSorteo(rows[0]) as Sorteo
@@ -60,6 +63,8 @@ export async function createSorteo(input: {
             minSpinsBetweenPrizes: input.minSpinsBetweenPrizes ?? 8,
             totalCards: input.totalCards ?? null, prizeCount: input.prizeCount ?? null,
             slotsPerCard: input.slotsPerCard ?? null, cardSkin: input.cardSkin ?? null,
+            totalNumbers: input.totalNumbers ?? null, pricePerNumber: input.pricePerNumber ?? null,
+            drawDate: input.drawDate ?? null, tombPrizes: input.tombPrizes ?? null,
             syncStatus: 'SYNCED',
         })
         .select().single()
@@ -69,7 +74,11 @@ export async function createSorteo(input: {
 
 export async function updateSorteo(
     id: string,
-    input: Partial<{ name: string; status: string; startAt: string | null; endAt: string | null; minSpinsBetweenPrizes: number }>
+    input: Partial<{
+        name: string; status: string; startAt: string | null; endAt: string | null
+        minSpinsBetweenPrizes: number; totalNumbers: number; pricePerNumber: number
+        drawDate: string | null; tombPrizes: string | null
+    }>
 ): Promise<void> {
     const now = new Date().toISOString()
     if (window.electronAPI) {
@@ -392,6 +401,12 @@ function mapSorteo(r: Record<string, unknown>): Partial<Sorteo> {
         prizeCount: r.prizeCount != null ? (r.prizeCount as number) : null,
         slotsPerCard: r.slotsPerCard != null ? (r.slotsPerCard as number) : null,
         cardSkin: r.cardSkin != null ? (r.cardSkin as string) : null,
+        totalNumbers: r.totalNumbers != null ? (r.totalNumbers as number) : null,
+        pricePerNumber: r.pricePerNumber != null ? (r.pricePerNumber as number) : null,
+        sellStartDate: (r.sellStartDate as string) ?? null,
+        sellEndDate: (r.sellEndDate as string) ?? null,
+        drawDate: (r.drawDate as string) ?? null,
+        tombPrizes: r.tombPrizes ? JSON.parse(r.tombPrizes as string) : null,
         startAt: r.startAt ? new Date(r.startAt as string) : null,
         endAt: r.endAt ? new Date(r.endAt as string) : null,
         createdAt: new Date(r.createdAt as string),

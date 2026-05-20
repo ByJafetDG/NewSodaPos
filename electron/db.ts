@@ -541,6 +541,33 @@ export function initDb() {
   try { db.exec(`ALTER TABLE Sorteo ADD COLUMN prizeCount INTEGER`); } catch {}
   try { db.exec(`ALTER TABLE Sorteo ADD COLUMN slotsPerCard INTEGER DEFAULT 3`); } catch {}
   try { db.exec(`ALTER TABLE Sorteo ADD COLUMN cardSkin TEXT DEFAULT 'gold'`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN totalNumbers INTEGER`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN pricePerNumber REAL`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN sellStartDate TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN sellEndDate TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN drawDate TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE Sorteo ADD COLUMN tombPrizes TEXT`); } catch {}
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS TombolaEntry (
+      id TEXT PRIMARY KEY,
+      sorteoId TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      participantName TEXT NOT NULL,
+      participantCedula TEXT NOT NULL,
+      participantEmail TEXT,
+      paymentMethod TEXT NOT NULL,
+      price REAL NOT NULL,
+      saleRegisteredAt TEXT,
+      isWinner INTEGER DEFAULT 0,
+      prizePosition INTEGER,
+      syncStatus TEXT DEFAULT 'PENDING',
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (sorteoId) REFERENCES Sorteo(id) ON DELETE CASCADE,
+      UNIQUE(sorteoId, number)
+    )
+  `);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS RaspaditaCard (

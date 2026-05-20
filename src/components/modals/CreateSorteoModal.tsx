@@ -39,6 +39,13 @@ interface DraftPrizeTier {
     prizeValue: string
 }
 
+interface DraftTomboPrize {
+    _id: string
+    name: string
+    type: 'efectivo' | 'otro'
+    amount: string
+}
+
 type Participant = { type: 'PRODUCT' | 'CATEGORY'; refId: string }
 
 const COLORS = [
@@ -51,6 +58,7 @@ const WHEEL_SIZES = [10, 20, 30, 50, 100]
 const FILLER_COLOR = '#6B7280'
 const STEPS_RULETA = ['Nombre', 'Premios', 'Participantes', 'Vigencia', 'Resumen']
 const STEPS_RASPADITA = ['Nombre', 'Raspas', 'Participantes', 'Vigencia', 'Resumen']
+const STEPS_TOMBOLA = ['Nombre', 'Config', 'Premios', 'Resumen']
 
 function makeOption(sortOrder: number): DraftOption {
     return {
@@ -93,7 +101,6 @@ function OptionRow({ o, onUpdate, onRemove }: {
 }) {
     return (
         <div className="p-3 rounded-xl border bg-[#101520] border-[#1E2A40] space-y-2">
-            {/* Color + remove */}
             <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1 flex-shrink-0">
                     {COLORS.map(c => (
@@ -113,7 +120,6 @@ function OptionRow({ o, onUpdate, onRemove }: {
                 </button>
             </div>
 
-            {/* Prize name */}
             <KbInput
                 value={o.label}
                 onChange={v => onUpdate({ label: v })}
@@ -121,7 +127,6 @@ function OptionRow({ o, onUpdate, onRemove }: {
                 className="w-full h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
             />
 
-            {/* Type + value + quantity */}
             <div className="flex gap-2">
                 <div className="flex p-0.5 bg-[#0B0E19] rounded-lg border border-[#1E2A40] flex-shrink-0">
                     <button
@@ -193,6 +198,77 @@ function OptionRow({ o, onUpdate, onRemove }: {
     )
 }
 
+function TomboPrizeRow({ p, onUpdate, onRemove }: {
+    p: DraftTomboPrize
+    onUpdate: (patch: Partial<DraftTomboPrize>) => void
+    onRemove: () => void
+}) {
+    return (
+        <div className="p-3 rounded-xl border bg-[#101520] border-[#1E2A40] space-y-2">
+            <div className="flex items-center gap-2">
+                <KbInput
+                    value={p.name}
+                    onChange={v => onUpdate({ name: v })}
+                    placeholder="Nombre del premio (ej: 1er lugar)"
+                    className="flex-1 h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                />
+                <button
+                    onClick={onRemove}
+                    className="w-6 h-6 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer flex-shrink-0"
+                >
+                    <Trash2 size={12} />
+                </button>
+            </div>
+            <div className="flex gap-2">
+                <div className="flex p-0.5 bg-[#0B0E19] rounded-lg border border-[#1E2A40] flex-shrink-0">
+                    <button
+                        onClick={() => onUpdate({ type: 'efectivo', amount: '' })}
+                        className={cn(
+                            'flex items-center gap-1 px-2 h-7 rounded-md text-[11px] font-medium transition-all cursor-pointer',
+                            p.type === 'efectivo' ? 'bg-amber-500/20 text-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        <DollarSign size={10} />
+                        Efectivo
+                    </button>
+                    <button
+                        onClick={() => onUpdate({ type: 'otro', amount: '' })}
+                        className={cn(
+                            'flex items-center gap-1 px-2 h-7 rounded-md text-[11px] font-medium transition-all cursor-pointer',
+                            p.type === 'otro' ? 'bg-amber-500/20 text-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                        )}
+                    >
+                        <Gift size={10} />
+                        Otro
+                    </button>
+                </div>
+                {p.type === 'efectivo' ? (
+                    <div className="relative flex-1 min-w-0">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-400 text-[12px] font-bold pointer-events-none select-none">₡</span>
+                        <KbInput
+                            value={p.amount}
+                            onChange={v => onUpdate({ amount: v.replace(/[^\d.]/g, '') })}
+                            mode="numeric"
+                            placeholder="0"
+                            className="w-full h-8 pl-6 pr-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                        />
+                    </div>
+                ) : (
+                    <KbInput
+                        value={p.amount}
+                        onChange={v => onUpdate({ amount: v })}
+                        placeholder="Descripción del premio..."
+                        className="flex-1 min-w-0 h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
+                    />
+                )}
+            </div>
+            {p.type === 'efectivo' && p.amount && (
+                <p className="text-[10px] text-amber-400/60 pl-1">{formatColones(p.amount)}</p>
+            )}
+        </div>
+    )
+}
+
 export function CreateSorteoModal({ isOpen, onClose }: Props) {
     const qc = useQueryClient()
     const { data: categories = [] } = useCategories(false)
@@ -221,13 +297,23 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
     const [slotsPerCard, setSlotsPerCard] = useState(3)
     const [cardSkin, setCardSkin] = useState<'gold' | 'neon'>('gold')
 
+    // Tombola state
+    const [tombNumbers, setTombNumbers] = useState('100')
+    const [tombPrice, setTombPrice] = useState('')
+    const [tombDrawDate, setTombDrawDate] = useState('')
+    const [tombPrizes, setTombPrizes] = useState<DraftTomboPrize[]>([])
+
     const nameKb = useKeyboardInput(name, setName, { mode: 'alpha' })
     const totalCardsKb = useKeyboardInput(totalCards, setTotalCards, { mode: 'numeric' })
     const searchKb = useKeyboardInput(participantSearch, setParticipantSearch, { mode: 'alpha' })
+    const tombNumbersKb = useKeyboardInput(tombNumbers, setTombNumbers, { mode: 'numeric' })
+    const tombPriceKb = useKeyboardInput(tombPrice, setTombPrice, { mode: 'numeric' })
 
     const { data: occupiedParticipants = [] } = useOccupiedParticipants()
 
-    const STEPS = sorteoType === 'RASPADITA' ? STEPS_RASPADITA : STEPS_RULETA
+    const STEPS = sorteoType === 'TOMBOLA' ? STEPS_TOMBOLA
+        : sorteoType === 'RASPADITA' ? STEPS_RASPADITA
+        : STEPS_RULETA
 
     function getConflict(type: 'PRODUCT' | 'CATEGORY', refId: string): string | null {
         if (type === 'CATEGORY') {
@@ -256,6 +342,8 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
 
     const totalCardsNum = parseInt(totalCards) || 0
     const sumOfQtys = prizeTiers.reduce((s, t) => s + (parseInt(t.qty) || 0), 0)
+    const tombNumbersNum = parseInt(tombNumbers) || 0
+    const tombPriceNum = parseFloat(tombPrice) || 0
 
     useEffect(() => {
         if (isOpen) {
@@ -275,6 +363,10 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
             setPrizeTiers([{ _id: crypto.randomUUID(), label: '', qty: '1', color: COLORS[0], prizeType: 'efectivo', prizeValue: '' }])
             setSlotsPerCard(3)
             setCardSkin('gold')
+            setTombNumbers('100')
+            setTombPrice('')
+            setTombDrawDate('')
+            setTombPrizes([])
             setError(null)
         }
     }, [isOpen])
@@ -311,6 +403,7 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
     function canAdvance(): boolean {
         if (step === 1) return name.trim().length > 0
         if (step === 2) {
+            if (sorteoType === 'TOMBOLA') return tombNumbersNum > 0 && tombNumbersNum <= 100 && tombPriceNum > 0
             if (sorteoType === 'RASPADITA') {
                 return (
                     totalCardsNum > 0 &&
@@ -326,8 +419,11 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                 !probOver
             )
         }
-        if (step === 3) return participants.length > 0
-        if (step === 4) return !hasDates || (!!startAt && !!endAt)
+        if (step === 3) {
+            if (sorteoType === 'TOMBOLA') return true
+            return participants.length > 0
+        }
+        if (step === 4 && sorteoType !== 'TOMBOLA') return !hasDates || (!!startAt && !!endAt)
         return true
     }
 
@@ -335,6 +431,32 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
         setSubmitting(true)
         setError(null)
         try {
+            if (sorteoType === 'TOMBOLA') {
+                const tombPrizesJson = tombPrizes.length > 0
+                    ? JSON.stringify(tombPrizes.map(p => ({
+                        id: p._id,
+                        name: p.name,
+                        type: p.type === 'efectivo' ? 'EFECTIVO' : 'OTRO',
+                        amount: p.type === 'efectivo' ? (parseFloat(p.amount) || null) : null,
+                    })))
+                    : null
+
+                const sorteo = await createSorteo({
+                    name: name.trim(),
+                    type: 'TOMBOLA',
+                    totalNumbers: tombNumbersNum,
+                    pricePerNumber: tombPriceNum,
+                    drawDate: tombDrawDate || null,
+                    tombPrizes: tombPrizesJson,
+                })
+                if (activate) {
+                    await updateSorteo(sorteo.id, { status: 'ACTIVE' })
+                }
+                await qc.invalidateQueries({ queryKey: ['sorteos'] })
+                onClose()
+                return
+            }
+
             if (sorteoType === 'RASPADITA') {
                 const sorteo = await createSorteo({
                     name: name.trim(),
@@ -473,15 +595,15 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
 
                 <div className="max-h-[52vh] overflow-y-auto pr-1">
 
-                    {/* Step 1 */}
+                    {/* Step 1 — Nombre + Tipo */}
                     {step === 1 && (
                         <div className="space-y-3">
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Tipo de sorteo</p>
                             <div className="flex gap-2">
-                                {(['RULETA', 'RASPADITA'] as SorteoType[]).map(t => (
+                                {(['RULETA', 'RASPADITA', 'TOMBOLA'] as SorteoType[]).map(t => (
                                     <button
                                         key={t}
-                                        onClick={() => setSorteoType(t)}
+                                        onClick={() => { setSorteoType(t); setStep(1) }}
                                         className={cn(
                                             'flex-1 flex items-center justify-center gap-2 h-12 rounded-xl border text-[13px] font-semibold transition-all cursor-pointer',
                                             sorteoType === t
@@ -490,7 +612,7 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                         )}
                                     >
                                         <TicketIcon size={15} />
-                                        {t === 'RULETA' ? 'Ruleta' : 'Raspadita'}
+                                        {t === 'RULETA' ? 'Ruleta' : t === 'RASPADITA' ? 'Raspadita' : 'Tómbola'}
                                     </button>
                                 ))}
                             </div>
@@ -502,6 +624,61 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                 className="w-full h-11 px-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[14px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/40 transition-colors"
                                 autoFocus
                             />
+                        </div>
+                    )}
+
+                    {/* Step 2 — TOMBOLA Config */}
+                    {step === 2 && sorteoType === 'TOMBOLA' && (
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-2">Total de números <span className="normal-case font-normal">(máx. 100)</span></p>
+                                    <input
+                                        {...tombNumbersKb}
+                                        placeholder="Ej: 100"
+                                        className={cn('w-full h-10 px-4 rounded-xl bg-[#101520] border text-[#E4ECF7] text-[14px] placeholder:text-[#3D506A] outline-none transition-colors',
+                                            tombNumbersNum > 100 ? 'border-red-500/50 focus:border-red-500/70' : 'border-[#1E2A40] focus:border-amber-500/40')}
+                                    />
+                                    {tombNumbersNum > 100 && (
+                                        <p className="text-[11px] text-red-400 mt-1">Máximo 100 números permitidos</p>
+                                    )}
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-2">Precio por número</p>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-400 text-[13px] font-bold pointer-events-none select-none">₡</span>
+                                        <input
+                                            {...tombPriceKb}
+                                            placeholder="0"
+                                            className="w-full h-10 pl-7 pr-4 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[14px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/40 transition-colors"
+                                        />
+                                    </div>
+                                    {tombPriceNum > 0 && (
+                                        <p className="text-[10px] text-amber-400/60 mt-1 pl-1">{formatColones(tombPrice)}</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-2">Fecha del sorteo (opcional)</p>
+                                <input
+                                    type="datetime-local"
+                                    value={tombDrawDate}
+                                    onChange={e => setTombDrawDate(e.target.value)}
+                                    className="w-full h-10 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[12px] outline-none focus:border-amber-500/40 transition-colors"
+                                />
+                            </div>
+
+                            {tombNumbersNum > 0 && tombPriceNum > 0 && (
+                                <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/5 border border-amber-500/15">
+                                    <span className="text-[12px] text-[#7A8FAA]">
+                                        {tombNumbersNum} números × {formatColones(tombPrice)} =
+                                    </span>
+                                    <span className="text-[14px] font-bold text-amber-400">
+                                        {formatColones(String(tombNumbersNum * tombPriceNum))}
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -568,7 +745,6 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                 <div className="space-y-2">
                                     {prizeTiers.map((t, i) => (
                                         <div key={t._id} className="p-3 rounded-xl border bg-[#101520] border-[#1E2A40] space-y-2">
-                                            {/* Color + remove */}
                                             <div className="flex items-center gap-2">
                                                 <div className="flex items-center gap-1 flex-shrink-0">
                                                     {COLORS.map(c => (
@@ -587,14 +763,12 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                                     <Trash2 size={12} />
                                                 </button>
                                             </div>
-                                            {/* Prize name */}
                                             <KbInput
                                                 value={t.label}
                                                 onChange={v => setPrizeTiers(prev => prev.map((p, pi) => pi === i ? { ...p, label: v } : p))}
                                                 placeholder="Nombre del premio (ej: Premio Mayor)"
                                                 className="w-full h-8 px-3 rounded-lg bg-[#0B0E19] border border-[#1E2A40] text-[#E4ECF7] text-[12px] placeholder:text-[#3D506A] outline-none focus:border-amber-500/30"
                                             />
-                                            {/* Type + value + quantity */}
                                             <div className="flex gap-2">
                                                 <div className="flex p-0.5 bg-[#0B0E19] rounded-lg border border-[#1E2A40] flex-shrink-0">
                                                     <button
@@ -685,7 +859,6 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                                 </div>
                             </div>
 
-                            {/* Slots + probability status */}
                             <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#0B0E19] border border-[#1E2A40]">
                                 <span className="text-[12px]">
                                     <span className="font-bold text-amber-400">{options.length}</span>
@@ -750,8 +923,38 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                         </div>
                     )}
 
-                    {/* Step 3 */}
-                    {step === 3 && (
+                    {/* Step 3 — Tombola Premios */}
+                    {step === 3 && sorteoType === 'TOMBOLA' && (
+                        <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Premios (opcional)</p>
+                                <span className="text-[11px] text-[#7A8FAA]">{tombPrizes.length} premio{tombPrizes.length !== 1 ? 's' : ''}</span>
+                            </div>
+                            <div className="space-y-2">
+                                {tombPrizes.map(p => (
+                                    <TomboPrizeRow
+                                        key={p._id}
+                                        p={p}
+                                        onUpdate={patch => setTombPrizes(prev => prev.map(x => x._id === p._id ? { ...x, ...patch } : x))}
+                                        onRemove={() => setTombPrizes(prev => prev.filter(x => x._id !== p._id))}
+                                    />
+                                ))}
+                            </div>
+                            <button
+                                onClick={() => setTombPrizes(prev => [...prev, { _id: crypto.randomUUID(), name: '', type: 'efectivo', amount: '' }])}
+                                className="w-full h-9 rounded-xl border border-dashed border-[#1E2A40] text-[12px] text-[#3D506A] hover:text-[#7A8FAA] hover:border-[#283A56] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                                <Plus size={13} />
+                                Agregar premio
+                            </button>
+                            {tombPrizes.length === 0 && (
+                                <p className="text-[11px] text-[#3D506A] text-center py-2">Sin premios configurados — se pueden agregar después</p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Step 3 — Participantes (RULETA/RASPADITA) */}
+                    {step === 3 && sorteoType !== 'TOMBOLA' && (
                         <div className="space-y-3">
                             <div className="flex items-center justify-between">
                                 <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Participantes</p>
@@ -869,8 +1072,8 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                         </div>
                     )}
 
-                    {/* Step 4 */}
-                    {step === 4 && (
+                    {/* Step 4 — Vigencia (RULETA/RASPADITA) */}
+                    {step === 4 && sorteoType !== 'TOMBOLA' && (
                         <div className="space-y-4">
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Fechas de vigencia</p>
 
@@ -923,87 +1126,119 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                         </div>
                     )}
 
-                    {/* Step 5 */}
-                    {step === 5 && (
+                    {/* Resumen — last step for all types */}
+                    {step === STEPS.length && (
                         <div className="space-y-3">
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A]">Revisión final</p>
 
-                            <div className="space-y-2">
-                                {[
-                                    { label: 'Nombre', value: name },
-                                    { label: 'Tipo', value: sorteoType === 'RASPADITA' ? 'Raspadita' : 'Ruleta' },
-                                    sorteoType === 'RASPADITA'
-                                        ? {
-                                            label: 'Raspas',
-                                            value: `${totalCardsNum} raspas · ${sumOfQtys} premios · ${slotsPerCard} slots · ${cardSkin === 'gold' ? 'Dorada' : 'Neón'}`
-                                          }
-                                        : {
-                                            label: 'Ruleta',
-                                            value: `${wheelSize} opciones · ${options.length} premio${options.length !== 1 ? 's' : ''} + ${fillerSlots} relleno`
-                                          },
-                                    {
-                                        label: 'Participantes',
-                                        value: [
-                                            catParticipants.length > 0 ? `${catParticipants.length} categoría${catParticipants.length !== 1 ? 's' : ''}` : '',
-                                            prodParticipants.length > 0 ? `${prodParticipants.length} producto${prodParticipants.length !== 1 ? 's' : ''}` : '',
-                                        ].filter(Boolean).join(', ') || 'Ninguno'
-                                    },
-                                    {
-                                        label: 'Vigencia',
-                                        value: hasDates && startAt && endAt
-                                            ? `${new Date(startAt).toLocaleDateString()} → ${new Date(endAt).toLocaleDateString()}`
-                                            : 'Sin fecha límite'
-                                    },
-                                ].map(row => (
-                                    <div key={row.label} className="flex items-start gap-3 px-4 py-2.5 rounded-xl bg-[#0B0E19] border border-[#192030]">
-                                        <span className="text-[11px] text-[#3D506A] uppercase tracking-wide w-24 flex-shrink-0 pt-0.5">{row.label}</span>
-                                        <span className="text-[13px] text-[#E4ECF7] font-medium">{row.value}</span>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <div className="flex flex-wrap gap-1.5">
-                                {sorteoType === 'RASPADITA' ? prizeTiers.map(t => (
-                                    <div
-                                        key={t._id}
-                                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-black"
-                                        style={{ backgroundColor: t.color }}
-                                    >
-                                        <span>{t.label}</span>
-                                        {t.prizeType === 'efectivo' && t.prizeValue && (
-                                            <span className="opacity-70">({formatColones(t.prizeValue)})</span>
-                                        )}
-                                        {t.prizeType === 'otro' && t.prizeValue && (
-                                            <span className="opacity-70">({t.prizeValue})</span>
-                                        )}
-                                        <span className="opacity-70">×{t.qty}</span>
-                                    </div>
-                                )) : (
-                                    <>
-                                        {options.map(o => (
-                                            <div
-                                                key={o._id}
-                                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-black"
-                                                style={{ backgroundColor: o.color }}
-                                            >
-                                                <span>{o.label}</span>
-                                                {o.prizeType === 'efectivo' && o.prizeValue && (
-                                                    <span className="opacity-70">({formatColones(o.prizeValue)})</span>
-                                                )}
-                                                {o.prizeType === 'otro' && o.prizeValue && (
-                                                    <span className="opacity-70">({o.prizeValue})</span>
-                                                )}
+                            {sorteoType === 'TOMBOLA' ? (
+                                <>
+                                    <div className="space-y-2">
+                                        {[
+                                            { label: 'Nombre', value: name },
+                                            { label: 'Tipo', value: 'Tómbola' },
+                                            { label: 'Números', value: `${tombNumbersNum} números · ${formatColones(tombPrice)} c/u` },
+                                            { label: 'Total recaudo', value: formatColones(String(tombNumbersNum * tombPriceNum)) },
+                                            { label: 'Fecha sorteo', value: tombDrawDate ? new Date(tombDrawDate).toLocaleDateString('es-CR') : 'Sin fecha' },
+                                            { label: 'Premios', value: tombPrizes.length > 0 ? `${tombPrizes.length} configurados` : 'Sin premios' },
+                                        ].map(row => (
+                                            <div key={row.label} className="flex items-start gap-3 px-4 py-2.5 rounded-xl bg-[#0B0E19] border border-[#192030]">
+                                                <span className="text-[11px] text-[#3D506A] uppercase tracking-wide w-24 flex-shrink-0 pt-0.5">{row.label}</span>
+                                                <span className="text-[13px] text-[#E4ECF7] font-medium">{row.value}</span>
                                             </div>
                                         ))}
-                                        {fillerSlots > 0 && (
-                                            <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-white bg-[#6B7280]">
-                                                Sin premio
-                                                <span className="opacity-60 ml-1">×{fillerSlots}</span>
+                                    </div>
+                                    {tombPrizes.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {tombPrizes.map(p => (
+                                                <div key={p._id} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                                                    <span>{p.name || 'Premio'}</span>
+                                                    {p.amount && <span className="opacity-70">({p.type === 'efectivo' ? formatColones(p.amount) : p.amount})</span>}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <div className="space-y-2">
+                                        {[
+                                            { label: 'Nombre', value: name },
+                                            { label: 'Tipo', value: sorteoType === 'RASPADITA' ? 'Raspadita' : 'Ruleta' },
+                                            sorteoType === 'RASPADITA'
+                                                ? {
+                                                    label: 'Raspas',
+                                                    value: `${totalCardsNum} raspas · ${sumOfQtys} premios · ${slotsPerCard} slots · ${cardSkin === 'gold' ? 'Dorada' : 'Neón'}`
+                                                  }
+                                                : {
+                                                    label: 'Ruleta',
+                                                    value: `${wheelSize} opciones · ${options.length} premio${options.length !== 1 ? 's' : ''} + ${fillerSlots} relleno`
+                                                  },
+                                            {
+                                                label: 'Participantes',
+                                                value: [
+                                                    catParticipants.length > 0 ? `${catParticipants.length} categoría${catParticipants.length !== 1 ? 's' : ''}` : '',
+                                                    prodParticipants.length > 0 ? `${prodParticipants.length} producto${prodParticipants.length !== 1 ? 's' : ''}` : '',
+                                                ].filter(Boolean).join(', ') || 'Ninguno'
+                                            },
+                                            {
+                                                label: 'Vigencia',
+                                                value: hasDates && startAt && endAt
+                                                    ? `${new Date(startAt).toLocaleDateString()} → ${new Date(endAt).toLocaleDateString()}`
+                                                    : 'Sin fecha límite'
+                                            },
+                                        ].map(row => (
+                                            <div key={row.label} className="flex items-start gap-3 px-4 py-2.5 rounded-xl bg-[#0B0E19] border border-[#192030]">
+                                                <span className="text-[11px] text-[#3D506A] uppercase tracking-wide w-24 flex-shrink-0 pt-0.5">{row.label}</span>
+                                                <span className="text-[13px] text-[#E4ECF7] font-medium">{row.value}</span>
                                             </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {sorteoType === 'RASPADITA' ? prizeTiers.map(t => (
+                                            <div
+                                                key={t._id}
+                                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-black"
+                                                style={{ backgroundColor: t.color }}
+                                            >
+                                                <span>{t.label}</span>
+                                                {t.prizeType === 'efectivo' && t.prizeValue && (
+                                                    <span className="opacity-70">({formatColones(t.prizeValue)})</span>
+                                                )}
+                                                {t.prizeType === 'otro' && t.prizeValue && (
+                                                    <span className="opacity-70">({t.prizeValue})</span>
+                                                )}
+                                                <span className="opacity-70">×{t.qty}</span>
+                                            </div>
+                                        )) : (
+                                            <>
+                                                {options.map(o => (
+                                                    <div
+                                                        key={o._id}
+                                                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-black"
+                                                        style={{ backgroundColor: o.color }}
+                                                    >
+                                                        <span>{o.label}</span>
+                                                        {o.prizeType === 'efectivo' && o.prizeValue && (
+                                                            <span className="opacity-70">({formatColones(o.prizeValue)})</span>
+                                                        )}
+                                                        {o.prizeType === 'otro' && o.prizeValue && (
+                                                            <span className="opacity-70">({o.prizeValue})</span>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                                {fillerSlots > 0 && (
+                                                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-white bg-[#6B7280]">
+                                                        Sin premio
+                                                        <span className="opacity-60 ml-1">×{fillerSlots}</span>
+                                                    </div>
+                                                )}
+                                            </>
                                         )}
-                                    </>
-                                )}
-                            </div>
+                                    </div>
+                                </>
+                            )}
 
                             {error && (
                                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/15 text-[12px] text-red-400">
@@ -1022,12 +1257,12 @@ export function CreateSorteoModal({ isOpen, onClose }: Props) {
                             Anterior
                         </Button>
                     )}
-                    {step < 5 && (
+                    {step < STEPS.length && (
                         <Button variant="primary" size="md" onClick={() => setStep(s => s + 1)} disabled={!canAdvance()} className="flex-1">
                             Siguiente
                         </Button>
                     )}
-                    {step === 5 && (
+                    {step === STEPS.length && (
                         <>
                             <Button variant="secondary" size="md" onClick={() => handleSubmit(false)} loading={submitting} className="flex-1">
                                 Guardar borrador

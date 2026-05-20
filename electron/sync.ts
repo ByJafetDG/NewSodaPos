@@ -5,7 +5,7 @@ import type {
     DbEmployeeRow, DbCategoryRow, DbCompanyRow, DbClientRow, DbProductRow,
     DbProductSubcategoryRow, DbSinpeMessageRow, DbCashRegisterRow, DbSaleRow,
     DbSaleItemRow, DbExpenseRow, DbInventoryMovementRow, DbPaymentRow,
-    DbEmailQueueRow, DbSubcategoryRow, DbBusinessConfigRow,
+    DbEmailQueueRow, DbSubcategoryRow, DbBusinessConfigRow, DbTombolaEntryRow, DbSorteoRow,
 } from '../src/types/db';
 
 let windowRef: BrowserWindow | null = null;
@@ -474,8 +474,8 @@ async function pullSync() {
                     execute(`DELETE FROM SaleItem WHERE saleId IN (SELECT id FROM Sale WHERE saleNumber = ? AND id != ?)`, [sale.saleNumber, sale.id]);
                     execute(`DELETE FROM Sale WHERE saleNumber = ? AND id != ?`, [sale.saleNumber, sale.id]);
                     execute(`
-                        INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?)
+                        INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName, physicalInvoiceNumber, originalSaleSnapshot, modifiedFromSaleId, paidAt, paymentMethod2, amount2)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             saleNumber = excluded.saleNumber,
                             date = excluded.date,
@@ -493,8 +493,14 @@ async function pullSync() {
                             syncStatus = 'SYNCED',
                             updatedAt = excluded.updatedAt,
                             companyId = excluded.companyId,
-                            consumerName = excluded.consumerName
-                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null]);
+                            consumerName = excluded.consumerName,
+                            physicalInvoiceNumber = excluded.physicalInvoiceNumber,
+                            originalSaleSnapshot = excluded.originalSaleSnapshot,
+                            modifiedFromSaleId = excluded.modifiedFromSaleId,
+                            paidAt = excluded.paidAt,
+                            paymentMethod2 = excluded.paymentMethod2,
+                            amount2 = excluded.amount2
+                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, sale.paidAt ?? null, sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
                 } catch (e) {
                     console.error(`[SyncEngine] Sale pull ${sale.id} (#${sale.saleNumber}):`, e);
                 }
@@ -594,10 +600,81 @@ async function pullSync() {
         // 14. Sync SinpeMessages — baja mensajes capturados por Edge Function mientras PC estuvo apagada
         await pullSinpeMessages();
 
+        // 15. Sync Sorteo
+        const { data: sorteos, error: sorteoError } = await supabase.from('Sorteo').select('*');
+        if (sorteoError && sorteoError.code !== 'PGRST205') throw sorteoError;
+        if (sorteos) {
+            transaction(() => {
+                for (const s of sorteos) {
+                    execute(`
+                        INSERT INTO Sorteo (id, name, type, status, startAt, endAt, minSpinsBetweenPrizes,
+                            totalCards, prizeCount, slotsPerCard, cardSkin,
+                            totalNumbers, pricePerNumber, sellStartDate, sellEndDate, drawDate, tombPrizes,
+                            syncStatus, createdAt, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            name = CASE WHEN Sorteo.syncStatus = 'PENDING' THEN Sorteo.name ELSE excluded.name END,
+                            type = excluded.type,
+                            status = CASE WHEN Sorteo.syncStatus = 'PENDING' THEN Sorteo.status ELSE excluded.status END,
+                            startAt = excluded.startAt,
+                            endAt = excluded.endAt,
+                            minSpinsBetweenPrizes = excluded.minSpinsBetweenPrizes,
+                            totalCards = excluded.totalCards,
+                            prizeCount = excluded.prizeCount,
+                            slotsPerCard = excluded.slotsPerCard,
+                            cardSkin = excluded.cardSkin,
+                            totalNumbers = excluded.totalNumbers,
+                            pricePerNumber = excluded.pricePerNumber,
+                            sellStartDate = excluded.sellStartDate,
+                            sellEndDate = excluded.sellEndDate,
+                            drawDate = excluded.drawDate,
+                            tombPrizes = excluded.tombPrizes,
+                            syncStatus = CASE WHEN Sorteo.syncStatus = 'PENDING' THEN 'PENDING' ELSE 'SYNCED' END,
+                            updatedAt = CASE WHEN Sorteo.syncStatus = 'PENDING' THEN Sorteo.updatedAt ELSE excluded.updatedAt END
+                    `, [s.id, s.name, s.type, s.status, s.startAt ?? null, s.endAt ?? null,
+                        s.minSpinsBetweenPrizes ?? 8, s.totalCards ?? null, s.prizeCount ?? null,
+                        s.slotsPerCard ?? null, s.cardSkin ?? null,
+                        s.totalNumbers ?? null, s.pricePerNumber ?? null,
+                        s.sellStartDate ?? null, s.sellEndDate ?? null, s.drawDate ?? null,
+                        s.tombPrizes ?? null, s.createdAt, s.updatedAt]);
+                }
+            });
+        }
+
+        // 16. Sync TombolaEntry (depends on Sorteo)
+        const { data: tombolaEntries, error: tombolaError } = await supabase.from('TombolaEntry').select('*');
+        if (tombolaError && tombolaError.code !== 'PGRST205') throw tombolaError;
+        if (tombolaEntries) {
+            transaction(() => {
+                for (const entry of tombolaEntries) {
+                    execute(`
+                        INSERT INTO TombolaEntry (id, sorteoId, number, participantName, participantCedula,
+                            participantEmail, paymentMethod, price, saleRegisteredAt, isWinner, prizePosition,
+                            syncStatus, createdAt, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            participantName = excluded.participantName,
+                            participantCedula = excluded.participantCedula,
+                            participantEmail = excluded.participantEmail,
+                            paymentMethod = excluded.paymentMethod,
+                            price = excluded.price,
+                            saleRegisteredAt = excluded.saleRegisteredAt,
+                            isWinner = excluded.isWinner,
+                            prizePosition = excluded.prizePosition,
+                            syncStatus = 'SYNCED',
+                            updatedAt = excluded.updatedAt
+                    `, [entry.id, entry.sorteoId, entry.number, entry.participantName, entry.participantCedula,
+                        entry.participantEmail ?? null, entry.paymentMethod, entry.price,
+                        entry.saleRegisteredAt ?? null, entry.isWinner ? 1 : 0, entry.prizePosition ?? null,
+                        entry.createdAt, entry.updatedAt]);
+                }
+            });
+        }
+
         console.log('[SyncEngine] Pull items success.');
 
         // Notificar UI para que React Query invalide todas las queries afectadas
-        for (const table of ['Product', 'Category', 'Subcategory', 'Client', 'Company', 'Employee', 'BusinessConfig', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment']) {
+        for (const table of ['Product', 'Category', 'Subcategory', 'Client', 'Company', 'Employee', 'BusinessConfig', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment', 'Sorteo', 'TombolaEntry']) {
             notifyUI(table);
         }
     } catch (err) {
@@ -654,11 +731,13 @@ async function _pushSync(): Promise<string[]> {
     const pendingSubcategories = query(`SELECT * FROM Subcategory WHERE syncStatus = 'PENDING'`) as DbSubcategoryRow[];
     const pendingConfig = query(`SELECT * FROM BusinessConfig WHERE syncStatus = 'PENDING'`) as DbBusinessConfigRow[];
     const pendingSinpe = query(`SELECT * FROM SinpeMessage WHERE syncStatus = 'PENDING'`) as DbSinpeMessageRow[];
+    const pendingTombolaEntries = query(`SELECT * FROM TombolaEntry WHERE syncStatus = 'PENDING'`) as DbTombolaEntryRow[];
+    const pendingSorteos = query(`SELECT * FROM Sorteo WHERE syncStatus = 'PENDING'`) as DbSorteoRow[];
 
     const totalPending = pendingSales.length + pendingExpenses.length + pendingMovements.length +
         pendingRegisters.length + pendingPayments.length + pendingEmployees.length +
         pendingCompanies.length + pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length +
-        pendingConfig.length + pendingSinpe.length;
+        pendingConfig.length + pendingSinpe.length + pendingTombolaEntries.length + pendingSorteos.length;
 
     if (totalPending === 0) return [];
 
@@ -941,6 +1020,12 @@ async function _pushSync(): Promise<string[]> {
                 updatedAt: new Date().toISOString(),
                 companyId: sale.companyId ?? null,
                 consumerName: sale.consumerName ?? null,
+                physicalInvoiceNumber: sale.physicalInvoiceNumber ?? null,
+                originalSaleSnapshot: sale.originalSaleSnapshot ?? null,
+                modifiedFromSaleId: sale.modifiedFromSaleId ?? null,
+                paidAt: sale.paidAt ?? null,
+                paymentMethod2: sale.paymentMethod2 ?? null,
+                amount2: sale.amount2 ?? null,
             });
             if (saleError) throw saleError;
             for (const item of items as DbSaleItemRow[]) {
@@ -1053,6 +1138,68 @@ async function _pushSync(): Promise<string[]> {
             logError(m);
             errors.push(m);
             persistSyncError('SinpeMessage', msg.id, m);
+        }
+    }
+
+    // 12. Sorteo — before TombolaEntry
+    for (const s of pendingSorteos) {
+        try {
+            const { error } = await supabase.from('Sorteo').upsert({
+                id: s.id,
+                name: s.name,
+                type: s.type,
+                status: s.status,
+                startAt: s.startAt ?? null,
+                endAt: s.endAt ?? null,
+                minSpinsBetweenPrizes: s.minSpinsBetweenPrizes ?? 8,
+                totalCards: s.totalCards ?? null,
+                prizeCount: s.prizeCount ?? null,
+                slotsPerCard: s.slotsPerCard ?? null,
+                cardSkin: s.cardSkin ?? null,
+                totalNumbers: s.totalNumbers ?? null,
+                pricePerNumber: s.pricePerNumber ?? null,
+                sellStartDate: s.sellStartDate ?? null,
+                sellEndDate: s.sellEndDate ?? null,
+                drawDate: s.drawDate ?? null,
+                tombPrizes: s.tombPrizes ?? null,
+                syncStatus: 'SYNCED',
+                updatedAt: new Date().toISOString(),
+            });
+            if (error) throw error;
+            execute(`UPDATE Sorteo SET syncStatus = 'SYNCED' WHERE id = ?`, [s.id]);
+        } catch (err: any) {
+            const msg = `Sorteo ${s.id}: ${err?.message ?? err}`;
+            logError(msg);
+            errors.push(msg);
+            persistSyncError('Sorteo', s.id, msg);
+        }
+    }
+
+    // 13. TombolaEntry — after Sorteo
+    for (const entry of pendingTombolaEntries) {
+        try {
+            const { error } = await supabase.from('TombolaEntry').upsert({
+                id: entry.id,
+                sorteoId: entry.sorteoId,
+                number: entry.number,
+                participantName: entry.participantName,
+                participantCedula: entry.participantCedula,
+                participantEmail: entry.participantEmail ?? null,
+                paymentMethod: entry.paymentMethod,
+                price: entry.price,
+                saleRegisteredAt: entry.saleRegisteredAt ?? null,
+                isWinner: !!entry.isWinner,
+                prizePosition: entry.prizePosition ?? null,
+                syncStatus: 'SYNCED',
+                updatedAt: new Date().toISOString(),
+            });
+            if (error) throw error;
+            execute(`UPDATE TombolaEntry SET syncStatus = 'SYNCED' WHERE id = ?`, [entry.id]);
+        } catch (err: any) {
+            const msg = `TombolaEntry ${entry.id}: ${err?.message ?? err}`;
+            logError(msg);
+            errors.push(msg);
+            persistSyncError('TombolaEntry', entry.id, msg);
         }
     }
 
@@ -1252,8 +1399,8 @@ function setupRealtimeSubscriptions() {
             if (!sale?.id) return;
             try {
                 execute(`
-                    INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?)
+                    INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName, physicalInvoiceNumber, originalSaleSnapshot, modifiedFromSaleId, paidAt, paymentMethod2, amount2)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         saleNumber = excluded.saleNumber,
                         date = excluded.date,
@@ -1271,8 +1418,14 @@ function setupRealtimeSubscriptions() {
                         syncStatus = 'SYNCED',
                         updatedAt = excluded.updatedAt,
                         companyId = excluded.companyId,
-                        consumerName = excluded.consumerName
-                `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null]);
+                        consumerName = excluded.consumerName,
+                        physicalInvoiceNumber = excluded.physicalInvoiceNumber,
+                        originalSaleSnapshot = excluded.originalSaleSnapshot,
+                        modifiedFromSaleId = excluded.modifiedFromSaleId,
+                        paidAt = excluded.paidAt,
+                        paymentMethod2 = excluded.paymentMethod2,
+                        amount2 = excluded.amount2
+                `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, sale.paidAt ?? null, sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
             } catch (e) { console.error('[SyncRealtime] Sale:', e); }
             notifyUI('Sale');
         })
@@ -1353,6 +1506,70 @@ function setupRealtimeSubscriptions() {
                 `, [pay.id, pay.clientId, pay.amount, pay.method, pay.reference ?? null, pay.notes ?? null, d(pay.date)]);
             } catch (e) { console.error('[SyncRealtime] Payment:', e); }
             notifyUI('Payment');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'Sorteo' }, (payload) => {
+            const s = payload.new as Record<string, unknown>;
+            if (!s?.id) return;
+            try {
+                execute(`
+                    INSERT INTO Sorteo (id, name, type, status, startAt, endAt, minSpinsBetweenPrizes,
+                        totalCards, prizeCount, slotsPerCard, cardSkin,
+                        totalNumbers, pricePerNumber, sellStartDate, sellEndDate, drawDate, tombPrizes,
+                        syncStatus, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        name = CASE WHEN Sorteo.syncStatus = 'PENDING' THEN Sorteo.name ELSE excluded.name END,
+                        status = CASE WHEN Sorteo.syncStatus = 'PENDING' THEN Sorteo.status ELSE excluded.status END,
+                        startAt = excluded.startAt,
+                        endAt = excluded.endAt,
+                        minSpinsBetweenPrizes = excluded.minSpinsBetweenPrizes,
+                        totalCards = excluded.totalCards,
+                        prizeCount = excluded.prizeCount,
+                        slotsPerCard = excluded.slotsPerCard,
+                        cardSkin = excluded.cardSkin,
+                        totalNumbers = excluded.totalNumbers,
+                        pricePerNumber = excluded.pricePerNumber,
+                        sellStartDate = excluded.sellStartDate,
+                        sellEndDate = excluded.sellEndDate,
+                        drawDate = excluded.drawDate,
+                        tombPrizes = excluded.tombPrizes,
+                        syncStatus = CASE WHEN Sorteo.syncStatus = 'PENDING' THEN 'PENDING' ELSE 'SYNCED' END,
+                        updatedAt = CASE WHEN Sorteo.syncStatus = 'PENDING' THEN Sorteo.updatedAt ELSE excluded.updatedAt END
+                `, [s.id, s.name, s.type, s.status, s.startAt ?? null, s.endAt ?? null,
+                    (s.minSpinsBetweenPrizes as number) ?? 8, s.totalCards ?? null, s.prizeCount ?? null,
+                    s.slotsPerCard ?? null, s.cardSkin ?? null,
+                    s.totalNumbers ?? null, s.pricePerNumber ?? null,
+                    s.sellStartDate ?? null, s.sellEndDate ?? null, s.drawDate ?? null,
+                    s.tombPrizes ?? null, s.createdAt, s.updatedAt]);
+            } catch (e) { console.error('[SyncRealtime] Sorteo:', e); }
+            notifyUI('Sorteo');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'TombolaEntry' }, (payload) => {
+            const entry = payload.new as DbTombolaEntryRow;
+            if (!entry?.id) return;
+            try {
+                execute(`
+                    INSERT INTO TombolaEntry (id, sorteoId, number, participantName, participantCedula,
+                        participantEmail, paymentMethod, price, saleRegisteredAt, isWinner, prizePosition,
+                        syncStatus, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        participantName = excluded.participantName,
+                        participantCedula = excluded.participantCedula,
+                        participantEmail = excluded.participantEmail,
+                        paymentMethod = excluded.paymentMethod,
+                        price = excluded.price,
+                        saleRegisteredAt = excluded.saleRegisteredAt,
+                        isWinner = excluded.isWinner,
+                        prizePosition = excluded.prizePosition,
+                        syncStatus = 'SYNCED',
+                        updatedAt = excluded.updatedAt
+                `, [entry.id, entry.sorteoId, entry.number, entry.participantName, entry.participantCedula,
+                    entry.participantEmail ?? null, entry.paymentMethod, entry.price,
+                    entry.saleRegisteredAt ?? null, entry.isWinner ? 1 : 0, entry.prizePosition ?? null,
+                    entry.createdAt, entry.updatedAt]);
+            } catch (e) { console.error('[SyncRealtime] TombolaEntry:', e); }
+            notifyUI('TombolaEntry');
         })
         .subscribe();
 }

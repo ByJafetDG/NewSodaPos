@@ -233,6 +233,46 @@ export interface SaleSnapshotEntry {
     modifiedAt: string
 }
 
+export interface DbSorteoRow {
+    id: string
+    name: string
+    type: string
+    status: string
+    startAt: string | null
+    endAt: string | null
+    minSpinsBetweenPrizes: number
+    totalCards: number | null
+    prizeCount: number | null
+    slotsPerCard: number | null
+    cardSkin: string | null
+    totalNumbers: number | null
+    pricePerNumber: number | null
+    sellStartDate: string | null
+    sellEndDate: string | null
+    drawDate: string | null
+    tombPrizes: string | null
+    syncStatus: string
+    createdAt: string
+    updatedAt: string
+}
+
+export interface DbTombolaEntryRow {
+    id: string
+    sorteoId: string
+    number: number
+    participantName: string
+    participantCedula: string
+    participantEmail: string | null
+    paymentMethod: string
+    price: number
+    saleRegisteredAt: string | null
+    isWinner: number
+    prizePosition: number | null
+    syncStatus: string
+    createdAt: string
+    updatedAt: string
+}
+
 export interface CompanySaleView {
     id: string
     saleNumber: number

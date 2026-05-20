@@ -45,7 +45,17 @@ export function SinpePage() {
     const [filter, setFilter] = useState('')
     const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
     const [pendingClearAll, setPendingClearAll] = useState(false)
-    const sentinelRef = useRef<HTMLDivElement>(null)
+    const scrollRef = useRef<HTMLDivElement>(null)
+    const [pullDistance, setPullDistance] = useState(0)
+    const touchStartYRef = useRef(0)
+    const pullDistRef = useRef(0)
+    const hasMoreRef = useRef(false)
+    const triggeredRef = useRef(false)
+    const wheelAccumRef = useRef(0)
+    const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+    const PULL_THRESHOLD = 56
+    const WHEEL_THRESHOLD = 150
 
     const kbFilter = useKeyboardInput(filter, setFilter, { mode: 'alpha' })
 
@@ -78,25 +88,102 @@ export function SinpePage() {
         }
     }, [messages, loading])
 
-    // Infinite scroll: load more when sentinel enters viewport
+    // Pull-to-load: pointer events (touch screen drag) + wheel events (trackpad/mouse)
     useEffect(() => {
-        const sentinel = sentinelRef.current
-        if (!sentinel) return
-        const observer = new IntersectionObserver(
-            entries => {
-                if (entries[0].isIntersecting) {
-                    setVisibleCount(v => v + PAGE_SIZE)
-                }
-            },
-            { threshold: 0.1 }
-        )
-        observer.observe(sentinel)
-        return () => observer.disconnect()
+        const el = scrollRef.current
+        if (!el) return
+
+        const isAtBottom = () => el.scrollHeight - el.scrollTop - el.clientHeight < 20
+
+        const triggerLoad = () => {
+            if (triggeredRef.current) return
+            triggeredRef.current = true
+            setVisibleCount(v => v + PAGE_SIZE)
+            pullDistRef.current = 0
+            wheelAccumRef.current = 0
+            setPullDistance(0)
+            setTimeout(() => { triggeredRef.current = false }, 600)
+        }
+
+        // Pointer events — touch drag on screen
+        const onPointerDown = (e: PointerEvent) => {
+            touchStartYRef.current = e.clientY
+            pullDistRef.current = 0
+        }
+        const onPointerMove = (e: PointerEvent) => {
+            if (!hasMoreRef.current || triggeredRef.current) return
+            const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+            if (fromBottom > 60) {
+                // Scrolled clearly away from bottom — reset
+                touchStartYRef.current = e.clientY
+                if (pullDistRef.current > 0) { pullDistRef.current = 0; setPullDistance(0) }
+                return
+            }
+            const delta = touchStartYRef.current - e.clientY
+            if (delta > 0) {
+                const capped = Math.min(delta, PULL_THRESHOLD * 1.5)
+                if (capped > pullDistRef.current) { pullDistRef.current = capped; setPullDistance(capped) }
+            }
+        }
+        const onPointerUp = () => {
+            if (!triggeredRef.current && pullDistRef.current >= PULL_THRESHOLD) {
+                triggerLoad()
+            } else {
+                pullDistRef.current = 0
+                setPullDistance(0)
+            }
+        }
+
+        // Scroll event — scrollbar drag to bottom
+        const onScroll = () => {
+            if (!hasMoreRef.current || triggeredRef.current) return
+            if (el.scrollHeight - el.scrollTop - el.clientHeight < 2) triggerLoad()
+        }
+
+        // Wheel events — trackpad two-finger scroll and mouse wheel
+        const onWheel = (e: WheelEvent) => {
+            if (!hasMoreRef.current || triggeredRef.current) return
+            if (!isAtBottom() || e.deltaY <= 0) {
+                wheelAccumRef.current = 0
+                clearTimeout(wheelTimerRef.current)
+                if (pullDistRef.current > 0) { pullDistRef.current = 0; setPullDistance(0) }
+                return
+            }
+            wheelAccumRef.current += e.deltaY
+            const progress = Math.min(wheelAccumRef.current / WHEEL_THRESHOLD, 1)
+            const dist = Math.round(progress * PULL_THRESHOLD)
+            pullDistRef.current = dist
+            setPullDistance(dist)
+            clearTimeout(wheelTimerRef.current)
+            wheelTimerRef.current = setTimeout(() => {
+                wheelAccumRef.current = 0
+                pullDistRef.current = 0
+                setPullDistance(0)
+            }, 500)
+            if (wheelAccumRef.current >= WHEEL_THRESHOLD) triggerLoad()
+        }
+
+        el.addEventListener('pointerdown', onPointerDown)
+        el.addEventListener('pointermove', onPointerMove)
+        el.addEventListener('pointerup', onPointerUp)
+        el.addEventListener('pointercancel', onPointerUp)
+        el.addEventListener('wheel', onWheel)
+        el.addEventListener('scroll', onScroll)
+        return () => {
+            el.removeEventListener('pointerdown', onPointerDown)
+            el.removeEventListener('pointermove', onPointerMove)
+            el.removeEventListener('pointerup', onPointerUp)
+            el.removeEventListener('pointercancel', onPointerUp)
+            el.removeEventListener('wheel', onWheel)
+            el.removeEventListener('scroll', onScroll)
+            clearTimeout(wheelTimerRef.current)
+        }
     }, [])
 
-    // Reset visible count when filter changes
+    // Reset visible count and pull indicator when filter changes
     useEffect(() => {
         setVisibleCount(PAGE_SIZE)
+        setPullDistance(0)
     }, [filter])
 
     async function handleMarkAllRead() {
@@ -132,6 +219,7 @@ export function SinpePage() {
 
     const visible = filtered.slice(0, visibleCount)
     const hasMore = visibleCount < filtered.length
+    hasMoreRef.current = hasMore
     const unreadCount = messages.filter(m => !m.isRead).length
 
     return (
@@ -225,7 +313,7 @@ export function SinpePage() {
             </div>
 
             {/* Message list */}
-            <div className="flex-1 overflow-y-auto">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto">
                 {loading ? (
                     <div className="flex items-center justify-center h-40 text-[#3D506A] text-[13px]">
                         Cargando...
@@ -256,10 +344,19 @@ export function SinpePage() {
                             />
                         ))}
 
-                        {/* Infinite scroll sentinel */}
+                        {/* Pull-to-load indicator */}
                         {hasMore && (
-                            <div ref={sentinelRef} className="flex items-center justify-center py-4">
-                                <span className="text-[11px] text-[#3D506A]">Cargando más...</span>
+                            <div className="h-14 flex items-center justify-center overflow-hidden">
+                                <span
+                                    className="text-[11px] text-[#3D506A]"
+                                    style={{
+                                        transform: `translateY(${Math.round((1 - Math.min(pullDistance / PULL_THRESHOLD, 1)) * 20)}px)`,
+                                        opacity: Math.min(pullDistance / PULL_THRESHOLD, 1),
+                                        transition: pullDistance === 0 ? 'transform 250ms ease, opacity 250ms ease' : 'none',
+                                    }}
+                                >
+                                    {pullDistance >= PULL_THRESHOLD ? 'Cargando...' : 'Seguí deslizando ↑'}
+                                </span>
                             </div>
                         )}
 

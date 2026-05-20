@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Ticket, Plus, Play, Pause, StopCircle, Trash2, Clock, Zap, BarChart2, Users, UserX, UserCheck, Pencil, Trophy } from 'lucide-react'
+import { Ticket, Plus, Play, Pause, StopCircle, Trash2, Clock, Zap, BarChart2, Users, UserX, UserCheck, Pencil, Trophy, Hash } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { Badge } from '@/components/atoms/Badge'
 import { EmptyState } from '@/components/atoms/EmptyState'
@@ -9,8 +9,9 @@ import { CreateSorteoModal } from '@/components/modals/CreateSorteoModal'
 import { EditSorteoModal } from '@/components/modals/EditSorteoModal'
 import { RuletaModal } from '@/components/modals/RuletaModal'
 import { RaspaditaModal } from '@/components/modals/RaspaditaModal'
+import { TombolaModal } from '@/components/modals/TombolaModal'
 import { cn } from '@/lib/utils'
-import { useSorteos, useUpdateSorteo, useDeleteSorteo, useSorteoStats, useSorteoOptions, useSorteoWinners, useRaspaditaCards } from '@/hooks/useSorteos'
+import { useSorteos, useUpdateSorteo, useDeleteSorteo, useSorteoStats, useSorteoOptions, useSorteoWinners, useRaspaditaCards, useTombolaEntries } from '@/hooks/useSorteos'
 import { scratchCard, generateRaspaditaCards, getSorteoOptions, updateSorteo } from '@/services/sorteos'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Sorteo, SorteoStatus } from '@/types'
@@ -30,12 +31,183 @@ const STATUS_VARIANT: Record<SorteoStatus, 'default' | 'success' | 'warning' | '
 }
 
 function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose: () => void }) {
-    const { data: stats } = useSorteoStats(sorteo?.id ?? null)
-    const { data: options = [] } = useSorteoOptions(sorteo?.id ?? null)
-    const { data: winners = [] } = useSorteoWinners(sorteo?.id ?? null)
+    const isTombola = sorteo?.type === 'TOMBOLA'
+    const isRaspadita = sorteo?.type === 'RASPADITA'
+    const isRuleta = sorteo?.type === 'RULETA'
+
+    const { data: stats } = useSorteoStats(isRuleta ? (sorteo?.id ?? null) : null)
+    const { data: options = [] } = useSorteoOptions(isRuleta ? (sorteo?.id ?? null) : null)
+    const { data: winners = [] } = useSorteoWinners(isRuleta ? (sorteo?.id ?? null) : null)
+    const { data: tombolaEntries = [] } = useTombolaEntries(isTombola ? (sorteo?.id ?? null) : null)
+    const { data: raspaditaCards = [] } = useRaspaditaCards(isRaspadita ? (sorteo?.id ?? null) : null)
 
     if (!sorteo) return null
 
+    // ── TOMBOLA ───────────────────────────────────────────────────────────────
+    if (isTombola) {
+        const totalNumbers = sorteo.totalNumbers ?? 0
+        const sold = tombolaEntries.length
+        const available = totalNumbers - sold
+        const revenue = tombolaEntries.reduce((s, e) => s + e.price, 0)
+        const efectivoAmt = tombolaEntries.filter(e => e.paymentMethod === 'EFECTIVO').reduce((s, e) => s + e.price, 0)
+        const sinpeAmt = tombolaEntries.filter(e => e.paymentMethod === 'SINPE').reduce((s, e) => s + e.price, 0)
+        const winnerEntries = tombolaEntries.filter(e => e.isWinner)
+        const prizes = sorteo.tombPrizes ?? []
+        const soldPct = totalNumbers > 0 ? Math.round((sold / totalNumbers) * 100) : 0
+
+        return (
+            <BaseModal isOpen={!!sorteo} onClose={onClose} title={sorteo.name} description="Estadísticas de participación" width="max-w-lg">
+                {sold === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 gap-2">
+                        <BarChart2 size={28} className="text-[#283A56]" />
+                        <p className="text-[13px] text-[#3D506A]">Sin números vendidos aún</p>
+                    </div>
+                ) : (
+                    <div className="space-y-5">
+                        <div className="grid grid-cols-3 gap-2">
+                            {[
+                                { label: 'Vendidos', value: String(sold), color: 'text-emerald-400', bg: 'bg-emerald-500/5', border: 'border-emerald-500/15' },
+                                { label: 'Disponibles', value: String(available), color: 'text-[#7A8FAA]', bg: 'bg-[#101828]', border: 'border-[#192030]' },
+                                { label: 'Recaudado', value: `₡${revenue.toLocaleString('es-CR')}`, color: 'text-amber-400', bg: 'bg-amber-500/5', border: 'border-amber-500/15' },
+                            ].map(c => (
+                                <div key={c.label} className={cn('rounded-xl border px-3 py-3 flex flex-col gap-1', c.bg, c.border)}>
+                                    <span className="text-[10px] uppercase tracking-wider text-[#3D506A]">{c.label}</span>
+                                    <span className={cn('font-bold tabular-nums truncate', c.value.startsWith('₡') ? 'text-[14px]' : 'text-[22px]', c.color)}>{c.value}</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <div className="flex justify-between items-center">
+                                <span className="text-[11px] text-[#3D506A] uppercase tracking-wider">Avance de ventas</span>
+                                <span className="text-[13px] font-semibold text-[#7A8FAA]">{soldPct}%</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-[#101828] border border-[#192030] overflow-hidden">
+                                <div className="h-full rounded-full bg-emerald-500 transition-all duration-700" style={{ width: `${soldPct}%` }} />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            {[
+                                { label: 'Efectivo', value: efectivoAmt, color: 'text-emerald-400' },
+                                { label: 'SINPE', value: sinpeAmt, color: 'text-blue-400' },
+                            ].map(p => (
+                                <div key={p.label} className="rounded-xl border border-[#192030] bg-[#101828] px-3 py-2.5 flex flex-col gap-0.5">
+                                    <span className="text-[10px] uppercase tracking-wider text-[#3D506A]">{p.label}</span>
+                                    <span className={cn('text-[15px] font-bold tabular-nums', p.color)}>₡{p.value.toLocaleString('es-CR')}</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        {winnerEntries.length > 0 && (
+                            <div className="space-y-2">
+                                <p className="text-[11px] uppercase tracking-wider text-[#3D506A]">Ganadores</p>
+                                <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-0.5">
+                                    {winnerEntries
+                                        .slice().sort((a, b) => (a.prizePosition ?? 0) - (b.prizePosition ?? 0))
+                                        .map(e => {
+                                            const prize = prizes[e.prizePosition ?? 0]
+                                            return (
+                                                <div key={e.id} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-[#101828] border border-[#192030]">
+                                                    <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+                                                        <span className="text-[11px] font-bold text-amber-400 tabular-nums">{e.number}</span>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-[12px] font-medium text-[#E4ECF7] truncate">{e.participantName}</p>
+                                                        {prize && <p className="text-[10px] text-[#3D506A] truncate">{prize.name}</p>}
+                                                    </div>
+                                                    <Trophy size={11} className="text-amber-400 shrink-0" />
+                                                </div>
+                                            )
+                                        })}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </BaseModal>
+        )
+    }
+
+    // ── RASPADITA ─────────────────────────────────────────────────────────────
+    if (isRaspadita) {
+        const total = raspaditaCards.length
+        const scratched = raspaditaCards.filter(c => c.isScratched).length
+        const remaining = total - scratched
+        const prizeCards = raspaditaCards.filter(c => c.isPrize)
+        const prizeWon = prizeCards.filter(c => c.isScratched).length
+        const prizeRemaining = prizeCards.length - prizeWon
+        const scratchedPct = total > 0 ? Math.round((scratched / total) * 100) : 0
+
+        return (
+            <BaseModal isOpen={!!sorteo} onClose={onClose} title={sorteo.name} description="Estadísticas de participación" width="max-w-lg">
+                {total === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 gap-2">
+                        <BarChart2 size={28} className="text-[#283A56]" />
+                        <p className="text-[13px] text-[#3D506A]">Sin tarjetas generadas aún</p>
+                    </div>
+                ) : (
+                    <div className="space-y-5">
+                        <div className="grid grid-cols-3 gap-2">
+                            {[
+                                { label: 'Total', value: total, color: 'text-[#7A8FAA]', bg: 'bg-[#101828]', border: 'border-[#192030]' },
+                                { label: 'Raspadas', value: scratched, color: 'text-emerald-400', bg: 'bg-emerald-500/5', border: 'border-emerald-500/15' },
+                                { label: 'Restantes', value: remaining, color: 'text-amber-400', bg: 'bg-amber-500/5', border: 'border-amber-500/15' },
+                            ].map(c => (
+                                <div key={c.label} className={cn('rounded-xl border px-3 py-3 flex flex-col gap-1', c.bg, c.border)}>
+                                    <span className="text-[10px] uppercase tracking-wider text-[#3D506A]">{c.label}</span>
+                                    <span className={cn('text-[22px] font-bold tabular-nums', c.color)}>{c.value}</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <div className="flex justify-between items-center">
+                                <span className="text-[11px] text-[#3D506A] uppercase tracking-wider">Tarjetas raspadas</span>
+                                <span className="text-[13px] font-semibold text-[#7A8FAA]">{scratchedPct}%</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-[#101828] border border-[#192030] overflow-hidden">
+                                <div className="h-full rounded-full bg-emerald-500 transition-all duration-700" style={{ width: `${scratchedPct}%` }} />
+                            </div>
+                        </div>
+
+                        {prizeCards.length > 0 && (
+                            <div className="grid grid-cols-2 gap-2">
+                                {[
+                                    { label: 'Premios ganados', value: prizeWon, color: 'text-emerald-400', bg: 'bg-emerald-500/5', border: 'border-emerald-500/15' },
+                                    { label: 'Premios restantes', value: prizeRemaining, color: 'text-amber-400', bg: 'bg-amber-500/5', border: 'border-amber-500/15' },
+                                ].map(p => (
+                                    <div key={p.label} className={cn('rounded-xl border px-3 py-2.5 flex flex-col gap-1', p.bg, p.border)}>
+                                        <span className="text-[10px] uppercase tracking-wider text-[#3D506A]">{p.label}</span>
+                                        <span className={cn('text-[22px] font-bold tabular-nums', p.color)}>{p.value}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {prizeWon > 0 && (
+                            <div className="space-y-2">
+                                <p className="text-[11px] uppercase tracking-wider text-[#3D506A]">Premios encontrados</p>
+                                <div className="space-y-1 max-h-[160px] overflow-y-auto pr-0.5">
+                                    {raspaditaCards.filter(c => c.isPrize && c.isScratched).map(c => (
+                                        <div key={c.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#101828] border border-[#192030]">
+                                            <Trophy size={12} className="text-amber-400 shrink-0" />
+                                            <span className="text-[12px] text-[#C5D5E8] flex-1 truncate">{c.prizeLabel ?? 'Premio'}</span>
+                                            {c.prizeDescription && (
+                                                <span className="text-[11px] text-[#3D506A] truncate max-w-[120px]">{c.prizeDescription}</span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </BaseModal>
+        )
+    }
+
+    // ── RULETA ────────────────────────────────────────────────────────────────
     const participationPct = stats && stats.total > 0
         ? Math.round((stats.participated / stats.total) * 100)
         : 0
@@ -45,13 +217,7 @@ function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose:
         : 1
 
     return (
-        <BaseModal
-            isOpen={!!sorteo}
-            onClose={onClose}
-            title={sorteo.name}
-            description="Estadísticas de participación"
-            width="max-w-lg"
-        >
+        <BaseModal isOpen={!!sorteo} onClose={onClose} title={sorteo.name} description="Estadísticas de participación" width="max-w-lg">
             {!stats || stats.total === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 gap-2">
                     <BarChart2 size={28} className="text-[#283A56]" />
@@ -59,7 +225,6 @@ function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose:
                 </div>
             ) : (
                 <div className="space-y-5">
-                    {/* Summary cards */}
                     <div className="grid grid-cols-3 gap-2">
                         {[
                             { label: 'Total', value: stats.total, icon: Users, color: 'text-[#7A8FAA]', bg: 'bg-[#101828]', border: 'border-[#192030]' },
@@ -76,21 +241,16 @@ function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose:
                         ))}
                     </div>
 
-                    {/* Participation rate bar */}
                     <div className="space-y-1.5">
                         <div className="flex justify-between items-center">
                             <span className="text-[11px] text-[#3D506A] uppercase tracking-wider">Tasa de participación</span>
                             <span className="text-[13px] font-semibold text-[#7A8FAA]">{participationPct}%</span>
                         </div>
                         <div className="h-2 rounded-full bg-[#101828] border border-[#192030] overflow-hidden">
-                            <div
-                                className="h-full rounded-full bg-emerald-500 transition-all duration-700"
-                                style={{ width: `${participationPct}%` }}
-                            />
+                            <div className="h-full rounded-full bg-emerald-500 transition-all duration-700" style={{ width: `${participationPct}%` }} />
                         </div>
                     </div>
 
-                    {/* Prize distribution */}
                     {stats.optionCounts.some(o => o.count > 0) && (
                         <div className="space-y-2">
                             <p className="text-[11px] uppercase tracking-wider text-[#3D506A]">Distribución de premios</p>
@@ -107,10 +267,7 @@ function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose:
                                             <div key={o.optionId} className="space-y-1">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-2">
-                                                        <div
-                                                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                                                            style={{ backgroundColor: color }}
-                                                        />
+                                                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                                                         <span className="text-[12px] text-[#C5D5E8] truncate max-w-[200px]">{o.label}</span>
                                                         {remaining !== null && remaining !== undefined && (
                                                             <span className="text-[10px] text-[#3D506A]">({remaining} restantes)</span>
@@ -119,10 +276,7 @@ function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose:
                                                     <span className="text-[12px] font-semibold text-[#7A8FAA] tabular-nums shrink-0">{o.count}</span>
                                                 </div>
                                                 <div className="h-1.5 rounded-full bg-[#101828] overflow-hidden">
-                                                    <div
-                                                        className="h-full rounded-full transition-all duration-700"
-                                                        style={{ width: `${barPct}%`, backgroundColor: color + '99' }}
-                                                    />
+                                                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${barPct}%`, backgroundColor: color + '99' }} />
                                                 </div>
                                             </div>
                                         )
@@ -133,7 +287,6 @@ function SorteoStatsModal({ sorteo, onClose }: { sorteo: Sorteo | null; onClose:
                 </div>
             )}
 
-            {/* Winner history */}
             {winners.length > 0 && (
                 <div className="mt-5 space-y-2">
                     <p className="text-[11px] uppercase tracking-wider text-[#3D506A]">Historial de ganadores</p>
@@ -172,6 +325,7 @@ function SorteoRow({
     onDelete,
     onPreview,
     onRaspadita,
+    onTombola,
     onStats,
     onEdit,
     onActivate,
@@ -180,6 +334,7 @@ function SorteoRow({
     onDelete: (s: Sorteo) => void
     onPreview: (s: Sorteo) => void
     onRaspadita: (s: Sorteo) => void
+    onTombola: (s: Sorteo) => void
     onStats: (s: Sorteo) => void
     onEdit: (s: Sorteo) => void
     onActivate: (s: Sorteo) => void
@@ -240,13 +395,24 @@ function SorteoRow({
                     )}
                     {sorteo.status === 'ACTIVE' && (
                         <>
-                            <button
-                                onClick={() => sorteo.type === 'RASPADITA' ? onRaspadita(sorteo) : onPreview(sorteo)}
-                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/20 active:scale-95 transition-all cursor-pointer"
-                            >
-                                <Zap size={10} />
-                                {sorteo.type === 'RASPADITA' ? 'Abrir' : 'Probar'}
-                            </button>
+                            {sorteo.type !== 'TOMBOLA' && (
+                                <button
+                                    onClick={() => sorteo.type === 'RASPADITA' ? onRaspadita(sorteo) : onPreview(sorteo)}
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/20 active:scale-95 transition-all cursor-pointer"
+                                >
+                                    <Zap size={10} />
+                                    {sorteo.type === 'RASPADITA' ? 'Abrir' : 'Probar'}
+                                </button>
+                            )}
+                            {sorteo.type === 'TOMBOLA' && (
+                                <button
+                                    onClick={() => onTombola(sorteo)}
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all cursor-pointer"
+                                >
+                                    <Hash size={10} />
+                                    Números
+                                </button>
+                            )}
                             <button
                                 onClick={() => changeStatus('PAUSED')}
                                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-[#101828] border-[#1E2A40] text-[#7A8FAA] hover:text-amber-400 hover:border-amber-500/25 hover:bg-amber-500/10 active:scale-95 transition-all cursor-pointer"
@@ -329,6 +495,8 @@ export function SorteosPage() {
     const [raspaditaSorteo, setRaspaditaSorteo] = useState<Sorteo | null>(null)
     const { data: raspaditaCards = [] } = useRaspaditaCards(raspaditaSorteo?.id ?? null)
 
+    const [tombolaSorteo, setTombolaSorteo] = useState<Sorteo | null>(null)
+
     async function activateSorteo(sorteo: Sorteo) {
         await updateSorteo(sorteo.id, { status: 'ACTIVE' })
         if (sorteo.type === 'RASPADITA' && sorteo.totalCards && sorteo.slotsPerCard) {
@@ -410,6 +578,7 @@ export function SorteosPage() {
                                     onDelete={setDeleteTarget}
                                     onPreview={setPreviewSorteo}
                                     onRaspadita={setRaspaditaSorteo}
+                                    onTombola={setTombolaSorteo}
                                     onStats={setStatsSorteo}
                                     onEdit={setEditSorteo}
                                     onActivate={activateSorteo}
@@ -451,6 +620,11 @@ export function SorteosPage() {
                         qc.invalidateQueries({ queryKey: ['sorteos'] })
                     }
                 }}
+            />
+
+            <TombolaModal
+                sorteo={tombolaSorteo}
+                onClose={() => setTombolaSorteo(null)}
             />
 
             <DeleteConfirmModal
