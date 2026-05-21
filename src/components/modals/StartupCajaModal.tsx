@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { DoorOpen, Wallet, X } from 'lucide-react'
 import { NumericPad } from '@/components/molecules/NumericPad'
@@ -36,6 +36,17 @@ export function StartupCajaModal() {
     const openRegister = useOpenRegister()
     const [amount, setAmount] = useState('')
     const [skipped, setSkipped] = useState(() => wasSkippedToday())
+    const hadRegister = useRef(false)
+
+    useEffect(() => {
+        if (activeRegister) {
+            hadRegister.current = true
+        }
+        if (!activeRegister && hadRegister.current && !isLoading) {
+            skipToday()
+            setSkipped(true)
+        }
+    }, [activeRegister, isLoading])
 
     const isOpen = !isLoading && !activeRegister && !skipped
 

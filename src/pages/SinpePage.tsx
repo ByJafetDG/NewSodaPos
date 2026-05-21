@@ -381,8 +381,11 @@ function MsgCard({ msg, pending, onRead, onDelete, onPendingDelete, onCancelDele
     onCancelDelete: () => void
 }) {
     return (
-        <button
+        <div
+            role="button"
+            tabIndex={0}
             onClick={onRead}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onRead() }}
             className={cn(
                 'w-full text-left p-4 rounded-xl border transition-all cursor-pointer',
                 msg.isRead
@@ -449,6 +452,6 @@ function MsgCard({ msg, pending, onRead, onDelete, onPendingDelete, onCancelDele
                     <p className="text-[10px] text-[#3D506A] mt-1.5">{formatFull(msg.receivedAt)}</p>
                 </div>
             </div>
-        </button>
+        </div>
     )
 }

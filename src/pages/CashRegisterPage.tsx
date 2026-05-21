@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { sileo } from 'sileo'
 import {
     Wallet, DoorOpen, DoorClosed, Banknote, Smartphone,
     CheckCircle2, Clock, Edit2, Trash2, TrendingUp,
@@ -63,16 +64,70 @@ export function CashRegisterPage() {
 
     async function handleOpen() {
         if (!initialAmount) return
-        await openRegister.mutateAsync(parseAmount(initialAmount))
+        const amount = parseAmount(initialAmount)
+        await openRegister.mutateAsync(amount)
         setInitialAmount('')
         setOpenModal(false)
+        sileo.success({
+            title: 'Caja abierta',
+            description: (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(16,185,129,0.14) 0%, rgba(5,150,105,0.05) 100%)',
+                        border: '1px solid rgba(16,185,129,0.25)', borderRadius: 12, padding: '12px 14px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10B981', boxShadow: '0 0 8px rgba(16,185,129,0.6)', display: 'inline-block' }} />
+                            <span style={{ fontSize: 9, color: '#6EE7B7', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Fondo inicial</span>
+                        </div>
+                        <div style={{ fontSize: 28, color: '#10B981', fontWeight: 900, fontFamily: 'monospace', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                            ₡{amount.toLocaleString('es-CR')}
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 2 }}>
+                        <span style={{ fontSize: 10, color: '#374151' }}>Lista para recibir ventas</span>
+                        <span style={{ fontSize: 10, color: '#374151', fontFamily: 'monospace' }}>
+                            {crTime(new Date())}
+                        </span>
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     async function handleClose() {
         if (!activeRegister || !finalAmount) return
-        await closeRegister.mutateAsync({ registerId: activeRegister.id, finalAmount: parseAmount(finalAmount) })
+        const amount = parseAmount(finalAmount)
+        await closeRegister.mutateAsync({ registerId: activeRegister.id, finalAmount: amount })
         setFinalAmount('')
         setCloseModal(false)
+        sileo.success({
+            title: 'Caja cerrada',
+            description: (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(245,158,11,0.14) 0%, rgba(217,119,6,0.05) 100%)',
+                        border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, padding: '12px 14px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#F59E0B', display: 'inline-block' }} />
+                            <span style={{ fontSize: 9, color: '#FCD34D', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Conteo final</span>
+                        </div>
+                        <div style={{ fontSize: 28, color: '#F59E0B', fontWeight: 900, fontFamily: 'monospace', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                            ₡{amount.toLocaleString('es-CR')}
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 2 }}>
+                        <span style={{ fontSize: 10, color: '#374151' }}>Sesión cerrada correctamente</span>
+                        <span style={{ fontSize: 10, color: '#374151', fontFamily: 'monospace' }}>
+                            {crTime(new Date())}
+                        </span>
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     function handleEdit(r: CashRegister) {
@@ -83,11 +138,45 @@ export function CashRegisterPage() {
 
     async function handleSaveEdit() {
         if (!editingRegister) return
+        const oldInitial = editingRegister.initialAmount
+        const oldFinal = editingRegister.finalAmount ?? 0
+        const newInitial = parseAmount(editInitial)
+        const newFinal = parseAmount(editFinal)
         await updateRegister.mutateAsync({
             registerId: editingRegister.id,
-            updates: { initialAmount: parseAmount(editInitial), finalAmount: parseAmount(editFinal) },
+            updates: { initialAmount: newInitial, finalAmount: newFinal },
         })
         setEditingRegister(null)
+        sileo.success({
+            title: 'Caja actualizada',
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div style={{
+                            background: 'rgba(107,114,128,0.08)', border: '1px solid rgba(107,114,128,0.2)',
+                            borderRadius: 10, padding: '10px 12px',
+                        }}>
+                            <div style={{ fontSize: 9, color: '#6B7280', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>Antes</div>
+                            <div style={{ fontSize: 11, color: '#6B7280', lineHeight: 1.8 }}>
+                                <div>Inicial · {formatCurrency(oldInitial)}</div>
+                                <div>Final · {formatCurrency(oldFinal)}</div>
+                            </div>
+                        </div>
+                        <div style={{
+                            background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.2)',
+                            borderRadius: 10, padding: '10px 12px',
+                        }}>
+                            <div style={{ fontSize: 9, color: '#FB923C', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>Ahora</div>
+                            <div style={{ fontSize: 11, color: '#FB923C', lineHeight: 1.8 }}>
+                                <div>Inicial · {formatCurrency(newInitial)}</div>
+                                <div>Final · {formatCurrency(newFinal)}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     async function handleDeleteConfirm() {
@@ -708,12 +797,50 @@ function CashAdjustmentModal({ isOpen, onClose, cashRegisterId }: {
     async function handleConfirm() {
         const amt = parseAmount(amount)
         if (!amt) return
+        const capturedReason = reason.trim()
         await createAdjustment.mutateAsync({
             cashRegisterId,
             direction,
             amount: amt,
-            reason: reason.trim() || null,
+            reason: capturedReason || null,
             employeeName: selectedEmployee?.name ?? null,
+        })
+        sileo.success({
+            title: direction === 'IN' ? 'Ingreso registrado' : 'Retiro registrado',
+            description: (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{
+                        background: direction === 'IN'
+                            ? 'linear-gradient(135deg, rgba(14,165,233,0.14) 0%, rgba(2,132,199,0.05) 100%)'
+                            : 'linear-gradient(135deg, rgba(249,115,22,0.14) 0%, rgba(234,88,12,0.05) 100%)',
+                        border: `1px solid ${direction === 'IN' ? 'rgba(14,165,233,0.25)' : 'rgba(249,115,22,0.25)'}`,
+                        borderRadius: 12, padding: '12px 14px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                            <span style={{
+                                width: 7, height: 7, borderRadius: '50%', display: 'inline-block',
+                                background: direction === 'IN' ? '#38BDF8' : '#FB923C',
+                            }} />
+                            <span style={{
+                                fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
+                                color: direction === 'IN' ? '#7DD3FC' : '#FDBA74',
+                            }}>
+                                {direction === 'IN' ? 'Ingreso a caja' : 'Retiro de caja'}
+                            </span>
+                        </div>
+                        <div style={{
+                            fontSize: 28, fontWeight: 900, fontFamily: 'monospace', letterSpacing: '-0.02em', lineHeight: 1,
+                            color: direction === 'IN' ? '#38BDF8' : '#FB923C',
+                        }}>
+                            {direction === 'IN' ? '+' : '−'}₡{amt.toLocaleString('es-CR')}
+                        </div>
+                    </div>
+                    {capturedReason && (
+                        <div style={{ fontSize: 11, color: '#6B7280', lineHeight: 1.4, paddingLeft: 2 }}>{capturedReason}</div>
+                    )}
+                </div>
+            ),
+            position: 'top-right',
         })
         setAmount('')
         setReason('')

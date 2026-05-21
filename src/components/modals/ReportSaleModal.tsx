@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { X, CreditCard, Banknote, Smartphone, User, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useBusinessConfig } from '@/hooks/useConfig'
-import { toast } from '@/components/ui/Toast'
+import { sileo } from 'sileo'
 import { getSaleDetails } from '@/services/sales'
 
 function MarqueeText({ text, className }: { text: string; className?: string }) {
@@ -173,7 +173,25 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
     const handleReprint = async () => {
         const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
         if (!printerPort || !window.electronAPI?.printReceipt) {
-            toast.error('Impresora no configurada o no disponible')
+            sileo.error({
+                title: 'Sin impresora',
+                description: (
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{
+                            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+                            borderRadius: 10, padding: '8px 12px',
+                        }}>
+                            <div style={{ fontSize: 11, color: '#FCA5A5', lineHeight: 1.4 }}>
+                                No se detecta impresora configurada
+                            </div>
+                        </div>
+                        <div style={{ fontSize: 10, color: '#6B7280' }}>
+                            Ve a Ajustes → Impresora para configurarla
+                        </div>
+                    </div>
+                ),
+                position: 'top-right',
+            })
             return
         }
 
@@ -214,10 +232,36 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
                 ticketLogoUrl: config?.ticketLogoUrl || null,
                 currencySymbol: tOpts.currencySymbol ?? '₡',
             })
-            toast.success('Ticket enviado a la impresora')
+            sileo.success({
+                title: 'Ticket enviado',
+                description: (
+                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: '#10B981', fontWeight: 700 }}>✓</span>
+                        <span style={{ fontSize: 11, color: '#7A8FAA' }}>Enviado a la impresora · #{sale.saleNumber}</span>
+                    </div>
+                ),
+                position: 'top-right',
+            })
         } catch (err) {
             console.error(err)
-            toast.error('Error al intentar imprimir')
+            sileo.error({
+                title: 'Error de impresora',
+                description: (
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{
+                            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+                            borderRadius: 10, padding: '8px 12px',
+                        }}>
+                            <div style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Error</div>
+                            <div style={{ fontSize: 11, color: '#FCA5A5', lineHeight: 1.4 }}>No se pudo enviar el ticket a la impresora</div>
+                        </div>
+                        <div style={{ fontSize: 10, color: '#6B7280' }}>
+                            Verifica que la impresora esté encendida y conectada
+                        </div>
+                    </div>
+                ),
+                position: 'top-right',
+            })
         } finally {
             setPrinting(false)
         }

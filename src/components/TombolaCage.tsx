@@ -13,9 +13,13 @@ const INNER_R = CAGE_R - BALL_R - 2   // 108
 const SP = 18
 const R2 = (CAGE_R - BALL_R - 4) ** 2
 const SPIN_DURATION = 13000
-const DECEL_DURATION = 7000   // gradual stop: 13s → 20s total
-const GRAVITY = 0.09
-const WALL_DAMPING = 0.88
+const DECEL_DURATION = 7000
+const SPIN2_DURATION = 13000
+const DECEL2_DURATION = 7000
+const TOTAL_DURATION = SPIN_DURATION + DECEL_DURATION + SPIN2_DURATION + DECEL2_DURATION  // 40s
+const GRAVITY = 0.25
+const WALL_COR = 0.65
+const WALL_FRICTION = 0.15
 const BALL_RESTITUTION = 0.86
 const MAX_SPEED = 15
 const MIN_D = BALL_R * 2
@@ -175,7 +179,7 @@ export function TombolaCage({ totalNumbers, phase, drawnNumber, onSpinComplete }
             winnerCalledRef.current = false
             winnerIdxRef.current = -1
             setHoleActive(false)
-            setCountdown(Math.ceil((SPIN_DURATION + DECEL_DURATION) / 1000))
+            setCountdown(Math.ceil(TOTAL_DURATION / 1000))
             const shuffled = [...gridPosRef.current].sort(() => Math.random() - 0.5)
             physBallsRef.current = shuffled.map(p => ({
                 x: p.x, y: p.y,
@@ -183,10 +187,9 @@ export function TombolaCage({ totalNumbers, phase, drawnNumber, onSpinComplete }
                 vy: (Math.random() - 0.5) * 12,
             }))
             stopSoundRef.current = startSpinSound()
-            const total = SPIN_DURATION + DECEL_DURATION
-            const holeTimer = window.setTimeout(() => setHoleActive(true), total)
+            const holeTimer = window.setTimeout(() => setHoleActive(true), TOTAL_DURATION)
             const countdownInterval = setInterval(() => {
-                const remaining = Math.max(0, total - (performance.now() - startTime))
+                const remaining = Math.max(0, TOTAL_DURATION - (performance.now() - startTime))
                 setCountdown(Math.ceil(remaining / 1000))
                 if (remaining <= 0) clearInterval(countdownInterval)
             }, 200)
@@ -244,62 +247,53 @@ export function TombolaCage({ totalNumbers, phase, drawnNumber, onSpinComplete }
 
             if (cp === 'spinning') {
                 const elapsed = now - (startRef.current ?? now)
-                const holeOpen = elapsed >= SPIN_DURATION + DECEL_DURATION
+                const holeOpen = elapsed >= TOTAL_DURATION
                 let angularVel = 0
 
+                const P1D = SPIN_DURATION + DECEL_DURATION
+                const P2S = P1D + SPIN2_DURATION
+
                 if (elapsed < SPIN_DURATION) {
+                    // Phase 1: CW spin
                     const t = elapsed / SPIN_DURATION
                     angularVel = (3 + 12 * Math.sin(t * Math.PI)) * 0.45
-                } else if (!holeOpen) {
-                    const dt = Math.min((elapsed - SPIN_DURATION) / DECEL_DURATION, 1)
+                } else if (elapsed < P1D) {
+                    // Phase 1 decel: CW → 0
+                    const dt = (elapsed - SPIN_DURATION) / DECEL_DURATION
                     angularVel = 3 * 0.45 * (1 - dt) * (1 - dt)
+                } else if (elapsed < P2S) {
+                    // Phase 2: CCW spin
+                    const t = (elapsed - P1D) / SPIN2_DURATION
+                    angularVel = -(3 + 12 * Math.sin(t * Math.PI)) * 0.45
+                } else if (!holeOpen) {
+                    // Phase 2 decel: CCW → 0
+                    const dt = (elapsed - P2S) / DECEL2_DURATION
+                    angularVel = -3 * 0.45 * (1 - dt) * (1 - dt)
                 }
 
-                if (cageWiresRef.current && angularVel > 0) {
+                if (cageWiresRef.current && angularVel !== 0) {
                     cageWiresRef.current.style.transform = `rotate(${cageAngleRef.current += angularVel}deg)`
                 }
 
                 const balls = physBallsRef.current
                 const n = balls.length
 
-                // spinFraction: 1 at full spin → 0 at end of decel → 0 during hole
-                // Used to blend physics toward gravity-dominant as cage slows
-                const spinFraction = elapsed < SPIN_DURATION ? 1.0 :
-                    holeOpen ? 0.0 :
-                    (1 - Math.min((elapsed - SPIN_DURATION) / DECEL_DURATION, 1)) ** 2
-
-                const spinScale = holeOpen ? 0 : angularVel * 0.04
-                const inDecel = !holeOpen && elapsed >= SPIN_DURATION
-                const turbScale = holeOpen ? 0 : (inDecel ? angularVel * 0.24 : Math.max(angularVel * 0.24, 0.5))
-                // Friction increases as spin dies: 0.997 at full spin → 0.907 at stop → 0.90 during hole
-                const friction = holeOpen ? 0.90 : 0.997 - (1 - spinFraction) * 0.09
-                // Wall damping increases as spin dies: 0.88 at full spin → 0.30 at stop → 0.25 during hole
-                const wallDamp = holeOpen ? 0.25 : 0.30 + 0.58 * spinFraction
+                // omega: angular velocity in rad/frame — drives wall contact physics
+                const omega = angularVel * Math.PI / 180
+                const inDecel = (elapsed >= SPIN_DURATION && elapsed < P1D) || (elapsed >= P2S && !holeOpen)
+                const damping = inDecel ? 0.987 : 0.9995
 
                 for (let i = 0; i < n; i++) {
                     const b = balls[i]
-                    const dist = Math.sqrt(b.x * b.x + b.y * b.y)
-
-                    if (!holeOpen && dist > 1) {
-                        const tx = -b.y / dist, ty = b.x / dist
-                        const f = spinScale * (0.4 + 0.6 * dist / INNER_R)
-                        b.vx += tx * f
-                        b.vy += ty * f
-                    }
-
-                    if (!holeOpen) {
-                        b.vx += (Math.random() - 0.5) * turbScale
-                        b.vy += (Math.random() - 0.5) * turbScale
-                    } else {
-                        // Funnel toward exit: pull laterally toward x=0
-                        b.vx -= b.x * 0.008
-                    }
 
                     b.vy += holeOpen ? GRAVITY * 2.5 : GRAVITY
-                    b.vx *= friction
-                    b.vy *= friction
+                    b.vx *= damping
+                    b.vy *= damping
+                    if (holeOpen) b.vx -= b.x * 0.008
+
                     const spd = Math.sqrt(b.vx * b.vx + b.vy * b.vy)
                     if (spd > MAX_SPEED) { b.vx *= MAX_SPEED / spd; b.vy *= MAX_SPEED / spd }
+
                     b.x += b.vx
                     b.y += b.vy
 
@@ -310,66 +304,82 @@ export function TombolaCage({ totalNumbers, phase, drawnNumber, onSpinComplete }
                             winnerIdxRef.current = i
                             cbRef.current(i + 1)
                         } else if (winnerIdxRef.current === i) {
-                            // Winner ball already exited, let gravity carry it out
+                            // Winner already exited — let it fly
                         } else {
                             const nx = b.x / d, ny = b.y / d
                             b.x = nx * INNER_R
                             b.y = ny * INNER_R
-                            const dot = b.vx * nx + b.vy * ny
-                            b.vx = (b.vx - 2 * dot * nx) * wallDamp
-                            b.vy = (b.vy - 2 * dot * ny) * wallDamp
+                            // Rotating wall velocity (CW, screen coords y-down)
+                            const wallVx = -ny * omega * INNER_R
+                            const wallVy =  nx * omega * INNER_R
+                            const relVx = b.vx - wallVx
+                            const relVy = b.vy - wallVy
+                            const relDotN = relVx * nx + relVy * ny
+                            if (relDotN > 0) {
+                                b.vx -= (1 + WALL_COR) * relDotN * nx
+                                b.vy -= (1 + WALL_COR) * relDotN * ny
+                                const relTanVx = relVx - relDotN * nx
+                                const relTanVy = relVy - relDotN * ny
+                                b.vx -= WALL_FRICTION * relTanVx
+                                b.vy -= WALL_FRICTION * relTanVy
+                            }
                         }
                     }
                 }
 
-                // Ball-ball collisions via spatial grid — O(n) average vs O(n²) brute force
-                _gHead.fill(-1)
-                for (let i = 0; i < n; i++) {
-                    const gx = Math.floor((balls[i].x + GRID_OFF) / GRID_CELL)
-                    const gy = Math.floor((balls[i].y + GRID_OFF) / GRID_CELL)
-                    const key = gy * GRID_W + gx
-                    _gNext[i] = _gHead[key]
-                    _gHead[key] = i as unknown as never
-                }
-                for (let i = 0; i < n; i++) {
-                    const gx = Math.floor((balls[i].x + GRID_OFF) / GRID_CELL)
-                    const gy = Math.floor((balls[i].y + GRID_OFF) / GRID_CELL)
-                    for (let ddx = -1; ddx <= 1; ddx++) {
-                        const ngx = gx + ddx
-                        if (ngx < 0 || ngx >= GRID_W) continue
-                        for (let ddy = -1; ddy <= 1; ddy++) {
-                            const ngy = gy + ddy
-                            if (ngy < 0 || ngy >= GRID_W) continue
-                            let j = _gHead[ngy * GRID_W + ngx] as unknown as number
-                            while (j !== -1) {
-                                if (j > i) {
-                                    const dx = balls[j].x - balls[i].x
-                                    const dy = balls[j].y - balls[i].y
-                                    const d2 = dx * dx + dy * dy
-                                    if (d2 < MIN_D2 && d2 > 0.01) {
-                                        const d = Math.sqrt(d2)
-                                        const nx = dx / d, ny = dy / d
-                                        const ov = (MIN_D - d) * 0.5
-                                        balls[i].x -= nx * ov; balls[i].y -= ny * ov
-                                        balls[j].x += nx * ov; balls[j].y += ny * ov
-                                        const dvx = balls[i].vx - balls[j].vx
-                                        const dvy = balls[i].vy - balls[j].vy
-                                        const dot = dvx * nx + dvy * ny
-                                        if (dot > 0) {
-                                            const imp = dot * BALL_RESTITUTION
-                                            balls[i].vx -= imp * nx; balls[i].vy -= imp * ny
-                                            balls[j].vx += imp * nx; balls[j].vy += imp * ny
+                // Ball-ball collisions — 3 position-correction iterations for stable stacking
+                // Velocity impulse only on iter 0 to avoid double-counting
+                for (let iter = 0; iter < 3; iter++) {
+                    _gHead.fill(-1)
+                    for (let i = 0; i < n; i++) {
+                        const gx = Math.floor((balls[i].x + GRID_OFF) / GRID_CELL)
+                        const gy = Math.floor((balls[i].y + GRID_OFF) / GRID_CELL)
+                        const key = gy * GRID_W + gx
+                        _gNext[i] = _gHead[key]
+                        _gHead[key] = i as unknown as never
+                    }
+                    for (let i = 0; i < n; i++) {
+                        const gx = Math.floor((balls[i].x + GRID_OFF) / GRID_CELL)
+                        const gy = Math.floor((balls[i].y + GRID_OFF) / GRID_CELL)
+                        for (let ddx = -1; ddx <= 1; ddx++) {
+                            const ngx = gx + ddx
+                            if (ngx < 0 || ngx >= GRID_W) continue
+                            for (let ddy = -1; ddy <= 1; ddy++) {
+                                const ngy = gy + ddy
+                                if (ngy < 0 || ngy >= GRID_W) continue
+                                let j = _gHead[ngy * GRID_W + ngx] as unknown as number
+                                while (j !== -1) {
+                                    if (j > i) {
+                                        const dx = balls[j].x - balls[i].x
+                                        const dy = balls[j].y - balls[i].y
+                                        const d2 = dx * dx + dy * dy
+                                        if (d2 < MIN_D2 && d2 > 0.01) {
+                                            const d = Math.sqrt(d2)
+                                            const nx = dx / d, ny = dy / d
+                                            const ov = (MIN_D - d) * 0.5
+                                            balls[i].x -= nx * ov; balls[i].y -= ny * ov
+                                            balls[j].x += nx * ov; balls[j].y += ny * ov
+                                            if (iter === 0) {
+                                                const dvx = balls[i].vx - balls[j].vx
+                                                const dvy = balls[i].vy - balls[j].vy
+                                                const dot = dvx * nx + dvy * ny
+                                                if (dot > 0) {
+                                                    const imp = dot * BALL_RESTITUTION
+                                                    balls[i].vx -= imp * nx; balls[i].vy -= imp * ny
+                                                    balls[j].vx += imp * nx; balls[j].vy += imp * ny
+                                                }
+                                            }
                                         }
                                     }
+                                    j = _gNext[j] as unknown as number
                                 }
-                                j = _gNext[j] as unknown as number
                             }
                         }
                     }
                 }
 
                 // Fallback: if hole open > 8s and no ball exited (e.g. all stuck), pick nearest
-                if (holeOpen && !winnerCalledRef.current && elapsed > SPIN_DURATION + DECEL_DURATION + 8000) {
+                if (holeOpen && !winnerCalledRef.current && elapsed > TOTAL_DURATION + 8000) {
                     winnerCalledRef.current = true
                     let minD2 = Infinity, fallbackIdx = 0
                     for (let i = 0; i < n; i++) {

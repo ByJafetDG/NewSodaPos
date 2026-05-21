@@ -17,6 +17,7 @@ import { TimeWheelPicker, HOURS, MINUTES } from '@/components/ui/TimeWheelPicker
 import { usePendingSaleLoadStore } from '@/store/pendingSaleLoadStore'
 import { useUIStore } from '@/store/uiStore'
 import { toast } from '@/components/ui/Toast'
+import { sileo } from 'sileo'
 
 function toLocalISO(d: Date): string {
     const pad = (n: number) => String(n).padStart(2, '0')
@@ -153,6 +154,41 @@ export function ReportsPage() {
 
     const [from, to] = getDateRange(dateFilter, customFrom, customTo, showCustom)
     const { data: reportData } = useReportData(from, to)
+
+    const isFirstRender = useRef(true)
+    const prevPeriodLabel = useRef('')
+    useEffect(() => {
+        if (isFirstRender.current) {
+            isFirstRender.current = false
+            prevPeriodLabel.current = periodLabel
+            return
+        }
+        const prev = prevPeriodLabel.current
+        prevPeriodLabel.current = periodLabel
+        sileo.success({
+            title: 'Filtro actualizado',
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{
+                        display: 'flex', alignItems: 'stretch',
+                        background: 'rgba(0,0,0,0.3)', borderRadius: 10,
+                        border: '1px solid rgba(255,255,255,0.07)', overflow: 'hidden',
+                    }}>
+                        <div style={{ flex: 1, padding: '10px 14px', textAlign: 'center' }}>
+                            <div style={{ fontSize: 9, color: '#4B5563', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 5 }}>Antes</div>
+                            <div style={{ fontSize: 15, color: '#6B7280', fontWeight: 700, lineHeight: 1 }}>{prev}</div>
+                        </div>
+                        <div style={{ width: 1, background: 'rgba(255,255,255,0.07)' }} />
+                        <div style={{ flex: 1, padding: '10px 14px', textAlign: 'center' }}>
+                            <div style={{ fontSize: 9, color: '#22D3EE', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 5 }}>Ahora</div>
+                            <div style={{ fontSize: 15, color: '#22D3EE', fontWeight: 900, lineHeight: 1 }}>{periodLabel}</div>
+                        </div>
+                    </div>
+                </div>
+            ),
+            position: 'top-left',
+        })
+    }, [from, to])
     const { data: productsStock = [] } = useProductsStock()
     const { data: historicalLeaderboard = [] } = useCashierLeaderboard()
 

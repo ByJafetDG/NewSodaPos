@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { sileo } from 'sileo'
 import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
 import { useKeyboardStore } from '@/store/keyboardStore'
@@ -197,13 +198,62 @@ export function POSPage() {
 
     // ── Handlers ──────────────────────────────────────────────────────────────
     const tryAddProduct = useCallback((product: Product) => {
-        if (!product.isInfinite) {
-            const currentQty = items.find(i => i.id === product.id)?.quantity ?? 0
-            if (currentQty >= product.stockQty) return
+        // Use fresh product data from query — cart snapshot can be stale after realtime stock update
+        const fresh = products.find(p => p.id === product.id) ?? product
+        if (!fresh.isInfinite) {
+            const currentQty = items.find(i => i.id === fresh.id)?.quantity ?? 0
+            if (currentQty >= (fresh.stockQty ?? 0)) {
+                sileo.warning({
+                    title: 'Sin stock disponible',
+                    description: (
+                        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ fontSize: 13, color: '#E4ECF7', fontWeight: 600, lineHeight: 1.3 }}>{fresh.name}</div>
+                            <div style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.22)',
+                                borderRadius: 99, padding: '3px 10px', width: 'fit-content',
+                            }}>
+                                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#EF4444', display: 'inline-block' }} />
+                                <span style={{ fontSize: 10, color: '#FCA5A5', fontWeight: 700 }}>Sin unidades disponibles</span>
+                            </div>
+                        </div>
+                    ),
+                    position: 'top-right',
+                })
+                return
+            }
         }
-        addItem(product)
+        addItem(fresh)
+        if (activeOrderId && activeOrderName) {
+            sileo.success({
+                title: 'Guardado en cuenta',
+                description: (
+                    <div style={{ marginTop: 6 }}>
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(79,70,229,0.05) 100%)',
+                            border: '1px solid rgba(99,102,241,0.26)', borderRadius: 10, padding: '10px 12px',
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#818CF8', boxShadow: '0 0 7px 2px rgba(129,140,248,0.65)', display: 'inline-block', flexShrink: 0 }} />
+                                <span style={{ fontSize: 9, color: '#818CF8', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Cuenta activa</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: '#E4ECF7', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 5, lineHeight: 1.3 }}>
+                                {fresh.name}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                <span style={{ fontSize: 10, color: '#6366F1', fontWeight: 600, marginRight: 2 }}>→</span>
+                                <span style={{ fontSize: 10, color: '#A5B4FC', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {activeOrderName}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                position: 'top-left',
+            })
+        }
         useKeyboardStore.getState().close()
-    }, [items, addItem])
+    }, [items, addItem, products, activeOrderId, activeOrderName])
 
     // handleSearchSubmit is also called from the virtual keyboard's onEnter
     const handleSearchSubmit = (e?: React.FormEvent) => {
@@ -287,13 +337,16 @@ export function POSPage() {
                 return
             }
         }
+        const actualName = name.trim() || `Cuenta pendiente ${heldOrders.length + 1}`
+        const savedName = activeOrderId ? (activeOrderName ?? actualName) : actualName
+        const savedItemCount = items.length
+        const isUpdate = !!activeOrderId
         const debtSnapshot = pendingDebt.hasDebt
             ? { clientId: pendingDebt.clientId, clientName: pendingDebt.clientName, saleIds: pendingDebt.saleIds, debtTotal: pendingDebt.debtTotal, sales: pendingDebt.sales }
             : undefined
         if (activeOrderId) {
             updateHeldOrder(activeOrderId, items, discount, debtSnapshot, invoiceClient)
         } else {
-            const actualName = name.trim() || `Cuenta pendiente ${heldOrders.length + 1}`
             saveHeldOrder(actualName, items, discount, debtSnapshot, undefined, invoiceClient)
         }
         pendingDebt.clear()
@@ -303,6 +356,25 @@ export function POSPage() {
         setActiveOrderId(null)
         setActiveOrderName(null)
         setHeldOrdersView(null)
+        sileo.success({
+            title: isUpdate ? 'Cuenta actualizada' : 'Cuenta guardada',
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(79,70,229,0.05) 100%)',
+                        border: '1px solid rgba(99,102,241,0.26)', borderRadius: 10, padding: '12px 14px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#818CF8', boxShadow: '0 0 7px 2px rgba(129,140,248,0.65)', display: 'inline-block', flexShrink: 0 }} />
+                            <span style={{ fontSize: 9, color: '#818CF8', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{savedItemCount} producto{savedItemCount !== 1 ? 's' : ''}</span>
+                        </div>
+                        <div style={{ fontSize: 13, color: '#C7D2FE', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 6 }}>{savedName}</div>
+                        <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>Cambia de cuenta tranquilamente — los datos están seguros</div>
+                    </div>
+                </div>
+            ),
+            position: 'top-left',
+        })
     }
 
     const handleInvoiceClient = async (data: { name: string; cedula: string; email: string; ccEmails?: string[]; existingId?: string; companyId?: string; consumerName?: string; physicalInvoiceNumber?: string }) => {
@@ -357,6 +429,7 @@ export function POSPage() {
     }
 
     const handleNewCustomer = (name?: string) => {
+        const prevName = activeOrderName || (items.length > 0 && !activeOrderId ? (name?.trim() || 'Carrito sin cuenta') : null)
         if (items.length > 0 && !activeOrderId) {
             if (mergeSnapshot) {
                 const fusionId = crypto.randomUUID()
@@ -374,9 +447,35 @@ export function POSPage() {
         setAmountReceived('')
         setHeldOrdersView(null)
         pendingDebt.clear()
+        sileo.success({
+            title: 'Nueva cuenta',
+            description: (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {prevName && (
+                        <div style={{ display: 'flex', alignItems: 'stretch', background: 'rgba(0,0,0,0.3)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                            <div style={{ flex: 1, padding: '10px 12px', textAlign: 'center' }}>
+                                <div style={{ fontSize: 9, color: '#4B5563', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 4 }}>Anterior</div>
+                                <div style={{ fontSize: 11, color: '#6B7280', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prevName}</div>
+                            </div>
+                            <div style={{ width: 1, background: 'rgba(255,255,255,0.07)' }} />
+                            <div style={{ flex: 1, padding: '10px 12px', textAlign: 'center', background: 'rgba(16,185,129,0.06)' }}>
+                                <div style={{ fontSize: 9, color: '#10B981', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 4 }}>Ahora</div>
+                                <div style={{ fontSize: 12, color: '#34D399', fontWeight: 700 }}>Nueva cuenta</div>
+                            </div>
+                        </div>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.18)', borderRadius: 8, padding: '6px 10px' }}>
+                        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#10B981', boxShadow: '0 0 5px 2px rgba(16,185,129,0.55)', display: 'inline-block', flexShrink: 0 }} />
+                        <span style={{ fontSize: 10, color: '#6EE7B7', fontWeight: 600 }}>Carrito limpio · listo para el siguiente</span>
+                    </div>
+                </div>
+            ),
+            position: 'top-left',
+        })
     }
 
     const handleLoadHeldOrder = (order: HeldOrder) => {
+        const prevName = activeOrderName || (items.length > 0 && !activeOrderId ? 'Carrito sin cuenta' : null)
         if (items.length > 0 && !activeOrderId) {
             const saveName = mergeSnapshot && mergeSnapshot.length > 0
                 ? mergeSnapshot.map(o => o.name).join(' + ')
@@ -432,6 +531,28 @@ export function POSPage() {
         } else {
             pendingDebt.clear()
         }
+        sileo.success({
+            title: 'Cuenta cargada',
+            description: (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'stretch', background: 'rgba(0,0,0,0.3)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                        <div style={{ flex: 1, padding: '10px 12px', textAlign: 'center' }}>
+                            <div style={{ fontSize: 9, color: '#4B5563', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 4 }}>Anterior</div>
+                            <div style={{ fontSize: 11, color: '#6B7280', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prevName || '—'}</div>
+                        </div>
+                        <div style={{ width: 1, background: 'rgba(255,255,255,0.07)' }} />
+                        <div style={{ flex: 1, padding: '10px 12px', textAlign: 'center' }}>
+                            <div style={{ fontSize: 9, color: '#10B981', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 4 }}>Activa</div>
+                            <div style={{ fontSize: 11, color: '#10B981', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{order.name || 'Sin nombre'}</div>
+                        </div>
+                    </div>
+                    <div style={{ fontSize: 10, color: '#6B7280' }}>
+                        {validItems.length} producto{validItems.length !== 1 ? 's' : ''} · guardado automáticamente al cambiar
+                    </div>
+                </div>
+            ),
+            position: 'top-left',
+        })
     }
 
     const handlePaymentMethodChange = (method: PaymentMethod) => {
@@ -780,6 +901,35 @@ export function POSPage() {
                 paymentMethod: isCredit ? 'CREDITO' : method,
             })
             if (activeOrderId) deleteHeldOrder(activeOrderId)
+            const depleted = saleItems.filter(i => !i.product.isInfinite && i.product.stockQty - i.quantity <= 0)
+            if (depleted.length > 0)
+                sileo.warning({
+                    title: depleted.length === 1 ? 'Producto agotado' : `${depleted.length} productos agotados`,
+                    description: (
+                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                            {depleted.slice(0, 3).map(i => (
+                                <div key={i.product.id} style={{
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                                    padding: '5px 10px', borderRadius: 8,
+                                    background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.14)',
+                                }}>
+                                    <span style={{ fontSize: 11, color: '#CBD5E1', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {i.product.name}
+                                    </span>
+                                    <span style={{
+                                        fontSize: 9, background: 'rgba(239,68,68,0.18)', color: '#FCA5A5',
+                                        padding: '2px 8px', borderRadius: 99, fontWeight: 800, letterSpacing: '0.1em',
+                                        border: '1px solid rgba(239,68,68,0.28)', flexShrink: 0,
+                                    }}>AGOTADO</span>
+                                </div>
+                            ))}
+                            {depleted.length > 3 && (
+                                <div style={{ fontSize: 10, color: '#6B7280', paddingLeft: 4 }}>+{depleted.length - 3} producto{depleted.length - 3 > 1 ? 's' : ''} más</div>
+                            )}
+                        </div>
+                    ),
+                    position: 'top-right',
+                })
             clearCart()
             pendingSaleLoad.clearModifying()
             setAmountReceived('')
@@ -828,6 +978,29 @@ export function POSPage() {
             const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
 
             // --- AUTOMATIC PRINTING — await before drawer to avoid COM port conflict ---
+            if (!printerPort && window.electronAPI) {
+                sileo.warning({
+                    title: 'Sin impresora',
+                    description: (
+                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{
+                                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)',
+                                borderRadius: 10, padding: '9px 12px',
+                                display: 'flex', alignItems: 'center', gap: 8,
+                            }}>
+                                <span style={{ fontSize: 15 }}>🖨️</span>
+                                <div style={{ fontSize: 12, color: '#FCD34D', fontWeight: 600, lineHeight: 1.3 }}>
+                                    No se imprimirá ticket
+                                </div>
+                            </div>
+                            <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
+                                No se detecta impresora. Ve a Ajustes → Impresora para configurarla.
+                            </div>
+                        </div>
+                    ),
+                    position: 'top-right',
+                })
+            }
             if (printerPort && window.electronAPI?.printReceipt) {
                 const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
                 const selClient = capturedInvoiceClient
@@ -869,36 +1042,84 @@ export function POSPage() {
                     showDecimals: tOpts.showDecimals ?? true,
                     ticketLogoUrl: config?.ticketLogoUrl || null,
                     currencySymbol: tOpts.currencySymbol ?? '₡',
-                }).catch(err => console.error('[POS] Auto-print error:', err))
+                }).then(r => {
+                    if (!r.success) sileo.error({
+                        title: 'Error de impresora',
+                        description: (
+                            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                <div style={{
+                                    background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+                                    borderRadius: 10, padding: '8px 12px',
+                                }}>
+                                    <div style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Detalles del error</div>
+                                    <div style={{ fontSize: 11, color: '#FCA5A5', lineHeight: 1.4 }}>{r.error || 'Error desconocido'}</div>
+                                </div>
+                                <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
+                                    Verifica que la impresora esté encendida y conectada por USB
+                                </div>
+                            </div>
+                        ),
+                        position: 'top-right',
+                    })
+                }).catch(() => sileo.error({
+                    title: 'Error de impresora',
+                    description: (
+                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{
+                                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+                                borderRadius: 10, padding: '8px 12px',
+                            }}>
+                                <div style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Sin conexión</div>
+                                <div style={{ fontSize: 11, color: '#FCA5A5', lineHeight: 1.4 }}>No se pudo comunicar con la impresora</div>
+                            </div>
+                            <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
+                                Verifica que esté encendida y conectada por USB
+                            </div>
+                        </div>
+                    ),
+                    position: 'top-right',
+                }))
             }
 
             if (isCredit && clientId) {
                 const client = clients.find(c => c.id === clientId)
                 if (client?.email) {
-                    sendReceiptEmail({
-                        to: client.email,
-                        clientName: client.name,
-                        businessName: config?.name ?? 'Mi Soda',
-                        logoUrl: config?.emailLogoUrl,
-                        saleNumber: sale.saleNumber,
-                        date: sale.date,
-                        items: saleItems.map(i => ({
-                            name: i.product.name,
-                            quantity: i.quantity,
-                            unitPrice: i.unitPrice,
-                            subtotal: i.subtotal,
-                        })),
-                        subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
-                        modifiedFromSaleNumber: pendingSaleLoad.originalSaleNumber ?? undefined,
-                    }).then(result => {
-                        if (result.success) {
-                            toast.success(`Recibo enviado a ${client.email}`)
-                        } else if (result.isVerificationError) {
-                            toast.error('Dominio de correo no verificado. Configura el dominio en Resend.')
-                        } else {
-                            toast.error(`Error al enviar recibo: ${result.error}`)
+                    sileo.promise(
+                        sendReceiptEmail({
+                            to: client.email,
+                            clientName: client.name,
+                            businessName: config?.name ?? 'Mi Soda',
+                            logoUrl: config?.emailLogoUrl,
+                            saleNumber: sale.saleNumber,
+                            date: sale.date,
+                            items: saleItems.map(i => ({
+                                name: i.product.name,
+                                quantity: i.quantity,
+                                unitPrice: i.unitPrice,
+                                subtotal: i.subtotal,
+                            })),
+                            subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
+                            modifiedFromSaleNumber: pendingSaleLoad.originalSaleNumber ?? undefined,
+                        }).then(r => { if (!r.success) throw r; return r }),
+                        {
+                            loading: { title: 'Enviando recibo...', description: client.email, position: 'top-right' },
+                            success: {
+                                title: 'Recibo enviado',
+                                description: (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 2 }}>
+                                        <span style={{ color: '#10B981' }}>✓</span>
+                                        <span style={{ color: '#7A8FAA' }}>{client.email}</span>
+                                    </span>
+                                ),
+                                position: 'top-right' as const,
+                            },
+                            error: (err: any) => ({
+                                title: err?.isVerificationError ? 'Dominio no verificado' : 'Error al enviar recibo',
+                                description: err?.isVerificationError ? 'Configura el dominio en Resend' : (err?.error ?? ''),
+                                position: 'top-right' as const,
+                            }),
                         }
-                    })
+                    )
                 }
             }
 
@@ -948,6 +1169,28 @@ export function POSPage() {
         if (drawerEnabled && printerPort && window.electronAPI?.openDrawer) {
             window.electronAPI.openDrawer(printerPort)
                 .catch((err: any) => console.warn('[Drawer]', err))
+        } else if (drawerEnabled && window.electronAPI && (!printerPort || !window.electronAPI.openDrawer)) {
+            sileo.warning({
+                title: 'Cajón no disponible',
+                description: (
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{
+                            background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)',
+                            borderRadius: 10, padding: '9px 12px',
+                            display: 'flex', alignItems: 'center', gap: 8,
+                        }}>
+                            <span style={{ fontSize: 15 }}>🪙</span>
+                            <div style={{ fontSize: 12, color: '#FCD34D', fontWeight: 600, lineHeight: 1.3 }}>
+                                No se abrirá el cajón
+                            </div>
+                        </div>
+                        <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
+                            No se detecta impresora. El cajón de dinero requiere una impresora conectada y encendida.
+                        </div>
+                    </div>
+                ),
+                position: 'top-right',
+            })
         }
     }
 
@@ -972,10 +1215,40 @@ export function POSPage() {
         setActiveOrderId(null)
         setActiveOrderName(null)
         setHeldOrdersView(null)
+        sileo.success({
+            title: `${toMerge.length} cuentas fusionadas`,
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(139,92,246,0.15) 0%, rgba(109,40,217,0.05) 100%)',
+                        border: '1px solid rgba(139,92,246,0.26)', borderRadius: 10, padding: '10px 12px',
+                        display: 'flex', flexDirection: 'column', gap: 6,
+                    }}>
+                        {toMerge.map((o, i) => (
+                            <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{
+                                    width: 16, height: 16, borderRadius: 4,
+                                    background: 'rgba(139,92,246,0.25)', border: '1px solid rgba(139,92,246,0.4)',
+                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: 9, color: '#C4B5FD', fontWeight: 700, flexShrink: 0,
+                                }}>{i + 1}</span>
+                                <span style={{ fontSize: 11, color: '#DDD6FE', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name || 'Sin nombre'}</span>
+                            </div>
+                        ))}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, paddingTop: 6, borderTop: '1px solid rgba(139,92,246,0.15)' }}>
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#A78BFA', boxShadow: '0 0 5px 2px rgba(167,139,250,0.55)', display: 'inline-block', flexShrink: 0 }} />
+                            <span style={{ fontSize: 10, color: '#C4B5FD', fontWeight: 600 }}>Cuenta unificada lista para cobrar</span>
+                        </div>
+                    </div>
+                </div>
+            ),
+            position: 'top-left',
+        })
     }
 
     const handleUndoMerge = () => {
         if (!mergeSnapshot && !autoSavedFusionId) return
+        const capturedSnapshot = mergeSnapshot
         if (autoSavedFusionId) {
             deleteHeldOrder(autoSavedFusionId)
             setAutoSavedFusionId(null)
@@ -988,12 +1261,80 @@ export function POSPage() {
         }
         setActiveOrderId(null)
         setActiveOrderName(null)
+        sileo.success({
+            title: 'Fusión deshecha',
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(245,158,11,0.13) 0%, rgba(217,119,6,0.04) 100%)',
+                        border: '1px solid rgba(245,158,11,0.24)', borderRadius: 10, padding: '10px 12px',
+                        display: 'flex', flexDirection: 'column', gap: 6,
+                    }}>
+                        {capturedSnapshot && capturedSnapshot.map((o, i) => (
+                            <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{
+                                    width: 16, height: 16, borderRadius: 4,
+                                    background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.38)',
+                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: 9, color: '#FCD34D', fontWeight: 700, flexShrink: 0,
+                                }}>{i + 1}</span>
+                                <span style={{ fontSize: 11, color: '#FDE68A', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name || 'Sin nombre'}</span>
+                            </div>
+                        ))}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, paddingTop: 6, borderTop: '1px solid rgba(245,158,11,0.15)' }}>
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F59E0B', boxShadow: '0 0 5px 2px rgba(245,158,11,0.55)', display: 'inline-block', flexShrink: 0 }} />
+                            <span style={{ fontSize: 10, color: '#FCD34D', fontWeight: 600 }}>
+                                {capturedSnapshot?.length ?? 0} cuenta{(capturedSnapshot?.length ?? 0) !== 1 ? 's' : ''} restauradas al estado original
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            ),
+            position: 'top-left',
+        })
     }
 
     const handleConfirmPriceEdit = () => {
         if (editingItem && editPriceValue) {
             const p = parseFloat(editPriceValue)
-            if (p > 0) useCartStore.getState().updatePrice(editingItem.id, p)
+            if (p > 0) {
+                const oldPrice = editingItem.unitPrice
+                useCartStore.getState().updatePrice(editingItem.id, p)
+                sileo.success({
+                    title: 'Precio actualizado',
+                    description: (
+                        <div style={{ marginTop: 6 }}>
+                            <p style={{
+                                fontSize: 11, color: '#7A8FAA', fontWeight: 500, marginBottom: 10,
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                letterSpacing: '0.01em',
+                            }}>
+                                {editingItem.product.name}
+                            </p>
+                            <div style={{
+                                display: 'flex', alignItems: 'stretch',
+                                background: 'rgba(0,0,0,0.3)', borderRadius: 10,
+                                border: '1px solid rgba(255,255,255,0.07)', overflow: 'hidden',
+                            }}>
+                                <div style={{ flex: 1, padding: '10px 14px', textAlign: 'center' }}>
+                                    <div style={{ fontSize: 9, color: '#4B5563', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 5 }}>Antes</div>
+                                    <div style={{ fontSize: 17, color: '#6B7280', textDecoration: 'line-through', fontWeight: 700, lineHeight: 1 }}>
+                                        ₡{oldPrice.toLocaleString('es-CR')}
+                                    </div>
+                                </div>
+                                <div style={{ width: 1, background: 'rgba(255,255,255,0.07)' }} />
+                                <div style={{ flex: 1, padding: '10px 14px', textAlign: 'center' }}>
+                                    <div style={{ fontSize: 9, color: '#10B981', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 5 }}>Ahora</div>
+                                    <div style={{ fontSize: 17, color: '#10B981', fontWeight: 900, lineHeight: 1 }}>
+                                        ₡{p.toLocaleString('es-CR')}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ),
+                    position: 'top-right',
+                })
+            }
         }
         setEditingItem(null)
         setEditPriceValue('')

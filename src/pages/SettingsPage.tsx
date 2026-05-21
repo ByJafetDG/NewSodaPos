@@ -13,6 +13,7 @@ import { getDeletedProducts, restoreProduct, hardDeleteProduct } from '@/service
 import { getVoidedSales } from '@/services/sales'
 import { Button } from '@/components/atoms/Button'
 import { toast } from '@/components/ui/Toast'
+import { sileo } from 'sileo'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { EmployeeFormModal } from '@/components/modals/EmployeeFormModal'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
@@ -252,11 +253,72 @@ export function SettingsPage() {
 
     async function handleSaveBusiness() {
         await updateConfig.mutateAsync({ name: bizName, phone: bizPhone || null, address: bizAddress || null })
+        sileo.success({
+            title: 'Negocio guardado',
+            description: (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{
+                            width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+                            background: 'linear-gradient(135deg, rgba(249,115,22,0.25), rgba(249,115,22,0.08))',
+                            border: '1px solid rgba(249,115,22,0.3)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 19, fontWeight: 900, color: '#F97316',
+                        }}>
+                            {bizName.charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 14, color: '#E4ECF7', fontWeight: 700, lineHeight: 1.2, marginBottom: 3 }}>{bizName}</div>
+                            {(bizPhone || bizAddress) && (
+                                <div style={{ fontSize: 11, color: '#6B7280', lineHeight: 1.4 }}>
+                                    {[bizPhone, bizAddress].filter(Boolean).join(' · ')}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     async function handleSaveTicket() {
         await updateConfig.mutateAsync({ ticketHeader: ticketHeader || null, ticketFooter: ticketFooter || null })
         localStorage.setItem('pos_ticket_options', JSON.stringify(ticketOpts))
+        const activeOpts = [
+            ticketOpts.showCashier && 'Cajero',
+            ticketOpts.showChange && 'Cambio',
+            ticketOpts.showUnitPrice && 'Precio unitario',
+            ticketOpts.showHeader && 'Encabezado',
+        ].filter(Boolean) as string[]
+        sileo.success({
+            title: 'Ticket guardado',
+            description: (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {activeOpts.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                            {activeOpts.map(label => (
+                                <span key={label} style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                                    fontSize: 10, background: 'rgba(16,185,129,0.1)', color: '#10B981',
+                                    padding: '3px 9px', borderRadius: 99, fontWeight: 600,
+                                    border: '1px solid rgba(16,185,129,0.22)',
+                                }}>
+                                    <span style={{ fontSize: 8, fontWeight: 900 }}>✓</span>
+                                    {label}
+                                </span>
+                            ))}
+                        </div>
+                    ) : (
+                        <span style={{ fontSize: 11, color: '#6B7280' }}>Sin opciones activas</span>
+                    )}
+                    <div style={{ fontSize: 10, color: '#374151' }}>
+                        {activeOpts.length} opción{activeOpts.length !== 1 ? 'es' : ''} activa{activeOpts.length !== 1 ? 's' : ''}
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     async function handleUploadTicketLogo(file: File) {
@@ -929,18 +991,31 @@ export function SettingsPage() {
                                         onClick={async () => {
                                             setForcePushing(true)
                                             try {
-                                                const result = await window.electronAPI!.forcePush()
-                                                if (result.totalRemaining === 0) {
-                                                    toast.success('Re-sincronización completada — todo subido')
-                                                } else {
-                                                    const details = Object.entries(result.remaining)
-                                                        .map(([t, n]) => `${t}: ${n}`)
-                                                        .join(', ')
-                                                    const firstError = result.pushErrors?.[0] ?? ''
-                                                    toast.warning(`Sync incompleto (${details})${firstError ? ` — ${firstError}` : ''}`, 15000)
-                                                }
-                                            } catch {
-                                                toast.error('Error al re-sincronizar')
+                                                await sileo.promise(window.electronAPI!.forcePush(), {
+                                                    loading: { title: 'Sincronizando...', description: 'Subiendo cambios pendientes', position: 'top-right' },
+                                                    success: (result) => result.totalRemaining === 0
+                                                        ? {
+                                                            title: 'Sincronización completa',
+                                                            description: (
+                                                                <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 2 }}>
+                                                                    <span style={{ color: '#10B981' }}>✓</span>
+                                                                    <span style={{ color: '#7A8FAA' }}>Todo subido correctamente</span>
+                                                                </span>
+                                                            ),
+                                                            position: 'top-right' as const,
+                                                          }
+                                                        : {
+                                                            title: 'Sync incompleto',
+                                                            type: 'warning' as const,
+                                                            description: (
+                                                                <span style={{ fontSize: 12, color: '#F59E0B', marginTop: 2, display: 'block' }}>
+                                                                    {Object.entries(result.remaining).map(([t, n]) => `${t}: ${n}`).join(' · ')}
+                                                                </span>
+                                                            ),
+                                                            position: 'top-right' as const,
+                                                          },
+                                                    error: { title: 'Error al re-sincronizar', description: 'Revisa tu conexión a internet', position: 'top-right' },
+                                                })
                                             } finally {
                                                 setForcePushing(false)
                                             }
