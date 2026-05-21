@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import { Package, ArrowDownToLine, ScanBarcode, PackageSearch, Plus } from 'lucide-react'
-import { toast } from '@/components/ui/Toast'
+import { Package, ArrowDownToLine } from 'lucide-react'
+import { sileo } from 'sileo'
 import { ProductsTable } from '@/components/organisms/inventory/ProductsTable'
 import { StockEntryPanel } from '@/components/organisms/inventory/StockEntryPanel'
 import { MovementsPanel } from '@/components/organisms/inventory/MovementsPanel'
 import type { MovementBatch } from '@/components/organisms/inventory/MovementsPanel'
-import { BaseModal } from '@/components/modals/BaseModal'
 import { ProductFormModal } from '@/components/modals/ProductFormModal'
 import { ScanBufferModal } from '@/components/modals/ScanBufferModal'
 import { ManageCategoriesModal } from '@/components/modals/ManageCategoriesModal'
@@ -48,7 +47,6 @@ export function InventoryPage() {
     const [deletingProduct, setDeletingProduct] = useState<Product | null>(null)
     const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
     const [selectedBatch, setSelectedBatch] = useState<MovementBatch | null>(null)
-    const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null)
     const [inventoryScanBuffer, setInventoryScanBuffer] = useState<string | null>(null)
     const [createBarcode, setCreateBarcode] = useState('')
 
@@ -96,7 +94,7 @@ export function InventoryPage() {
         const result = await deleteProduct.mutateAsync(deletingProduct.id)
         setDeletingProduct(null)
         if (result?.soft) {
-            toast.info(`"${name}" fue archivado porque tiene ventas registradas`)
+            sileo.success({ title: `"${name}" fue archivado porque tiene ventas registradas`, position: 'top-right' })
         }
     }
 
@@ -111,20 +109,106 @@ export function InventoryPage() {
         notes: string
     ) {
         const batchRef = crypto.randomUUID()
+        const totalUnits = entries.reduce((s, e) => s + e.qty, 0)
         await createMovementBatch.mutateAsync({
             entries: entries.map(e => ({ productId: e.productId, qty: e.qty })),
             batchRef,
             notes: notes || undefined,
         })
         setEntrySubTab('movimientos')
+        sileo.success({
+            title: 'Ingreso confirmado',
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(16,185,129,0.15) 0%, rgba(5,150,105,0.05) 100%)',
+                        border: '1px solid rgba(16,185,129,0.26)', borderRadius: 10, padding: '12px 14px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', boxShadow: '0 0 7px 2px rgba(16,185,129,0.65)', display: 'inline-block', flexShrink: 0 }} />
+                            <span style={{ fontSize: 9, color: '#10B981', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const }}>Inventario actualizado</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 20, marginBottom: notes ? 10 : 0 }}>
+                            <div>
+                                <div style={{ fontSize: 9, color: '#6B7280', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: 2 }}>Productos</div>
+                                <div style={{ fontSize: 20, color: '#34D399', fontWeight: 800, fontFamily: 'monospace' }}>{entries.length}</div>
+                            </div>
+                            <div style={{ width: 1, background: 'rgba(16,185,129,0.15)' }} />
+                            <div>
+                                <div style={{ fontSize: 9, color: '#6B7280', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: 2 }}>Unidades</div>
+                                <div style={{ fontSize: 20, color: '#34D399', fontWeight: 800, fontFamily: 'monospace' }}>+{totalUnits}</div>
+                            </div>
+                        </div>
+                        {notes && (
+                            <div style={{ fontSize: 10, color: '#6B7280', borderTop: '1px solid rgba(16,185,129,0.12)', paddingTop: 6 }}>"{notes}"</div>
+                        )}
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     async function handleUpdateMovementQty(mv: InventoryMovement, newQty: number) {
-        await updateMovement.mutateAsync({ id: mv.id, newQty, type: mv.type, productId: mv.productId, oldQty: mv.quantity })
+        const oldQty = mv.quantity
+        await updateMovement.mutateAsync({ id: mv.id, newQty, type: mv.type, productId: mv.productId, oldQty })
+        const productName = products.find(p => p.id === mv.productId)?.name ?? 'Producto'
+        sileo.success({
+            title: 'Cantidad actualizada',
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{
+                        display: 'flex', alignItems: 'stretch',
+                        background: 'rgba(0,0,0,0.3)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden',
+                    }}>
+                        <div style={{ flex: 1, padding: '10px 12px', textAlign: 'center' }}>
+                            <div style={{ fontSize: 9, color: '#4B5563', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' as const, marginBottom: 4 }}>Antes</div>
+                            <div style={{ fontSize: 20, color: '#6B7280', fontWeight: 800, fontFamily: 'monospace' }}>+{oldQty}</div>
+                        </div>
+                        <div style={{ width: 1, background: 'rgba(255,255,255,0.07)' }} />
+                        <div style={{ flex: 1, padding: '10px 12px', textAlign: 'center', background: 'rgba(16,185,129,0.06)' }}>
+                            <div style={{ fontSize: 9, color: '#10B981', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' as const, marginBottom: 4 }}>Ahora</div>
+                            <div style={{ fontSize: 20, color: '#34D399', fontWeight: 800, fontFamily: 'monospace' }}>+{newQty}</div>
+                        </div>
+                    </div>
+                    <div style={{ marginTop: 5, fontSize: 10, color: '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                        {productName}
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     async function handleDeleteMovement(mv: InventoryMovement) {
+        const productName = products.find(p => p.id === mv.productId)?.name ?? 'Producto'
         await deleteMovement.mutateAsync({ id: mv.id, type: mv.type, quantity: mv.quantity, productId: mv.productId })
+        setSelectedBatch(prev => {
+            if (!prev) return null
+            const remaining = prev.movements.filter(m => m.id !== mv.id)
+            return remaining.length === 0 ? null : { ...prev, movements: remaining }
+        })
+        sileo.success({
+            title: 'Movimiento eliminado',
+            description: (
+                <div style={{ marginTop: 6 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(239,68,68,0.1) 0%, rgba(220,38,38,0.03) 100%)',
+                        border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: '10px 12px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#EF4444', boxShadow: '0 0 7px 2px rgba(239,68,68,0.55)', display: 'inline-block', flexShrink: 0 }} />
+                            <span style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const }}>Stock revertido</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#D1D5DB', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginBottom: 3 }}>
+                            {productName}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#6B7280' }}>−{mv.quantity} unidades revertidas del stock</div>
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     return (
@@ -184,7 +268,7 @@ export function InventoryPage() {
                                 products={products}
                                 onConfirm={handleConfirmEntry}
                                 isPending={createMovementBatch.isPending}
-                                onProductNotFound={b => setNotFoundBarcode(b)}
+                                onProductNotFound={b => { setEditingProduct(null); setCreateBarcode(b); setProductFormOpen(true) }}
                             />
                         ) : (
                             <MovementsPanel
@@ -259,41 +343,6 @@ export function InventoryPage() {
                 }}
             />
 
-            <BaseModal isOpen={notFoundBarcode !== null} onClose={() => setNotFoundBarcode(null)} title="" width="max-w-sm">
-                <div className="flex flex-col items-center text-center gap-4 py-2">
-                    <div className="w-14 h-14 rounded-2xl bg-orange-500/10 flex items-center justify-center">
-                        <PackageSearch size={28} className="text-orange-400" />
-                    </div>
-                    <div>
-                        <p className="text-[15px] font-semibold text-[#E4ECF7] mb-1">Producto no encontrado</p>
-                        {notFoundBarcode && (
-                            <div className="flex items-center justify-center gap-1.5 mb-2">
-                                <ScanBarcode size={13} className="text-[#3D506A]" />
-                                <span className="text-[12px] font-mono text-[#7A8FAA]">{notFoundBarcode}</span>
-                            </div>
-                        )}
-                        <p className="text-[13px] text-[#3D506A] leading-relaxed">
-                            Ningún producto activo tiene ese código.<br />
-                            Intenta escanearlo una vez más, o agrégalo al sistema.
-                        </p>
-                    </div>
-                    <div className="flex flex-col gap-2 w-full">
-                        <button
-                            onClick={() => setNotFoundBarcode(null)}
-                            className="w-full h-10 rounded-xl bg-[#1C2438] border border-[#283A56] text-[#E4ECF7] text-[13px] font-medium hover:bg-[#243050] transition-colors cursor-pointer"
-                        >
-                            Escanear de nuevo
-                        </button>
-                        <button
-                            onClick={() => { setNotFoundBarcode(null); handleNewProduct() }}
-                            className="w-full h-10 rounded-xl bg-orange-500/15 border border-orange-500/30 text-orange-400 text-[13px] font-medium flex items-center justify-center gap-2 hover:bg-orange-500/25 transition-colors cursor-pointer"
-                        >
-                            <Plus size={14} />
-                            Agregar producto
-                        </button>
-                    </div>
-                </div>
-            </BaseModal>
         </div>
     )
 }

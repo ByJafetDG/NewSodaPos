@@ -14,6 +14,7 @@ interface StockEntryState {
     scanMode: boolean
     addEntry: (product: Product) => void
     setQty: (productId: string, qty: number) => void
+    moveEntry: (productId: string, direction: 'up' | 'down') => void
     setNotes: (notes: string) => void
     setScanMode: (v: boolean) => void
     clear: () => void
@@ -37,6 +38,20 @@ export const useStockEntryStore = create<StockEntryState>()(
                         }
                     }
                     return { entries: [...state.entries, { productId: product.id, product, qty: 1 }] }
+                })
+            },
+
+            moveEntry: (productId, direction) => {
+                set(state => {
+                    const idx = state.entries.findIndex(e => e.productId === productId)
+                    if (idx === -1) return state
+                    const arr = [...state.entries]
+                    if (direction === 'up' && idx > 0) {
+                        [arr[idx], arr[idx - 1]] = [arr[idx - 1], arr[idx]]
+                    } else if (direction === 'down' && idx < arr.length - 1) {
+                        [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]]
+                    }
+                    return { entries: arr }
                 })
             },
 

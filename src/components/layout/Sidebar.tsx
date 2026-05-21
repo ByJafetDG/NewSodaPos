@@ -205,6 +205,9 @@ export function Sidebar() {
         return () => clearInterval(t)
     }, [])
 
+    const crNow = new Date(time.getTime() - 6 * 60 * 60 * 1000)
+    const crDate = `${String(crNow.getUTCDate()).padStart(2,'0')}/${String(crNow.getUTCMonth()+1).padStart(2,'0')}/${crNow.getUTCFullYear()}`
+
     return (
         <nav
             className="flex flex-col h-full flex-shrink-0 bg-[#0B0E19] border-r border-[#192030]"
@@ -264,7 +267,7 @@ export function Sidebar() {
                                 ? <Wifi size={12} />
                                 : <WifiOff size={12} />
                             }
-                            {syncInfo.isOnline ? 'En línea' : 'Sin conexión'}
+                            {syncInfo.isOnline ? crDate : 'Sin conexión'}
                         </div>
 
                         {/* Sync badge */}

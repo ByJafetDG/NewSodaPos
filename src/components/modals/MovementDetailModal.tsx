@@ -3,6 +3,7 @@ import { Minus, Plus, Trash2, ArrowDownToLine } from 'lucide-react'
 import { BaseModal } from './BaseModal'
 import { Button } from '@/components/atoms/Button'
 import { Badge } from '@/components/atoms/Badge'
+import { crDateStr, crTime } from '@/lib/utils'
 import type { InventoryMovement, Product } from '@/types'
 import type { MovementBatch } from '@/components/organisms/inventory/MovementsPanel'
 
@@ -20,10 +21,8 @@ export function MovementDetailModal({
 }: MovementDetailModalProps) {
     if (!batch) return null
 
-    const date = batch.date.toLocaleDateString('es-CR', {
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-    })
-    const time = batch.date.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+    const date = crDateStr(batch.date)
+    const time = crTime(batch.date)
     const totalUnits = batch.movements.reduce((s, m) => s + m.quantity, 0)
     const note = batch.movements[0]?.notes
 
@@ -51,16 +50,18 @@ export function MovementDetailModal({
                 </div>
 
                 {/* Movement rows */}
-                <div className="divide-y divide-[#192030] rounded-xl border border-[#1E2A40] overflow-hidden">
-                    {batch.movements.map(mv => (
-                        <MovementRow
-                            key={mv.id}
-                            movement={mv}
-                            products={products}
-                            onUpdateQty={onUpdateQty}
-                            onDelete={onDelete}
-                        />
-                    ))}
+                <div className="max-h-[52vh] overflow-y-auto rounded-xl border border-[#1E2A40]">
+                    <div className="divide-y divide-[#192030]">
+                        {batch.movements.map(mv => (
+                            <MovementRow
+                                key={mv.id}
+                                movement={mv}
+                                products={products}
+                                onUpdateQty={onUpdateQty}
+                                onDelete={onDelete}
+                            />
+                        ))}
+                    </div>
                 </div>
 
                 <Button variant="secondary" size="md" onClick={onClose} className="w-full">
@@ -78,9 +79,10 @@ function MovementRow({ movement, products, onUpdateQty, onDelete }: {
     onDelete: (mv: InventoryMovement) => void
 }) {
     const [localQty, setLocalQty] = useState(movement.quantity)
+    const [committedQty, setCommittedQty] = useState(movement.quantity)
     const [confirmingDelete, setConfirmingDelete] = useState(false)
     const product = products.find(p => p.id === movement.productId)
-    const isDirty = localQty !== movement.quantity
+    const isDirty = localQty !== committedQty
 
     return (
         <div className="flex flex-col px-4 py-3 gap-2">
@@ -148,13 +150,13 @@ function MovementRow({ movement, products, onUpdateQty, onDelete }: {
                         Cambio pendiente: +{movement.quantity} → +{localQty}
                     </span>
                     <button
-                        onClick={() => setLocalQty(movement.quantity)}
+                        onClick={() => setLocalQty(committedQty)}
                         className="h-6 px-2 rounded-md text-[11px] text-[#7A8FAA] bg-[#1C2438] border border-[#283A56] cursor-pointer hover:bg-[#243050]"
                     >
                         Cancelar
                     </button>
                     <button
-                        onClick={() => onUpdateQty(movement, localQty)}
+                        onClick={() => { setCommittedQty(localQty); onUpdateQty(movement, localQty) }}
                         className="h-6 px-2 rounded-md text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 cursor-pointer hover:bg-emerald-500/20"
                     >
                         Confirmar

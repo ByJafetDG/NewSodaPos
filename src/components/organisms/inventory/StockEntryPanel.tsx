@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ScanBarcode, ScanLine, Plus, Minus, X, ClipboardList, Package } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ScanBarcode, ScanLine, Plus, Minus, Trash2, ClipboardList, Package, ChevronUp, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
 import { SearchDropdown } from '@/components/molecules/SearchDropdown'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useStockEntryStore, type StockEntry } from '@/store/stockEntryStore'
 import { cn, formatCurrency } from '@/lib/utils'
+import { sileo } from 'sileo'
 import type { Product } from '@/types'
 
 interface StockEntryPanelProps {
@@ -16,10 +18,9 @@ interface StockEntryPanelProps {
 }
 
 export function StockEntryPanel({ products, onConfirm, isPending, onProductNotFound }: StockEntryPanelProps) {
-    const { entries, notes, scanMode, addEntry, setQty, setNotes, setScanMode, clear } = useStockEntryStore()
+    const { entries, notes, scanMode, addEntry, setQty, moveEntry, setNotes, setScanMode, clear } = useStockEntryStore()
 
     const [barcode, setBarcode] = useState('')
-    const [errorMsg, setErrorMsg] = useState('')
     const [scanFlash, setScanFlash] = useState(false)
     const suppressKb = useSuppressKeyboard()
 
@@ -40,6 +41,7 @@ export function StockEntryPanel({ products, onConfirm, isPending, onProductNotFo
         const product = products.find(p => p.isActive && (p.barcode ?? '') === q)
         if (product) {
             addEntry(product)
+            showAddedToast(product)
             setBarcode('')
             triggerScanFlash()
             suppressKb.current = true
@@ -50,6 +52,29 @@ export function StockEntryPanel({ products, onConfirm, isPending, onProductNotFo
     function triggerScanFlash() {
         setScanFlash(true)
         setTimeout(() => setScanFlash(false), 500)
+    }
+
+    function showAddedToast(product: Product) {
+        sileo.success({
+            title: 'Agregado al ingreso',
+            description: (
+                <div style={{ marginTop: 6 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(16,185,129,0.14) 0%, rgba(5,150,105,0.05) 100%)',
+                        border: '1px solid rgba(16,185,129,0.24)', borderRadius: 10, padding: '10px 12px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', boxShadow: '0 0 7px 2px rgba(16,185,129,0.6)', display: 'inline-block', flexShrink: 0 }} />
+                            <span style={{ fontSize: 9, color: '#10B981', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const }}>Ingresar mercadería</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#E4ECF7', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                            {product.name}
+                        </div>
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
     }
 
     function handleBarcodeSubmit() {
@@ -63,16 +88,37 @@ export function StockEntryPanel({ products, onConfirm, isPending, onProductNotFo
         )
         if (!product) {
             setBarcode('')
-            if (onProductNotFound) {
-                onProductNotFound(q)
-            } else {
-                setErrorMsg(`No se encontró: "${q}"`)
-                setTimeout(() => setErrorMsg(''), 2000)
-            }
+            suppressKb.current = true
+            setTimeout(() => barcodeKb.ref.current?.focus(), 80)
+            sileo.action({
+                title: 'Producto no encontrado',
+                description: (
+                    <div style={{ marginTop: 6 }}>
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(239,68,68,0.12) 0%, rgba(220,38,38,0.04) 100%)',
+                            border: '1px solid rgba(239,68,68,0.22)', borderRadius: 10, padding: '10px 12px',
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#EF4444', boxShadow: '0 0 8px 2px rgba(239,68,68,0.6)', display: 'inline-block', flexShrink: 0 }} />
+                                <span style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const }}>No registrado</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: '#D1D5DB', fontFamily: 'monospace', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginBottom: 4 }}>
+                                {q}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#6B7280' }}>
+                                Ningún producto activo tiene este código
+                            </div>
+                        </div>
+                    </div>
+                ),
+                ...(onProductNotFound ? { button: { title: 'Agregar producto', onClick: () => onProductNotFound(q) } } : {}),
+                position: 'top-right',
+            })
             return
         }
         setBarcode('')
         addEntry(product)
+        showAddedToast(product)
         if (scanMode) triggerScanFlash()
         suppressKb.current = true
         setTimeout(() => barcodeKb.ref.current?.focus(), 50)
@@ -141,6 +187,7 @@ export function StockEntryPanel({ products, onConfirm, isPending, onProductNotFo
                                     allowOutOfStock
                                     onSelect={(product) => {
                                         addEntry(product)
+                                        showAddedToast(product)
                                         setBarcode('')
                                         suppressKb.current = true
                                         setTimeout(() => barcodeKb.ref.current?.focus(), 50)
@@ -164,9 +211,6 @@ export function StockEntryPanel({ products, onConfirm, isPending, onProductNotFo
                             <Plus size={14} />
                         </Button>
                     </div>
-                    {errorMsg && (
-                        <p className="mt-1.5 text-[12px] text-red-400">{errorMsg}</p>
-                    )}
                 </div>
 
                 {/* Entry list */}
@@ -178,16 +222,23 @@ export function StockEntryPanel({ products, onConfirm, isPending, onProductNotFo
                             description="Escanea un código para agregar"
                         />
                     ) : (
-                        <div className="divide-y divide-[#0F1523]">
-                            {entries.map(entry => (
-                                <EntryRow
-                                    key={entry.productId}
-                                    entry={entry}
-                                    onQtyChange={qty => setQty(entry.productId, qty)}
-                                    onRemove={() => setQty(entry.productId, 0)}
-                                />
+                        <motion.div className="divide-y divide-[#0F1523]">
+                            {entries.map((entry, i) => (
+                                <motion.div key={entry.productId} layout transition={{ duration: 0.18, ease: 'easeInOut' }}>
+                                    <EntryRow
+                                        entry={entry}
+                                        onQtyChange={qty => setQty(entry.productId, qty)}
+                                        onRemove={() => setQty(entry.productId, 0)}
+                                        onFocusScan={scanMode ? () => {
+                                            suppressKb.current = true
+                                            setTimeout(() => barcodeKb.ref.current?.focus(), 80)
+                                        } : undefined}
+                                        onMoveUp={entries.length > 1 && i > 0 ? () => moveEntry(entry.productId, 'up') : undefined}
+                                        onMoveDown={entries.length > 1 && i < entries.length - 1 ? () => moveEntry(entry.productId, 'down') : undefined}
+                                    />
+                                </motion.div>
                             ))}
-                        </div>
+                        </motion.div>
                     )}
                 </div>
             </div>
@@ -239,17 +290,50 @@ function EntryRow({
     entry,
     onQtyChange,
     onRemove,
+    onFocusScan,
+    onMoveUp,
+    onMoveDown,
 }: {
     entry: StockEntry
     onQtyChange: (qty: number) => void
     onRemove: () => void
+    onFocusScan?: () => void
+    onMoveUp?: () => void
+    onMoveDown?: () => void
 }) {
     const { product, qty } = entry
     const newStock = product.isInfinite ? product.stockQty : product.stockQty + qty
+    const [confirmingRemove, setConfirmingRemove] = useState(false)
+    const hasReorder = onMoveUp !== undefined || onMoveDown !== undefined
 
     return (
-        <div className="flex items-center gap-3 px-4 py-3 hover:bg-[#0D1117]/60 transition-colors">
-            <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 px-3 py-3 transition-colors">
+            {/* Reorder handle */}
+            {hasReorder && (
+                <div className="flex flex-col shrink-0">
+                    <button
+                        onClick={onMoveUp}
+                        disabled={!onMoveUp}
+                        className={cn(
+                            'w-6 h-6 rounded flex items-center justify-center transition-all',
+                            onMoveUp ? 'text-[#3D506A] active:text-[#E4ECF7] active:bg-[#1C2438] cursor-pointer' : 'text-[#192030] cursor-default'
+                        )}
+                    >
+                        <ChevronUp size={14} />
+                    </button>
+                    <button
+                        onClick={onMoveDown}
+                        disabled={!onMoveDown}
+                        className={cn(
+                            'w-6 h-6 rounded flex items-center justify-center transition-all',
+                            onMoveDown ? 'text-[#3D506A] active:text-[#E4ECF7] active:bg-[#1C2438] cursor-pointer' : 'text-[#192030] cursor-default'
+                        )}
+                    >
+                        <ChevronDown size={14} />
+                    </button>
+                </div>
+            )}
+            <div className="flex-1 min-w-0 pl-1">
                 <p className="text-[13px] font-medium text-[#E4ECF7] truncate">{product.name}</p>
                 {!product.isInfinite && (
                     <p className="text-[11px] text-[#3D506A] mt-0.5">
@@ -262,26 +346,59 @@ function EntryRow({
 
             <div className="flex items-center gap-1 shrink-0">
                 <button
-                    onClick={() => onQtyChange(qty - 1)}
+                    onClick={() => { onQtyChange(qty - 1); onFocusScan?.() }}
                     className="w-8 h-8 rounded-lg bg-[#1C2438] border border-[#283A56] text-[#E4ECF7] flex items-center justify-center hover:bg-[#243050] transition-all cursor-pointer"
                 >
                     <Minus size={12} />
                 </button>
                 <span className="w-8 text-center text-[14px] font-bold text-[#E4ECF7]">{qty}</span>
                 <button
-                    onClick={() => onQtyChange(qty + 1)}
+                    onClick={() => { onQtyChange(qty + 1); onFocusScan?.() }}
                     className="w-8 h-8 rounded-lg bg-[#1C2438] border border-[#283A56] text-[#E4ECF7] flex items-center justify-center hover:bg-[#243050] transition-all cursor-pointer"
                 >
                     <Plus size={12} />
                 </button>
             </div>
 
-            <button
-                onClick={onRemove}
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer shrink-0"
-            >
-                <X size={13} />
-            </button>
+            {confirmingRemove ? (
+                <div className="flex gap-1 shrink-0">
+                    <button
+                        onClick={() => setConfirmingRemove(false)}
+                        className="h-7 px-2 rounded-lg text-[11px] text-[#7A8FAA] bg-[#1C2438] border border-[#283A56] cursor-pointer hover:bg-[#243050]"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        onClick={() => {
+                            onRemove()
+                            onFocusScan?.()
+                            setConfirmingRemove(false)
+                            sileo.success({
+                                title: 'Producto retirado',
+                                description: (
+                                    <div style={{ marginTop: 6 }}>
+                                        <div style={{ fontSize: 12, color: '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                                            {product.name}
+                                        </div>
+                                        <div style={{ fontSize: 10, color: '#4B5563', marginTop: 3 }}>Retirado del ingreso</div>
+                                    </div>
+                                ),
+                                position: 'top-right',
+                            })
+                        }}
+                        className="h-7 px-2 rounded-lg text-[11px] text-red-400 bg-red-500/10 border border-red-500/20 cursor-pointer hover:bg-red-500/20"
+                    >
+                        Eliminar
+                    </button>
+                </div>
+            ) : (
+                <button
+                    onClick={() => setConfirmingRemove(true)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer shrink-0"
+                >
+                    <Trash2 size={13} />
+                </button>
+            )}
         </div>
     )
 }

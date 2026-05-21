@@ -35,7 +35,7 @@ function getDateRange(filter: string, customFrom: string, customTo: string, show
     else if (filter === 'Semana') { from.setDate(from.getDate() - 7); from.setHours(0, 0, 0, 0) }
     else if (filter === 'Mes')   { from.setDate(from.getDate() - 30); from.setHours(0, 0, 0, 0) }
     else if (filter === 'Año')   { from.setFullYear(from.getFullYear() - 1); from.setHours(0, 0, 0, 0) }
-    else from.setFullYear(2000)
+    else { from.setFullYear(2000, 0, 1); from.setHours(0, 0, 0, 0) }
     return [toLocalISO(from), toLocalISO(to)]
 }
 
@@ -65,6 +65,7 @@ export function ReportsPage() {
     const [customFrom, setCustomFrom] = useState('')
     const [customTo, setCustomTo] = useState('')
     const [showCustom, setShowCustom] = useState(false)
+    const [selectedHour, setSelectedHour] = useState<number | null>(null)
 
     // Sale detail
     const [selectedSale, setSelectedSale] = useState<any | null>(null)
@@ -216,6 +217,17 @@ export function ReportsPage() {
     const inventoryValue = products.reduce((sum: any, p: any) => sum + ((p.price ?? 0) * (p.stockQty ?? 0)), 0)
     const pendingCredit = (reportData?.totalDebt ?? 0) - (reportData?.totalPaid ?? 0)
 
+    const hourlyCounts = useMemo(() => {
+        const arr = Array(24).fill(0)
+        completedSales.forEach((s: any) => {
+            const h = new Date(s.paidAt ?? s.date).getHours()
+            if (h >= 0 && h < 24) arr[h]++
+        })
+        return arr
+    }, [completedSales])
+
+    const hourlyPeakIdx = effectiveHourly.indexOf(Math.max(...effectiveHourly, 1))
+
     const cajeros = useMemo(() => {
         const names = new Set<string>()
         ;(sales as any[]).forEach((s: any) => {
@@ -236,6 +248,7 @@ export function ReportsPage() {
                 const filterMinutes = filterHour * 60 + parseInt(MINUTES[filterMinuteIdx])
                 if (saleMinutes < filterMinutes) return false
             }
+            if (selectedHour !== null && new Date(s.paidAt ?? s.date).getHours() !== selectedHour) return false
             return true
         })
         .sort((a: any, b: any) =>
@@ -248,6 +261,44 @@ export function ReportsPage() {
 
     const lowStock = products.filter((p: any) => !p.isInfinite && p.stockQty <= p.minStock && p.stockQty > 0)
     const outOfStock = products.filter((p: any) => !p.isInfinite && p.stockQty === 0)
+
+    const handleHourSelect = (h: number | null) => {
+        const prev = selectedHour !== null ? fmtHour(selectedHour) : 'Todo el día'
+        const next = h !== null ? fmtHour(h) : 'Todo el día'
+        const isPeak = h !== null && h === hourlyPeakIdx
+        setSelectedHour(h)
+        if (h !== null) { setTimeActive(false); setShowTimePicker(false) }
+        sileo.success({
+            title: h === null
+                ? 'Filtro de hora quitado'
+                : isPeak
+                    ? `Hora pico · ${fmtHour(h)}`
+                    : `Ventas de ${fmtHour(h)}`,
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{
+                        display: 'flex', alignItems: 'stretch',
+                        background: 'rgba(0,0,0,0.3)', borderRadius: 10,
+                        border: '1px solid rgba(255,255,255,0.07)', overflow: 'hidden',
+                    }}>
+                        <div style={{ flex: 1, padding: '10px 14px', textAlign: 'center' }}>
+                            <div style={{ fontSize: 9, color: '#4B5563', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' as const, marginBottom: 5 }}>Antes</div>
+                            <div style={{ fontSize: 15, color: '#6B7280', fontWeight: 700, lineHeight: 1 }}>{prev}</div>
+                        </div>
+                        <div style={{ width: 1, background: 'rgba(255,255,255,0.07)' }} />
+                        <div style={{ flex: 1, padding: '10px 14px', textAlign: 'center' }}>
+                            <div style={{ fontSize: 9, color: '#22D3EE', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' as const, marginBottom: 5 }}>Ahora</div>
+                            <div style={{ fontSize: 15, color: '#22D3EE', fontWeight: 900, lineHeight: 1 }}>{next}</div>
+                            {h !== null && hourlyCounts[h] > 0 && (
+                                <div style={{ fontSize: 10, color: '#7A8FAA', marginTop: 4 }}>{hourlyCounts[h]} venta{hourlyCounts[h] !== 1 ? 's' : ''}</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            ),
+            position: 'top-right',
+        })
+    }
 
     return (
         <div className="flex flex-col h-full">
@@ -393,7 +444,12 @@ export function ReportsPage() {
                 </div>
 
                 {/* Sales by hour */}
-                <HourlySalesChart data={effectiveHourly} />
+                <HourlySalesChart
+                    data={effectiveHourly}
+                    counts={hourlyCounts}
+                    selectedHour={selectedHour}
+                    onHourSelect={handleHourSelect}
+                />
 
                 {/* Recent sales + Stock alerts */}
                 <div className="grid grid-cols-2 gap-4">
@@ -420,17 +476,21 @@ export function ReportsPage() {
                                     onClick={() => setShowTimePicker(v => !v)}
                                     className={cn(
                                         'flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-[12px] font-medium transition-all cursor-pointer',
-                                        timeActive
+                                        timeActive || selectedHour !== null
                                             ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-400'
                                             : 'bg-[#101520] border-[#1A2236] text-[#3D506A] hover:text-[#7A8FAA]'
                                     )}
                                 >
                                     <Clock size={12} />
-                                    {timeActive ? `${HOURS[filterHour]}:${MINUTES[filterMinuteIdx]}` : 'Hora'}
+                                    {timeActive
+                                        ? `${HOURS[filterHour]}:${MINUTES[filterMinuteIdx]}`
+                                        : selectedHour !== null
+                                            ? `${String(selectedHour).padStart(2, '0')}:00`
+                                            : 'Hora'}
                                 </button>
-                                {timeActive && (
+                                {(timeActive || selectedHour !== null) && (
                                     <button
-                                        onClick={() => { setTimeActive(false); setShowTimePicker(false) }}
+                                        onClick={() => { setTimeActive(false); setShowTimePicker(false); if (selectedHour !== null) handleHourSelect(null) }}
                                         className="w-5 h-5 rounded-full bg-[#1A2236] border border-[#1E2A40] text-[#3D506A] hover:text-[#E4ECF7] flex items-center justify-center transition-all cursor-pointer"
                                     >
                                         <X size={9} />
@@ -443,8 +503,8 @@ export function ReportsPage() {
                                         <TimeWheelPicker
                                             hour={filterHour}
                                             minuteIndex={filterMinuteIdx}
-                                            onHourChange={h => { setFilterHour(h); setTimeActive(true) }}
-                                            onMinuteChange={mi => { setFilterMinuteIdx(mi); setTimeActive(true) }}
+                                            onHourChange={h => { setFilterHour(h); setTimeActive(true); setSelectedHour(null) }}
+                                            onMinuteChange={mi => { setFilterMinuteIdx(mi); setTimeActive(true); setSelectedHour(null) }}
                                         />
                                         <div className="flex gap-2 mt-3">
                                             <button
@@ -454,7 +514,7 @@ export function ReportsPage() {
                                                 Limpiar
                                             </button>
                                             <button
-                                                onClick={() => { setTimeActive(true); setShowTimePicker(false) }}
+                                                onClick={() => { setTimeActive(true); setShowTimePicker(false); setSelectedHour(null) }}
                                                 className="flex-1 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-[11px] text-cyan-400 hover:bg-cyan-500/25 transition-all cursor-pointer"
                                             >
                                                 Aplicar
@@ -654,9 +714,14 @@ function fmtHour(h: number) {
     return `${h - 12}pm`
 }
 
-function HourlySalesChart({ data }: { data: number[] }) {
+function HourlySalesChart({ data, counts, selectedHour, onHourSelect }: {
+    data: number[]
+    counts: number[]
+    selectedHour: number | null
+    onHourSelect: (h: number | null) => void
+}) {
     const max = Math.max(...data, 1)
-    const peakIdx = data.indexOf(max)
+    const peakIdx = data.indexOf(Math.max(...data, 1))
     const activeHours = data.filter(v => v > 0).length
 
     const top3 = data
@@ -669,7 +734,30 @@ function HourlySalesChart({ data }: { data: number[] }) {
         <div className="rounded-2xl bg-[#0F1623] border border-[#192030] p-4">
             {/* Header */}
             <div className="flex items-center justify-between mb-5">
-                <p className="text-[12px] font-semibold text-[#7A8FAA]">Ventas por hora</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[12px] font-semibold text-[#7A8FAA]">Ventas por hora</p>
+                    {selectedHour !== null ? (
+                        <>
+                            <button
+                                onClick={() => onHourSelect(null)}
+                                className="flex items-center gap-1 h-5 px-2 rounded-md bg-cyan-500/15 border border-cyan-500/30 text-[10px] text-cyan-400 active:opacity-70 cursor-pointer"
+                            >
+                                {fmtHour(selectedHour)}
+                                <X size={8} />
+                            </button>
+                            {data[selectedHour] > 0 && (
+                                <span className="text-[12px] font-bold text-cyan-300">
+                                    {formatCurrency(data[selectedHour])}
+                                    {counts[selectedHour] > 0 && (
+                                        <span className="text-[10px] font-normal text-[#7A8FAA] ml-1.5">
+                                            · {counts[selectedHour]} venta{counts[selectedHour] !== 1 ? 's' : ''}
+                                        </span>
+                                    )}
+                                </span>
+                            )}
+                        </>
+                    ) : null}
+                </div>
                 {activeHours > 0 && (
                     <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
                         <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
@@ -682,34 +770,33 @@ function HourlySalesChart({ data }: { data: number[] }) {
 
             {/* Chart */}
             <div className="relative">
-                {/* Peak value label */}
-                {activeHours > 0 && (
-                    <div
-                        className="absolute -top-1 text-[9px] font-bold text-cyan-400 whitespace-nowrap"
-                        style={{ left: `calc(${(peakIdx / 24) * 100}% + ${peakIdx / 24 < 0.8 ? '4px' : '-40px'})` }}
-                    >
-                        {formatCurrency(max)}
-                    </div>
-                )}
-
                 {/* Bars */}
-                <div className="flex items-end gap-px mt-4" style={{ height: '120px' }}>
+                <div className="flex items-end gap-px" style={{ height: '120px' }}>
                     {data.map((val, h) => {
                         const heightPct = (val / max) * 100
                         const isPeak = h === peakIdx && val > 0
                         const isTop3 = top3.some(x => x.h === h)
+                        const isSelected = selectedHour === h
+                        const isDimmed = selectedHour !== null && !isSelected
                         return (
-                            <div key={h} className="flex-1 flex items-end" style={{ height: '100%' }}>
+                            <div
+                                key={h}
+                                className={cn('flex-1 flex items-end', val > 0 && 'cursor-pointer active:opacity-60')}
+                                style={{ height: '100%' }}
+                                onClick={() => val > 0 && onHourSelect(isSelected ? null : h)}
+                            >
                                 <div
                                     className={cn(
-                                        'w-full rounded-t transition-all',
+                                        'w-full rounded-t transition-all duration-150',
                                         val === 0
                                             ? 'bg-transparent'
-                                            : isPeak
-                                                ? 'bg-cyan-400'
-                                                : isTop3
-                                                    ? 'bg-cyan-500/70'
-                                                    : 'bg-cyan-500/30'
+                                            : isSelected
+                                                ? 'bg-cyan-300'
+                                                : isPeak
+                                                    ? isDimmed ? 'bg-cyan-400/20' : 'bg-cyan-400'
+                                                    : isTop3
+                                                        ? isDimmed ? 'bg-cyan-500/20' : 'bg-cyan-500/70'
+                                                        : isDimmed ? 'bg-cyan-500/10' : 'bg-cyan-500/30'
                                     )}
                                     style={{ height: val > 0 ? `${Math.max(heightPct, 3)}%` : '0%' }}
                                 />
@@ -723,7 +810,14 @@ function HourlySalesChart({ data }: { data: number[] }) {
                     {data.map((_, h) => (
                         <div key={h} className="flex-1 text-center">
                             {(h % 4 === 0) && (
-                                <span className="text-[9px] text-[#3D506A]">{fmtHour(h)}</span>
+                                <span className={cn(
+                                    'text-[9px]',
+                                    selectedHour !== null && h <= selectedHour && selectedHour < h + 4
+                                        ? 'text-cyan-400 font-semibold'
+                                        : 'text-[#3D506A]'
+                                )}>
+                                    {fmtHour(h)}
+                                </span>
                             )}
                         </div>
                     ))}
@@ -758,17 +852,35 @@ function HourlySalesChart({ data }: { data: number[] }) {
                     {top3.map((x, i) => {
                         const pct = Math.round((x.v / max) * 100)
                         const medals = ['🥇', '🥈', '🥉']
+                        const isThisSelected = selectedHour === x.h
                         return (
-                            <div key={x.h} className="flex items-center gap-3">
+                            <div
+                                key={x.h}
+                                onClick={() => onHourSelect(isThisSelected ? null : x.h)}
+                                className={cn(
+                                    'flex items-center gap-3 rounded-lg px-1 py-0.5 cursor-pointer active:opacity-70 transition-colors border',
+                                    isThisSelected
+                                        ? 'bg-cyan-500/10 border-cyan-500/20'
+                                        : 'border-transparent'
+                                )}
+                            >
                                 <span className="text-[12px] w-5 shrink-0">{medals[i]}</span>
-                                <span className="text-[12px] text-[#7A8FAA] w-12 shrink-0">{fmtHour(x.h)}</span>
+                                <span className={cn(
+                                    'text-[12px] w-12 shrink-0 font-medium',
+                                    isThisSelected ? 'text-cyan-400' : 'text-[#7A8FAA]'
+                                )}>
+                                    {fmtHour(x.h)}
+                                </span>
                                 <div className="flex-1 h-1.5 rounded-full bg-[#1C2438]">
                                     <div
-                                        className="h-full rounded-full bg-cyan-500/60"
+                                        className={cn('h-full rounded-full', isThisSelected ? 'bg-cyan-400' : 'bg-cyan-500/60')}
                                         style={{ width: `${pct}%` }}
                                     />
                                 </div>
-                                <span className="text-[12px] font-semibold text-[#E4ECF7] w-24 text-right shrink-0">
+                                <span className={cn(
+                                    'text-[12px] font-semibold w-24 text-right shrink-0',
+                                    isThisSelected ? 'text-cyan-400' : 'text-[#E4ECF7]'
+                                )}>
                                     {formatCurrency(x.v)}
                                 </span>
                             </div>

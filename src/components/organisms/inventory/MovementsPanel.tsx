@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ArrowDownToLine, History } from 'lucide-react'
 import { Badge } from '@/components/atoms/Badge'
 import { EmptyState } from '@/components/atoms/EmptyState'
+import { crDateStr, crTime } from '@/lib/utils'
 import type { InventoryMovement, Product } from '@/types'
 
 interface MovementBatch {
@@ -22,7 +23,15 @@ function groupMovements(movements: InventoryMovement[]): MovementBatch[] {
     for (const mv of movements) {
         const key = mv.reference ?? mv.id
         if (!map.has(key)) {
-            map.set(key, { reference: key, date: new Date(mv.date as any), type: mv.type, movements: [] })
+            const rawDate = mv.date as any
+            let date: Date
+            if (typeof rawDate === 'string') {
+                const s = (rawDate as string).replace(' ', 'T')
+                date = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z')
+            } else {
+                date = rawDate as Date
+            }
+            map.set(key, { reference: key, date, type: mv.type, movements: [] })
         }
         map.get(key)!.movements.push(mv)
     }
@@ -80,10 +89,10 @@ export function MovementsPanel({ movements, products, onOpenBatch }: MovementsPa
                             >
                                 <td className="px-4 py-3">
                                     <p className="text-[13px] text-[#E4ECF7]">
-                                        {batch.date.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                        {crDateStr(batch.date)}
                                     </p>
                                     <p className="text-[11px] text-[#3D506A] mt-0.5">
-                                        {batch.date.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })}
+                                        {crTime(batch.date)}
                                     </p>
                                 </td>
                                 <td className="px-3 py-3">
