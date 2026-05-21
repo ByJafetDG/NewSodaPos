@@ -51,6 +51,9 @@ function parseSinpeAmount(body?: string): string | null {
     // US format: "5,800.00" → comma=miles, dot=decimal
     } else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(raw)) {
         num = parseFloat(raw.replace(/,/g, ''))
+    // Single comma with 1-2 trailing digits = CR/EU decimal separator ("1,00" → 1, "2,5" → 2.5)
+    } else if (/^\d+(\s?\d{3})*(,\d{1,2})$/.test(raw)) {
+        num = parseFloat(raw.replace(/[\s]/g, '').replace(',', '.'))
     } else {
         num = parseFloat(raw.replace(/[,\s]/g, ''))
     }

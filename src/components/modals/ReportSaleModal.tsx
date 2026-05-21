@@ -68,7 +68,7 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
             const data = await getSaleDetails(sale.modifiedFromSaleId)
             setOriginalSale(data)
         } catch {
-            toast.error('No se pudo cargar la venta original')
+            sileo.error({ title: 'No se pudo cargar la venta original' })
         } finally {
             setLoadingOriginal(false)
         }
@@ -578,7 +578,7 @@ function SaleActions({
             if (confirm === 'modify' && onModify) await onModify(sale.id)
             onClose()
         } catch (err: any) {
-            toast.error(err?.message ?? 'Error al procesar')
+            sileo.error({ title: err?.message ?? 'Error al procesar' })
         } finally {
             setLoading(false)
             setConfirm(null)
