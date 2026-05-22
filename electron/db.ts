@@ -671,6 +671,24 @@ export function initDb() {
   } catch {}
 
   try {
+    db.exec(`ALTER TABLE Client ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE Client ADD COLUMN deletedAt TEXT`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE Company ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE Company ADD COLUMN deletedAt TEXT`);
+  } catch {}
+
+  // Migrar clientes con isActive=0 existentes → isDeleted=1
+  try {
+    db.exec(`UPDATE Client SET isDeleted = 1, deletedAt = updatedAt WHERE isActive = 0 AND isDeleted = 0`);
+  } catch {}
+
+  try {
     db.exec(`ALTER TABLE Sale ADD COLUMN companyId TEXT`);
   } catch {}
 

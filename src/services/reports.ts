@@ -33,9 +33,10 @@ export async function getCashierHistoricalLeaderboard(): Promise<Array<{ notes: 
 export async function getReportData(from: string, to: string) {
     if (window.electronAPI) {
         const sales = await window.electronAPI.dbQuery(`
-            SELECT s.*, c.name as clientName, c.code as clientCode
+            SELECT s.*, c.name as clientName, c.code as clientCode, co.name as companyName
             FROM Sale s
             LEFT JOIN Client c ON s.clientId = c.id
+            LEFT JOIN Company co ON s.companyId = co.id
             WHERE (s.date >= ? AND s.date <= ?)
                OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
             ORDER BY COALESCE(s.paidAt, s.date) DESC
@@ -141,7 +142,7 @@ export async function getReportData(from: string, to: string) {
     const [salesRes, expensesRes, productsRes, creditSalesRes, paymentsRes] = await Promise.all([
         supabase
             .from('Sale')
-            .select('*, client:Client(name, code), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
+            .select('*, client:Client(name, code), company:Company(name), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
             .or(`and(date.gte.${from},date.lte.${to}),and(paidAt.gte.${from},paidAt.lte.${to},paidAt.not.is.null)`)
             .order('date', { ascending: false }),
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, CreditCard, Banknote, Smartphone, User, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare } from 'lucide-react'
+import { X, CreditCard, Banknote, Smartphone, User, UserCheck, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare } from 'lucide-react'
 import { cn, formatCurrency, crTime, crDateStr } from '@/lib/utils'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { sileo } from 'sileo'
@@ -315,6 +315,9 @@ function SaleMeta({ sale }: { sale: any }) {
         : 'Sin cajero'
     const isSplitCredit = sale.notes?.startsWith('Crédito dividido') ?? false
     const clientName = sale.clientName ?? sale.client?.name ?? null
+    const companyName = sale.companyName ?? sale.company?.name ?? null
+    const consumerName = sale.consumerName ?? null
+    const invoicedTo = companyName ?? clientName ?? consumerName ?? null
 
     return (
         <div className="flex items-center gap-3 flex-wrap px-5 py-2.5 bg-[#090C14] border-b border-[#192030]">
@@ -328,17 +331,27 @@ function SaleMeta({ sale }: { sale: any }) {
                 <span className="text-[11px] text-[#3D506A]">Cajero</span>
                 <span className="text-[12px] text-[#7A8FAA]">{cashier}</span>
             </div>
-            {clientName && (
+            {invoicedTo && (
                 <>
                     <span className="w-px h-3 bg-[#1C2438] shrink-0" />
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
                         {sale.isCredit
-                            ? <CreditCard size={11} className="text-violet-400" />
-                            : <Receipt size={11} className="text-blue-400" />
+                            ? <CreditCard size={11} className="text-violet-400 shrink-0" />
+                            : <Receipt size={11} className="text-blue-400 shrink-0" />
                         }
-                        <span className={cn("text-[12px]", sale.isCredit ? "text-violet-400" : "text-blue-400")}>
-                            {sale.isCredit ? clientName : `Facturado a: ${clientName}`}
-                        </span>
+                        <MarqueeText
+                            text={sale.isCredit ? invoicedTo : `Facturado a: ${invoicedTo}`}
+                            className={cn("text-[12px] max-w-[160px]", sale.isCredit ? "text-violet-400" : "text-blue-400")}
+                        />
+                    </div>
+                </>
+            )}
+            {consumerName && invoicedTo !== consumerName && (
+                <>
+                    <span className="w-px h-3 bg-[#1C2438] shrink-0" />
+                    <div className="flex items-center gap-1.5 min-w-0">
+                        <UserCheck size={11} className="text-[#3D506A] shrink-0" />
+                        <MarqueeText text={consumerName} className="text-[12px] text-[#7A8FAA] max-w-[140px]" />
                     </div>
                 </>
             )}

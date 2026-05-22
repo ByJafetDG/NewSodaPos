@@ -5,7 +5,7 @@ import {
     Phone, Mail, ChevronLeft, CheckCircle2, Receipt, Banknote,
     Check, ChevronDown, CreditCard, History, IdCard,
     Building2, X, Pencil, Send, FileDown, ChevronRight, Printer,
-    Smartphone, Banknote as BanknoteIcon, ArrowLeft, Landmark, Ban,
+    Smartphone, Banknote as BanknoteIcon, ArrowLeft, Landmark, Ban, RotateCcw,
 } from 'lucide-react'
 import { Button } from '@/components/atoms/Button'
 import { EmptyState } from '@/components/atoms/EmptyState'
@@ -17,9 +17,11 @@ import { SaleDetailModal } from '@/components/modals/SaleDetailModal'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import {
     useClients, useCreateClient, useUpdateClient, useDeleteClient,
+    useDeletedClients, useRestoreClient, useHardDeleteClient,
     useCreditSales, useSettleSale, useSettleSaleDirect, useSettleClientSales, useSalesByClient,
     useDeleteCreditSale, useConvertCreditPayment,
     useCompanies, useCreateCompany, useUpdateCompany, useDeleteCompany,
+    useDeletedCompanies, useRestoreCompany, useHardDeleteCompany,
     useAllCompanySales, useCompanySales,
 } from '@/hooks/useClients'
 import { useActiveRegister } from '@/hooks/useCashRegister'
@@ -70,7 +72,7 @@ function statCount(clients: Client[], type?: ClientType) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function BalancesPage() {
-    const [mainTab, setMainTab] = useState<'clientes' | 'empresas'>('clientes')
+    const [mainTab, setMainTab] = useState<'clientes' | 'empresas' | 'papelera'>('clientes')
     const [search, setSearch] = useState('')
     const [typeFilter, setTypeFilter] = useState<TypeFilter>('TODOS')
     const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
@@ -94,6 +96,12 @@ export function BalancesPage() {
     const createClient = useCreateClient()
     const updateClient = useUpdateClient()
     const deleteClient = useDeleteClient()
+    const { data: deletedClients = [] } = useDeletedClients()
+    const { data: deletedCompanies = [] } = useDeletedCompanies()
+    const restoreClient = useRestoreClient()
+    const hardDeleteClient = useHardDeleteClient()
+    const restoreCompany = useRestoreCompany()
+    const hardDeleteCompany = useHardDeleteCompany()
     const settleSale = useSettleSale()
     const settleClientSales = useSettleClientSales()
     const createCompany = useCreateCompany()
@@ -172,8 +180,13 @@ export function BalancesPage() {
 
     async function handleDeleteConfirm() {
         if (!deletingClient) return
-        await deleteClient.mutateAsync(deletingClient.id)
-        setDeletingClient(null)
+        try {
+            await deleteClient.mutateAsync(deletingClient.id)
+            setDeletingClient(null)
+        } catch (e: any) {
+            toast.error(e?.message ?? 'Error al eliminar')
+            setDeletingClient(null)
+        }
     }
 
     async function handleCompanyFormConfirm(data: Omit<Company, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>) {
@@ -187,8 +200,13 @@ export function BalancesPage() {
 
     async function handleDeleteCompanyConfirm() {
         if (!deletingCompany) return
-        await deleteCompany.mutateAsync(deletingCompany.id)
-        setDeletingCompany(null)
+        try {
+            await deleteCompany.mutateAsync(deletingCompany.id)
+            setDeletingCompany(null)
+        } catch (e: any) {
+            toast.error(e?.message ?? 'Error al eliminar')
+            setDeletingCompany(null)
+        }
     }
 
     // Navigate to client detail
@@ -267,6 +285,16 @@ export function BalancesPage() {
                             <Building2 size={12} />
                             Empresas
                             {companies.length > 0 && <span className="bg-orange-500/20 text-orange-400 text-[10px] px-1.5 rounded-full">{companies.length}</span>}
+                        </button>
+                        <button
+                            onClick={() => setMainTab('papelera')}
+                            className={cn('flex items-center gap-1.5 px-3 h-7 rounded-lg text-[12px] font-semibold transition-all cursor-pointer', mainTab === 'papelera' ? 'bg-[#1E2A40] text-[#E4ECF7]' : 'text-[#3D506A] hover:text-[#7A8FAA]')}
+                        >
+                            <Trash2 size={12} />
+                            Papelera
+                            {(deletedClients.length + deletedCompanies.length) > 0 && (
+                                <span className="bg-red-500/20 text-red-400 text-[10px] px-1.5 rounded-full">{deletedClients.length + deletedCompanies.length}</span>
+                            )}
                         </button>
                     </div>
                 </div>
@@ -357,6 +385,18 @@ export function BalancesPage() {
                         </div>
                     )}
                 </div>
+            )}
+
+            {/* ── PAPELERA TAB ─────────────────────────────────────────── */}
+            {mainTab === 'papelera' && (
+                <TrashView
+                    deletedClients={deletedClients}
+                    deletedCompanies={deletedCompanies}
+                    onRestoreClient={id => restoreClient.mutateAsync(id)}
+                    onHardDeleteClient={id => hardDeleteClient.mutateAsync(id)}
+                    onRestoreCompany={id => restoreCompany.mutateAsync(id)}
+                    onHardDeleteCompany={id => hardDeleteCompany.mutateAsync(id)}
+                />
             )}
 
             {/* ── CLIENTES TAB ─────────────────────────────────────────── */}
@@ -471,7 +511,7 @@ export function BalancesPage() {
                 onClose={() => setDeletingCompany(null)}
                 onConfirm={handleDeleteCompanyConfirm}
                 title="Eliminar empresa"
-                description={`¿Eliminar "${deletingCompany?.name}"? Los colaboradores quedarán sin empresa asignada.`}
+                description={`¿Mover "${deletingCompany?.name}" a la papelera? Podrás restaurarla después.`}
                 isPending={deleteCompany.isPending}
             />
             <DeleteConfirmModal
@@ -479,7 +519,7 @@ export function BalancesPage() {
                 onClose={() => setDeletingClient(null)}
                 onConfirm={handleDeleteConfirm}
                 title="Eliminar cliente"
-                description={`¿Eliminar a "${deletingClient?.name}"? Esta acción no se puede deshacer.`}
+                description={`¿Mover a "${deletingClient?.name}" a la papelera? Podrás restaurarlo después.`}
                 isPending={deleteClient.isPending}
             />
             <DeleteConfirmModal
@@ -495,6 +535,161 @@ export function BalancesPage() {
                 confirmVariant="success"
                 isPending={settleClientSales.isPending}
             />
+        </div>
+    )
+}
+
+// ─── Trash view ───────────────────────────────────────────────────────────────
+
+function TrashView({ deletedClients, deletedCompanies, onRestoreClient, onHardDeleteClient, onRestoreCompany, onHardDeleteCompany }: {
+    deletedClients: Client[]
+    deletedCompanies: Company[]
+    onRestoreClient: (id: string) => Promise<void>
+    onHardDeleteClient: (id: string) => Promise<void>
+    onRestoreCompany: (id: string) => Promise<void>
+    onHardDeleteCompany: (id: string) => Promise<void>
+}) {
+    const [pendingHardDeleteClientId, setPendingHardDeleteClientId] = useState<string | null>(null)
+    const [pendingHardDeleteCompanyId, setPendingHardDeleteCompanyId] = useState<string | null>(null)
+    const [loading, setLoading] = useState<string | null>(null)
+
+    async function handleAction(key: string, fn: () => Promise<void>) {
+        setLoading(key)
+        try { await fn() } catch (e: any) { toast.error(e?.message ?? 'Error') }
+        finally { setLoading(null) }
+    }
+
+    const isEmpty = deletedClients.length === 0 && deletedCompanies.length === 0
+
+    return (
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {isEmpty ? (
+                <EmptyState
+                    icon={<Trash2 size={28} className="text-[#3D506A]" />}
+                    title="Papelera vacía"
+                    description="Los clientes y empresas eliminados aparecerán aquí"
+                />
+            ) : (
+                <>
+                    {deletedClients.length > 0 && (
+                        <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-3 flex items-center gap-2">
+                                <UserCircle2 size={12} />
+                                Clientes eliminados ({deletedClients.length})
+                            </p>
+                            <div className="space-y-2">
+                                {deletedClients.map(c => (
+                                    <div key={c.id} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#0F1523] border border-[#1E2A40]">
+                                        <div className="w-8 h-8 rounded-lg bg-[#161D2E] flex items-center justify-center shrink-0">
+                                            <UserCircle2 size={15} className="text-[#3D506A]" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[13px] font-semibold text-[#7A8FAA] truncate">{c.name}</p>
+                                            <p className="text-[10px] text-[#3D506A]">{c.cedula || c.code || TYPE_LABELS[c.type as ClientType] || ''}</p>
+                                        </div>
+                                        {pendingHardDeleteClientId === c.id ? (
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <span className="text-[11px] text-red-400">¿Eliminar definitivo?</span>
+                                                <button
+                                                    onClick={() => handleAction(`hdc-${c.id}`, async () => { await onHardDeleteClient(c.id); setPendingHardDeleteClientId(null) })}
+                                                    disabled={loading === `hdc-${c.id}`}
+                                                    className="px-3 h-7 rounded-lg bg-red-500/15 border border-red-500/30 text-red-400 text-[11px] font-semibold hover:bg-red-500/25 transition-colors cursor-pointer disabled:opacity-50"
+                                                >
+                                                    {loading === `hdc-${c.id}` ? '...' : 'Eliminar'}
+                                                </button>
+                                                <button
+                                                    onClick={() => setPendingHardDeleteClientId(null)}
+                                                    className="px-3 h-7 rounded-lg bg-[#1E2A40] text-[#7A8FAA] text-[11px] font-semibold hover:bg-[#283A56] transition-colors cursor-pointer"
+                                                >
+                                                    Cancelar
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <button
+                                                    onClick={() => handleAction(`rc-${c.id}`, () => onRestoreClient(c.id))}
+                                                    disabled={!!loading}
+                                                    className="flex items-center gap-1.5 px-3 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-semibold hover:bg-emerald-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                                                >
+                                                    <RotateCcw size={11} />
+                                                    Restaurar
+                                                </button>
+                                                <button
+                                                    onClick={() => setPendingHardDeleteClientId(c.id)}
+                                                    disabled={!!loading}
+                                                    className="flex items-center gap-1.5 px-3 h-7 rounded-lg bg-[#1E2A40] text-[#3D506A] text-[11px] font-semibold hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 border border-transparent transition-colors cursor-pointer disabled:opacity-50"
+                                                >
+                                                    <Trash2 size={11} />
+                                                    Definitivo
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {deletedCompanies.length > 0 && (
+                        <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#3D506A] mb-3 flex items-center gap-2">
+                                <Building2 size={12} />
+                                Empresas eliminadas ({deletedCompanies.length})
+                            </p>
+                            <div className="space-y-2">
+                                {deletedCompanies.map(co => (
+                                    <div key={co.id} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#0F1523] border border-[#1E2A40]">
+                                        <div className="w-8 h-8 rounded-lg bg-[#161D2E] flex items-center justify-center shrink-0">
+                                            <Building2 size={15} className="text-[#3D506A]" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[13px] font-semibold text-[#7A8FAA] truncate">{co.name}</p>
+                                            <p className="text-[10px] text-[#3D506A]">{co.taxId || co.billingEmail || 'Sin cédula jurídica'}</p>
+                                        </div>
+                                        {pendingHardDeleteCompanyId === co.id ? (
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <span className="text-[11px] text-red-400">¿Eliminar definitivo?</span>
+                                                <button
+                                                    onClick={() => handleAction(`hdc-co-${co.id}`, async () => { await onHardDeleteCompany(co.id); setPendingHardDeleteCompanyId(null) })}
+                                                    disabled={loading === `hdc-co-${co.id}`}
+                                                    className="px-3 h-7 rounded-lg bg-red-500/15 border border-red-500/30 text-red-400 text-[11px] font-semibold hover:bg-red-500/25 transition-colors cursor-pointer disabled:opacity-50"
+                                                >
+                                                    {loading === `hdc-co-${co.id}` ? '...' : 'Eliminar'}
+                                                </button>
+                                                <button
+                                                    onClick={() => setPendingHardDeleteCompanyId(null)}
+                                                    className="px-3 h-7 rounded-lg bg-[#1E2A40] text-[#7A8FAA] text-[11px] font-semibold hover:bg-[#283A56] transition-colors cursor-pointer"
+                                                >
+                                                    Cancelar
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <button
+                                                    onClick={() => handleAction(`rco-${co.id}`, () => onRestoreCompany(co.id))}
+                                                    disabled={!!loading}
+                                                    className="flex items-center gap-1.5 px-3 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-semibold hover:bg-emerald-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                                                >
+                                                    <RotateCcw size={11} />
+                                                    Restaurar
+                                                </button>
+                                                <button
+                                                    onClick={() => setPendingHardDeleteCompanyId(co.id)}
+                                                    disabled={!!loading}
+                                                    className="flex items-center gap-1.5 px-3 h-7 rounded-lg bg-[#1E2A40] text-[#3D506A] text-[11px] font-semibold hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 border border-transparent transition-colors cursor-pointer disabled:opacity-50"
+                                                >
+                                                    <Trash2 size={11} />
+                                                    Definitivo
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </>
+            )}
         </div>
     )
 }

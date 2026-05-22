@@ -119,7 +119,7 @@ export function ReportsPage() {
 
     // Recent sales filters
     const [orderSearch, setOrderSearch] = useState('')
-    const orderKb = useKeyboardInput(orderSearch, setOrderSearch, { mode: 'numeric' })
+    const orderKb = useKeyboardInput(orderSearch, setOrderSearch, { mode: 'alpha' })
     const [showAnuladas, setShowAnuladas] = useState(false)
     const [showSoloModificadas, setShowSoloModificadas] = useState(false)
     const [filterCajero, setFilterCajero] = useState('')
@@ -241,7 +241,14 @@ export function ReportsPage() {
             if (!showAnuladas && s.status === 'ANULADA') return false
             if (showSoloModificadas && !s.originalSaleSnapshot && !s.modifiedFromSaleId) return false
             if (filterCajero && extractCajero(s.notes) !== filterCajero) return false
-            if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false
+            if (orderSearch) {
+                const q = orderSearch.toLowerCase()
+                const matchNum = s.saleNumber?.toString().includes(orderSearch)
+                const matchClient = (s.clientName ?? s.client?.name ?? '').toLowerCase().includes(q)
+                const matchConsumer = (s.consumerName ?? '').toLowerCase().includes(q)
+                const matchCompany = (s.companyName ?? s.company?.name ?? '').toLowerCase().includes(q)
+                if (!matchNum && !matchClient && !matchConsumer && !matchCompany) return false
+            }
             if (timeActive) {
                 const d = toCR(s.paidAt ?? s.date)
                 const saleMinutes = d.getUTCHours() * 60 + d.getUTCMinutes()
@@ -466,7 +473,7 @@ export function ReportsPage() {
                                 <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#3D506A] pointer-events-none" />
                                 <input
                                     {...orderKb}
-                                    placeholder="# orden"
+                                    placeholder="# orden o nombre..."
                                     className="w-full h-8 pl-7 pr-3 rounded-lg bg-[#101520] border border-[#1A2236] text-[13px] text-[#E4ECF7] placeholder-[#3D506A] outline-none focus:border-cyan-500/40 transition-colors"
                                 />
                             </div>
@@ -608,6 +615,9 @@ export function ReportsPage() {
                                     const time = crTime(s.paidAt ?? s.date)
                                     const isSplit = s.notes?.startsWith('Crédito dividido') ?? false
                                     const clientName = s.client?.name ?? s.clientName ?? null
+                                    const consumerName = s.consumerName ?? null
+                                    const companyName = s.company?.name ?? s.companyName ?? null
+                                    const invoicedTo = companyName ?? clientName ?? consumerName ?? null
                                     return (
                                         <button
                                             key={s.id}
@@ -641,8 +651,8 @@ export function ReportsPage() {
                                                 {isSplit && (
                                                     <span className="text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded-md shrink-0">Dividido</span>
                                                 )}
-                                                {(isSplit || isModificada) && clientName && (
-                                                    <span className="text-[10px] text-[#3D506A] truncate">{clientName}</span>
+                                                {invoicedTo && (
+                                                    <span className="text-[10px] text-[#3D506A] truncate">{invoicedTo}</span>
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-3 shrink-0">

@@ -80,6 +80,8 @@ export interface DbClientRow {
     code: string | null
     cedula: string | null
     isActive: number | boolean
+    isDeleted: number | boolean
+    deletedAt: string | null
     syncStatus: string
     updatedAt: string
 }
@@ -92,6 +94,8 @@ export interface DbCompanyRow {
     phone: string | null
     notes: string | null
     isActive: number | boolean
+    isDeleted: number | boolean
+    deletedAt: string | null
     syncStatus: string
     updatedAt: string
 }

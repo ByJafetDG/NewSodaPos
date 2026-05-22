@@ -45,10 +45,20 @@ type SaleSettleFields = {
 
 export async function getCompanies(): Promise<Company[]> {
     if (window.electronAPI) {
-        const data = await window.electronAPI.dbQuery('SELECT * FROM Company ORDER BY name ASC')
-        return (data as DbCompanyRow[]).map(c => ({ ...c, isActive: !!c.isActive })) as unknown as Company[]
+        const data = await window.electronAPI.dbQuery('SELECT * FROM Company WHERE isDeleted = 0 ORDER BY name ASC')
+        return (data as DbCompanyRow[]).map(c => ({ ...c, isActive: !!c.isActive, isDeleted: !!c.isDeleted })) as unknown as Company[]
     }
-    const { data, error } = await supabase.from('Company').select('*').order('name')
+    const { data, error } = await supabase.from('Company').select('*').eq('isDeleted', false).order('name')
+    if (error) throw error
+    return (data ?? []) as unknown as Company[]
+}
+
+export async function getDeletedCompanies(): Promise<Company[]> {
+    if (window.electronAPI) {
+        const data = await window.electronAPI.dbQuery('SELECT * FROM Company WHERE isDeleted = 1 ORDER BY deletedAt DESC')
+        return (data as DbCompanyRow[]).map(c => ({ ...c, isActive: !!c.isActive, isDeleted: !!c.isDeleted })) as unknown as Company[]
+    }
+    const { data, error } = await supabase.from('Company').select('*').eq('isDeleted', true).order('deletedAt', { ascending: false })
     if (error) throw error
     return (data ?? []) as unknown as Company[]
 }
@@ -56,7 +66,7 @@ export async function getCompanies(): Promise<Company[]> {
 export async function createCompany(input: CompanyInput): Promise<Company> {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
-    const newCompany: Company = { ...input, id, createdAt: new Date(now), updatedAt: new Date(now), syncStatus: 'PENDING' }
+    const newCompany: Company = { ...input, id, isDeleted: false, deletedAt: null, createdAt: new Date(now), updatedAt: new Date(now), syncStatus: 'PENDING' }
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
             `INSERT INTO Company (id, name, taxId, billingEmail, phone, notes, isActive, syncStatus, createdAt, updatedAt)
@@ -88,12 +98,50 @@ export async function updateCompany(id: string, input: Partial<CompanyInput>): P
 }
 
 export async function deleteCompany(id: string): Promise<void> {
+    const now = new Date().toISOString()
     if (window.electronAPI) {
-        await window.electronAPI.dbExecute("UPDATE Client SET companyId = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE companyId = ?", [new Date().toISOString(), id])
-        await window.electronAPI.dbExecute("DELETE FROM Company WHERE id = ?", [id])
+        const pending = await window.electronAPI.dbGet(
+            `SELECT COUNT(*) as cnt FROM Sale WHERE companyId = ? AND isCredit = 1 AND paidAt IS NULL AND status = 'COMPLETADA'`,
+            [id]
+        ) as { cnt: number }
+        if (pending?.cnt > 0) throw new Error('La empresa tiene facturas pendientes de pago. Salda las deudas antes de eliminarla.')
+        await window.electronAPI.dbExecute(
+            `UPDATE Company SET isDeleted = 1, deletedAt = ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+            [now, now, id]
+        )
         return
     }
-    await supabase.from('Client').update({ companyId: null }).eq('companyId', id)
+    const { data: pending } = await supabase.from('Sale')
+        .select('id', { count: 'exact', head: true })
+        .eq('companyId', id).eq('isCredit', true).is('paidAt', null).eq('status', 'COMPLETADA')
+    if ((pending as any)?.count > 0) throw new Error('La empresa tiene facturas pendientes de pago. Salda las deudas antes de eliminarla.')
+    const { error } = await supabase.from('Company').update({ isDeleted: true, deletedAt: now, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
+    if (error) throw error
+}
+
+export async function restoreCompany(id: string): Promise<void> {
+    const now = new Date().toISOString()
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(
+            `UPDATE Company SET isDeleted = 0, deletedAt = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+            [now, id]
+        )
+        return
+    }
+    const { error } = await supabase.from('Company').update({ isDeleted: false, deletedAt: null, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
+    if (error) throw error
+}
+
+export async function hardDeleteCompany(id: string): Promise<void> {
+    const now = new Date().toISOString()
+    if (window.electronAPI) {
+        await window.electronAPI.dbExecute(`UPDATE Client SET companyId = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE companyId = ?`, [now, id])
+        await window.electronAPI.dbExecute(`UPDATE Sale SET companyId = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE companyId = ?`, [now, id])
+        await window.electronAPI.dbExecute(`DELETE FROM Company WHERE id = ?`, [id])
+        return
+    }
+    await supabase.from('Client').update({ companyId: null, updatedAt: now }).eq('companyId', id)
+    await supabase.from('Sale').update({ companyId: null, updatedAt: now }).eq('companyId', id)
     const { error } = await supabase.from('Company').delete().eq('id', id)
     if (error) throw error
 }
@@ -118,10 +166,10 @@ export async function settleClientSalesWithMethod(clientId: string, method: stri
 
 export async function getClients(): Promise<Client[]> {
     if (window.electronAPI) {
-        const data = await window.electronAPI.dbQuery('SELECT * FROM Client ORDER BY name ASC')
-        return (data as DbClientRow[]).map(c => ({ ...c, isActive: !!c.isActive })) as unknown as Client[]
+        const data = await window.electronAPI.dbQuery('SELECT * FROM Client WHERE isDeleted = 0 ORDER BY name ASC')
+        return (data as DbClientRow[]).map(c => ({ ...c, isActive: !!c.isActive, isDeleted: !!c.isDeleted })) as unknown as Client[]
     }
-    const { data, error } = await supabase.from('Client').select('*').order('name')
+    const { data, error } = await supabase.from('Client').select('*').eq('isDeleted', false).order('name')
     if (error) throw error
     return (data ?? []) as unknown as Client[]
 }
@@ -178,24 +226,34 @@ export async function updateClient(id: string, input: Partial<ClientInput>): Pro
 export async function deleteClient(id: string): Promise<void> {
     const now = new Date().toISOString()
     if (window.electronAPI) {
+        const pending = await window.electronAPI.dbGet(
+            `SELECT COUNT(*) as cnt FROM Sale WHERE clientId = ? AND isCredit = 1 AND paidAt IS NULL AND status = 'COMPLETADA'`,
+            [id]
+        ) as { cnt: number }
+        if (pending?.cnt > 0) throw new Error('El cliente tiene deuda pendiente. Salda las cuentas antes de eliminarlo.')
         await window.electronAPI.dbExecute(
-            "UPDATE Client SET isActive = 0, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?",
-            [now, id]
+            `UPDATE Client SET isDeleted = 1, deletedAt = ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+            [now, now, id]
         )
         return
     }
-    const { error } = await supabase.from('Client').update({ isActive: false, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
+    const { data: pendingSup } = await supabase.from('Sale')
+        .select('id', { count: 'exact', head: true })
+        .eq('clientId', id).eq('isCredit', true).is('paidAt', null).eq('status', 'COMPLETADA')
+    if ((pendingSup as any)?.count > 0) throw new Error('El cliente tiene deuda pendiente. Salda las cuentas antes de eliminarlo.')
+    const { error } = await supabase.from('Client').update({ isDeleted: true, deletedAt: now, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
     if (error) throw error
 }
 
 export async function getDeletedClients(): Promise<Client[]> {
     if (window.electronAPI) {
         const data = await window.electronAPI.dbQuery(
-            "SELECT * FROM Client WHERE isActive = 0 ORDER BY name ASC"
+            'SELECT * FROM Client WHERE isDeleted = 1 ORDER BY deletedAt DESC'
         ) as DbClientRow[]
-        return data.map(c => ({ ...c, isActive: !!c.isActive })) as unknown as Client[]
+        return data.map(c => ({ ...c, isActive: !!c.isActive, isDeleted: !!c.isDeleted })) as unknown as Client[]
     }
-    const { data } = await supabase.from('Client').select('*').eq('isActive', false).order('name')
+    const { data, error } = await supabase.from('Client').select('*').eq('isDeleted', true).order('deletedAt', { ascending: false })
+    if (error) throw error
     return (data ?? []) as unknown as Client[]
 }
 
@@ -203,12 +261,12 @@ export async function restoreClient(id: string): Promise<void> {
     const now = new Date().toISOString()
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
-            "UPDATE Client SET isActive = 1, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?",
+            `UPDATE Client SET isDeleted = 0, deletedAt = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
             [now, id]
         )
         return
     }
-    const { error } = await supabase.from('Client').update({ isActive: true, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
+    const { error } = await supabase.from('Client').update({ isDeleted: false, deletedAt: null, updatedAt: now, syncStatus: 'SYNCED' }).eq('id', id)
     if (error) throw error
 }
 
@@ -216,11 +274,11 @@ export async function hardDeleteClient(id: string): Promise<void> {
     const now = new Date().toISOString()
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
-            "UPDATE Sale SET clientId = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE clientId = ?",
+            `UPDATE Sale SET clientId = NULL, syncStatus = 'PENDING', updatedAt = ? WHERE clientId = ?`,
             [now, id]
         )
-        await window.electronAPI.dbExecute("DELETE FROM Payment WHERE clientId = ?", [id])
-        await window.electronAPI.dbExecute("DELETE FROM Client WHERE id = ?", [id])
+        await window.electronAPI.dbExecute(`DELETE FROM Payment WHERE clientId = ?`, [id])
+        await window.electronAPI.dbExecute(`DELETE FROM Client WHERE id = ?`, [id])
         return
     }
     await supabase.from('Sale').update({ clientId: null, updatedAt: now }).eq('clientId', id)

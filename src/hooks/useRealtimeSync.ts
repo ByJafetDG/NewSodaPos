@@ -18,10 +18,11 @@ function invalidateForTable(qc: QueryClient, table: string) {
             break
         case 'Client':
             qc.invalidateQueries({ queryKey: ['clients'] })
-            qc.invalidateQueries({ queryKey: ['companies'] })
+            qc.invalidateQueries({ queryKey: ['deleted-clients'] })
             break
         case 'Company':
             qc.invalidateQueries({ queryKey: ['companies'] })
+            qc.invalidateQueries({ queryKey: ['deleted-companies'] })
             qc.invalidateQueries({ queryKey: ['all-company-sales'] })
             qc.invalidateQueries({ queryKey: ['company-sales'] })
             break

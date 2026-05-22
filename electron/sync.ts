@@ -298,8 +298,8 @@ async function pullSync() {
             transaction(() => {
                 for (const co of companies) {
                     execute(`
-            INSERT INTO Company (id, name, taxId, billingEmail, phone, notes, isActive, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+            INSERT INTO Company (id, name, taxId, billingEmail, phone, notes, isActive, isDeleted, deletedAt, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
               name =         CASE WHEN Company.syncStatus = 'PENDING' THEN Company.name         ELSE excluded.name         END,
               taxId =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.taxId        ELSE excluded.taxId        END,
@@ -307,9 +307,11 @@ async function pullSync() {
               phone =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.phone        ELSE excluded.phone        END,
               notes =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.notes        ELSE excluded.notes        END,
               isActive =     CASE WHEN Company.syncStatus = 'PENDING' THEN Company.isActive     ELSE excluded.isActive     END,
+              isDeleted =    CASE WHEN Company.syncStatus = 'PENDING' THEN Company.isDeleted    ELSE excluded.isDeleted    END,
+              deletedAt =    CASE WHEN Company.syncStatus = 'PENDING' THEN Company.deletedAt    ELSE excluded.deletedAt    END,
               syncStatus =   CASE WHEN Company.syncStatus = 'PENDING' THEN 'PENDING'            ELSE 'SYNCED'              END,
               updatedAt =    CASE WHEN Company.syncStatus = 'PENDING' THEN Company.updatedAt    ELSE excluded.updatedAt    END
-          `, [co.id, co.name, co.taxId ?? null, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.updatedAt]);
+          `, [co.id, co.name, co.taxId ?? null, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.isDeleted ? 1 : 0, co.deletedAt ?? null, co.updatedAt]);
                 }
             });
         }
@@ -322,8 +324,8 @@ async function pullSync() {
             transaction(() => {
                 for (const client of clients) {
                     execute(`
-            INSERT INTO Client (id, name, phone, email, type, company, cedula, code, companyId, notes, isActive, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+            INSERT INTO Client (id, name, phone, email, type, company, cedula, code, companyId, notes, isActive, isDeleted, deletedAt, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
               name =      CASE WHEN Client.syncStatus = 'PENDING' THEN Client.name      ELSE excluded.name      END,
               phone =     CASE WHEN Client.syncStatus = 'PENDING' THEN Client.phone     ELSE excluded.phone     END,
@@ -335,9 +337,11 @@ async function pullSync() {
               companyId = CASE WHEN Client.syncStatus = 'PENDING' THEN Client.companyId ELSE excluded.companyId END,
               notes =     CASE WHEN Client.syncStatus = 'PENDING' THEN Client.notes     ELSE excluded.notes     END,
               isActive =  CASE WHEN Client.syncStatus = 'PENDING' THEN Client.isActive  ELSE excluded.isActive  END,
+              isDeleted = CASE WHEN Client.syncStatus = 'PENDING' THEN Client.isDeleted ELSE excluded.isDeleted END,
+              deletedAt = CASE WHEN Client.syncStatus = 'PENDING' THEN Client.deletedAt ELSE excluded.deletedAt END,
               syncStatus = CASE WHEN Client.syncStatus = 'PENDING' THEN 'PENDING' ELSE 'SYNCED' END,
               updatedAt =  CASE WHEN Client.syncStatus = 'PENDING' THEN Client.updatedAt ELSE excluded.updatedAt END
-          `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, client.updatedAt]);
+          `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, client.isDeleted ? 1 : 0, client.deletedAt ?? null, client.updatedAt]);
                 }
             });
         }
@@ -820,6 +824,8 @@ async function _pushSync(): Promise<string[]> {
                 phone: co.phone ?? null,
                 notes: co.notes ?? null,
                 isActive: !!co.isActive,
+                isDeleted: !!co.isDeleted,
+                deletedAt: co.deletedAt ?? null,
                 syncStatus: 'SYNCED',
                 updatedAt: new Date().toISOString(),
             });
@@ -848,6 +854,8 @@ async function _pushSync(): Promise<string[]> {
                 companyId: client.companyId,
                 notes: client.notes,
                 isActive: !!client.isActive,
+                isDeleted: !!client.isDeleted,
+                deletedAt: client.deletedAt ?? null,
                 syncStatus: 'SYNCED',
                 updatedAt: new Date().toISOString()
             });
