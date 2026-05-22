@@ -1,20 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
     X, ArrowLeft, Check, Package, Droplets, Layers, Utensils,
-    ScanLine, Tag, ChevronRight, DollarSign,
+    ScanLine, Tag, ChevronRight, DollarSign, ImagePlus, Link2, Upload, ClipboardPaste,
 } from 'lucide-react'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { useSubcategories } from '@/hooks/useSubcategories'
 import { formatCurrency, cn } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
+import { uploadProductImage } from '@/services/products'
 import type { Product, Category, ProductUnit, Subcategory } from '@/types'
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
-type WizardStep = 'draft-prompt' | 'name' | 'barcode' | 'unit' | 'category' | 'subcategory' | 'numbers' | 'recap'
-const STEP_ORDER: WizardStep[] = ['name', 'barcode', 'unit', 'category', 'subcategory', 'numbers', 'recap']
+type WizardStep = 'draft-prompt' | 'name' | 'barcode' | 'unit' | 'category' | 'subcategory' | 'numbers' | 'image' | 'recap'
+const STEP_ORDER: WizardStep[] = ['name', 'image', 'barcode', 'unit', 'category', 'subcategory', 'numbers', 'recap']
 const PROGRESS_STEPS: WizardStep[] = ['name', 'barcode', 'unit', 'category', 'numbers']
 
 const DRAFT_KEY_NEW = 'pos_product_draft_new'
@@ -23,10 +24,12 @@ const draftKeyEdit = (id: string) => `pos_product_draft_edit_${id}`
 type WizardData = {
     name: string; barcode: string; unit: ProductUnit; categoryId: string; subcategoryIds: string[]
     price: string; stockQty: string; minStock: string; isInfinite: boolean; isActive: boolean
+    imageUrl: string | null
 }
 const EMPTY: WizardData = {
     name: '', barcode: '', unit: 'UNIDAD', categoryId: '', subcategoryIds: [],
     price: '', stockQty: '0', minStock: '1', isInfinite: false, isActive: true,
+    imageUrl: null,
 }
 
 const UNITS: { value: ProductUnit; label: string; sub: string; icon: React.ElementType }[] = [
@@ -60,6 +63,7 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
     const [step, setStep] = useState<WizardStep>('name')
     const [dir, setDir]   = useState(1)
     const [data, setData] = useState<WizardData>(EMPTY)
+    const [isUploading, setIsUploading] = useState(false)
     const { data: allSubcategories = [] } = useSubcategories()
 
     const draftKey = product ? draftKeyEdit(product.id) : DRAFT_KEY_NEW
@@ -77,6 +81,7 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
                 subcategoryIds: product.subcategoryIds ?? [],
                 price: String(product.price), stockQty: String(product.stockQty),
                 minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive,
+                imageUrl: product.imageUrl ?? null,
             }
             if (draft?.name) { setData(draft); setStep('draft-prompt') }
             else             { setData(base);  setStep('name') }
@@ -124,8 +129,23 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
         go(s, next >= curr ? 1 : -1)
     }
 
-    function handleConfirm() {
-        if (isPending) return
+    async function handleConfirm() {
+        if (isPending || isUploading) return
+
+        let finalImageUrl = data.imageUrl
+
+        if (finalImageUrl?.startsWith('data:')) {
+            setIsUploading(true)
+            try {
+                finalImageUrl = await uploadProductImage(finalImageUrl)
+            } catch {
+                toast.error('Error al subir imagen. Verifica tu conexión.')
+                setIsUploading(false)
+                return
+            }
+            setIsUploading(false)
+        }
+
         localStorage.removeItem(draftKey)
         onConfirm({
             name: data.name.trim(),
@@ -139,14 +159,14 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
             stockQty: data.isInfinite ? (product?.stockQty ?? 0) : (parseFloat(data.stockQty) || 0),
             isInfinite: data.isInfinite,
             isActive: data.isActive,
-            imageUrl: null,
+            imageUrl: finalImageUrl ?? null,
         })
     }
 
     function discardDraft() {
         localStorage.removeItem(draftKey)
         const base = product
-            ? { name: product.name, barcode: product.barcode ?? '', unit: product.unit, categoryId: product.categoryId, subcategoryIds: product.subcategoryIds ?? [], price: String(product.price), stockQty: String(product.stockQty), minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive }
+            ? { name: product.name, barcode: product.barcode ?? '', unit: product.unit, categoryId: product.categoryId, subcategoryIds: product.subcategoryIds ?? [], price: String(product.price), stockQty: String(product.stockQty), minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive, imageUrl: product.imageUrl ?? null }
             : { ...EMPTY, categoryId: categories[0]?.id ?? '' }
         setData(base)
         go('name', 1)
@@ -228,7 +248,7 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
                                         className="px-5 pb-6"
                                     >
                                         {step === 'draft-prompt'  && <DraftPromptStep data={data} isEdit={!!product} onContinue={() => go('name', 1)} onDiscard={discardDraft} onClose={handleClose} />}
-                                        {step === 'name'          && <NameStep value={data.name} onChange={v => setData(d => ({ ...d, name: v }))} onNext={() => advance('barcode')} />}
+                                        {step === 'name'          && <NameStep value={data.name} onChange={v => setData(d => ({ ...d, name: v }))} onNext={() => advance('image')} />}
                                         {step === 'barcode'       && <BarcodeStep value={data.barcode} onChange={v => setData(d => ({ ...d, barcode: v }))} onNext={async () => {
                                             const barcode = data.barcode.trim()
                                             if (barcode && window.electronAPI) {
@@ -248,7 +268,8 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
                                         {step === 'category'      && <CategoryStep value={data.categoryId} categories={activeCategories} onChange={id => setData(d => ({ ...d, categoryId: id, subcategoryIds: [] }))} onNext={() => catSubcats.length > 0 ? advance('subcategory') : advance('numbers')} />}
                                         {step === 'subcategory'   && <SubcategoryStep values={data.subcategoryIds} subcategories={catSubcats} onChange={ids => setData(d => ({ ...d, subcategoryIds: ids }))} onNext={() => advance('numbers')} onSkip={() => { setData(d => ({ ...d, subcategoryIds: [] })); advance('numbers') }} />}
                                         {step === 'numbers'       && <NumbersStep data={data} isEdit={!!product} onChange={patch => setData(d => ({ ...d, ...patch }))} onNext={() => advance('recap')} />}
-                                        {step === 'recap'         && <RecapStep data={data} catName={catName} subNames={subNames} isEdit={!!product} isPending={isPending} onConfirm={handleConfirm} onEdit={goToStep} hasSubs={catSubcats.length > 0} />}
+                                        {step === 'image'         && <ImageStep value={data.imageUrl} onChange={v => setData(d => ({ ...d, imageUrl: v }))} onNext={() => advance('barcode')} onSkip={() => advance('barcode')} />}
+                                        {step === 'recap'         && <RecapStep data={data} catName={catName} subNames={subNames} isEdit={!!product} isPending={isPending || isUploading} isUploading={isUploading} onConfirm={handleConfirm} onEdit={goToStep} hasSubs={catSubcats.length > 0} />}
                                     </motion.div>
                                 </AnimatePresence>
                             </div>
@@ -327,6 +348,14 @@ function DraftPromptStep({ data, isEdit, onContinue, onDiscard, onClose }: {
                 <p className="text-[12px] text-amber-400 font-semibold mb-1">{isEdit ? 'Edición sin guardar' : 'Producto sin terminar'}</p>
                 <p className="text-[14px] text-[#E4ECF7] font-semibold truncate">{data.name || '(sin nombre)'}</p>
                 {data.price ? <p className="text-[12px] text-[#7A8FAA] mt-0.5">{formatCurrency(parseFloat(data.price) || 0)}</p> : null}
+                {data.imageUrl && (
+                    <div className="mt-2 flex items-center gap-1.5">
+                        <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
+                            <img src={data.imageUrl} alt="" className="w-full h-full object-cover" />
+                        </div>
+                        <p className="text-[11px] text-amber-400/70">Imagen guardada</p>
+                    </div>
+                )}
             </div>
             <div className="space-y-2">
                 <button
@@ -544,11 +573,149 @@ function NumbersStep({ data, isEdit, onChange, onNext }: { data: WizardData; isE
     )
 }
 
+// ── Step: Image ───────────────────────────────────────────────────────────────
+
+function ImageStep({ value, onChange, onNext, onSkip }: {
+    value: string | null; onChange: (v: string | null) => void; onNext: () => void; onSkip: () => void
+}) {
+    const fileRef = useRef<HTMLInputElement>(null)
+    const [mode, setMode] = useState<'url' | 'file'>(value?.startsWith('data:') ? 'file' : 'url')
+    const [urlInput, setUrlInput] = useState(value?.startsWith('http') ? value : '')
+
+    function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0]
+        if (!file) return
+        if (file.size > 3 * 1024 * 1024) {
+            toast.error('Imagen muy grande. Máximo 3MB.')
+            return
+        }
+        const reader = new FileReader()
+        reader.onload = (evt) => onChange(evt.target?.result as string)
+        reader.readAsDataURL(file)
+    }
+
+    function handleUrlConfirm() {
+        const trimmed = urlInput.trim()
+        if (trimmed.startsWith('http')) onChange(trimmed)
+    }
+
+    function clearImage() {
+        onChange(null)
+        setUrlInput('')
+        if (fileRef.current) fileRef.current.value = ''
+    }
+
+    const hasImage = !!value
+
+    return (
+        <div>
+            <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0">
+                    <ImagePlus size={15} className="text-sky-400" />
+                </div>
+                <StepQuestion>Imagen del producto</StepQuestion>
+            </div>
+
+            {/* Mode selector */}
+            <div className="flex gap-1.5 mb-4">
+                <button
+                    onClick={() => { setMode('url'); if (value?.startsWith('data:')) onChange(null) }}
+                    className={cn('flex-1 h-9 rounded-xl text-[12px] font-semibold border transition-all cursor-pointer flex items-center justify-center gap-1.5',
+                        mode === 'url' ? 'bg-sky-500/10 border-sky-500/30 text-sky-400' : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:bg-[#161D2E]')}
+                >
+                    <Link2 size={12} /> URL
+                </button>
+                <button
+                    onClick={() => { setMode('file'); if (value?.startsWith('http')) onChange(null) }}
+                    className={cn('flex-1 h-9 rounded-xl text-[12px] font-semibold border transition-all cursor-pointer flex items-center justify-center gap-1.5',
+                        mode === 'file' ? 'bg-sky-500/10 border-sky-500/30 text-sky-400' : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:bg-[#161D2E]')}
+                >
+                    <Upload size={12} /> Archivo
+                </button>
+            </div>
+
+            {/* URL input */}
+            {mode === 'url' && !hasImage && (
+                <div className="flex gap-2">
+                    <div className="relative flex-1">
+                        <input
+                            type="text"
+                            value={urlInput}
+                            onChange={e => setUrlInput(e.target.value)}
+                            placeholder="https://ejemplo.com/imagen.jpg"
+                            className="w-full h-11 pl-3 pr-10 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-sky-500/40 transition-colors"
+                        />
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                try {
+                                    const text = await navigator.clipboard.readText()
+                                    if (text.trim()) setUrlInput(text.trim())
+                                } catch {}
+                            }}
+                            title="Pegar desde portapapeles"
+                            className="absolute right-0 top-0 h-11 w-10 flex items-center justify-center text-[#3D506A] hover:text-sky-400 transition-colors cursor-pointer"
+                        >
+                            <ClipboardPaste size={15} />
+                        </button>
+                    </div>
+                    <button
+                        onClick={handleUrlConfirm}
+                        disabled={!urlInput.trim().startsWith('http')}
+                        className="h-11 px-4 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 text-[12px] font-semibold hover:bg-sky-500/15 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer shrink-0"
+                    >
+                        Usar
+                    </button>
+                </div>
+            )}
+
+            {/* File picker */}
+            {mode === 'file' && !hasImage && (
+                <>
+                    <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+                    <button
+                        onClick={() => fileRef.current?.click()}
+                        className="w-full h-24 rounded-xl border-2 border-dashed border-[#1E2A40] hover:border-sky-500/40 hover:bg-sky-500/5 text-[#3D506A] hover:text-sky-400 transition-all cursor-pointer flex flex-col items-center justify-center gap-2"
+                    >
+                        <Upload size={20} />
+                        <span className="text-[12px] font-medium">Seleccionar desde el dispositivo</span>
+                    </button>
+                </>
+            )}
+
+            {/* Preview */}
+            {hasImage && (
+                <div className="relative rounded-xl overflow-hidden bg-[#101520] border border-[#1E2A40]">
+                    <img
+                        src={value!}
+                        alt="Vista previa"
+                        className="w-full h-40 object-cover"
+                        onError={clearImage}
+                    />
+                    <button
+                        onClick={clearImage}
+                        className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 backdrop-blur-sm text-white flex items-center justify-center hover:bg-red-500/80 transition-colors cursor-pointer"
+                    >
+                        <X size={12} />
+                    </button>
+                </div>
+            )}
+
+            <NextBtn onClick={onNext} label={hasImage ? 'Continuar' : 'Continuar con imagen'} disabled={mode === 'url' && !hasImage && urlInput.trim().length > 0 && !urlInput.trim().startsWith('http')} />
+            {!hasImage && (
+                <button onClick={onSkip} className="mt-2 w-full h-9 rounded-xl text-[12px] text-[#3D506A] hover:text-[#7A8FAA] transition-colors cursor-pointer">
+                    Saltar — sin imagen
+                </button>
+            )}
+        </div>
+    )
+}
+
 // ── Step: Recap ───────────────────────────────────────────────────────────────
 
-function RecapStep({ data, catName, subNames, isEdit, isPending, onConfirm, onEdit, hasSubs }: {
+function RecapStep({ data, catName, subNames, isEdit, isPending, isUploading, onConfirm, onEdit, hasSubs }: {
     data: WizardData; catName: string; subNames: string[]; isEdit: boolean; hasSubs: boolean
-    isPending?: boolean; onConfirm: () => void; onEdit: (s: WizardStep) => void
+    isPending?: boolean; isUploading?: boolean; onConfirm: () => void; onEdit: (s: WizardStep) => void
 }) {
     const rows: { label: string; value: string; step: WizardStep }[] = [
         { label: 'Nombre',     value: data.name || '—',                                      step: 'name'        },
@@ -562,6 +729,8 @@ function RecapStep({ data, catName, subNames, isEdit, isPending, onConfirm, onEd
         { label: 'Activo',     value: data.isActive ? 'Sí' : 'No',                            step: 'numbers'     },
     ]
 
+    const pendingLabel = isUploading ? 'Subiendo imagen...' : 'Guardando...'
+
     return (
         <div>
             <div className="flex items-center gap-2 mb-4">
@@ -570,6 +739,30 @@ function RecapStep({ data, catName, subNames, isEdit, isPending, onConfirm, onEd
                 </div>
                 <StepQuestion>Confirmar producto</StepQuestion>
             </div>
+
+            {/* Image preview row */}
+            <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[#101520] border border-[#1E2A40] mb-2">
+                {data.imageUrl ? (
+                    <img src={data.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                ) : (
+                    <div className="w-10 h-10 rounded-lg bg-[#1C2438] flex items-center justify-center shrink-0">
+                        <ImagePlus size={16} className="text-[#3D506A]" />
+                    </div>
+                )}
+                <div className="flex-1 min-w-0">
+                    <p className="text-[10px] text-[#3D506A] uppercase tracking-wider">Imagen</p>
+                    <p className={cn('text-[12px] font-medium mt-0.5', data.imageUrl ? 'text-sky-400' : 'text-[#3D506A]')}>
+                        {data.imageUrl ? 'Imagen cargada' : 'Sin imagen'}
+                    </p>
+                </div>
+                <button
+                    onClick={() => onEdit('image')}
+                    className="ml-3 px-2 py-1 rounded-lg text-[11px] text-[#3D506A] hover:text-orange-400 hover:bg-orange-500/10 transition-all cursor-pointer shrink-0"
+                >
+                    {data.imageUrl ? 'Cambiar' : 'Agregar'}
+                </button>
+            </div>
+
             <div className="rounded-xl bg-[#101520] border border-[#1E2A40] divide-y divide-[#192030] mb-4">
                 {rows.map(row => (
                     <div key={row.label} className="flex items-center justify-between px-4 py-2.5 group">
@@ -591,7 +784,7 @@ function RecapStep({ data, catName, subNames, isEdit, isPending, onConfirm, onEd
                 disabled={isPending}
                 className="w-full h-12 rounded-xl bg-orange-500 text-white text-[14px] font-bold hover:bg-orange-600 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-2"
             >
-                {isPending ? 'Guardando...' : (isEdit ? 'Guardar cambios' : 'Crear producto')}
+                {isPending ? pendingLabel : (isEdit ? 'Guardar cambios' : 'Crear producto')}
                 {!isPending && <Check size={16} />}
             </button>
         </div>

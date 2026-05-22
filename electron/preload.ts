@@ -98,6 +98,12 @@ const electronAPI = {
         return () => ipcRenderer.removeListener('sinpe:new-message', sub)
     },
 
+    // Product images
+    downloadProductImage: (productId: string, url: string): Promise<{ success: boolean; error?: string }> =>
+        ipcRenderer.invoke('product-image:download', productId, url),
+    getProductLocalImage: (productId: string): Promise<string | null> =>
+        ipcRenderer.invoke('product-image:get-local', productId),
+
     // Platform detection
     platform: process.platform,
     isElectron: true,
@@ -158,6 +164,8 @@ export interface ElectronAPI {
     clearAllSyncErrors: () => Promise<void>;
     onSyncLog: (callback: (data: { level: string; msg: string }) => void) => () => void;
     onBarcodeConflict: (callback: (data: { productId: string; productName: string }) => void) => () => void;
+    downloadProductImage: (productId: string, url: string) => Promise<{ success: boolean; error?: string }>;
+    getProductLocalImage: (productId: string) => Promise<string | null>;
     platform: string;
     isElectron: boolean;
 }

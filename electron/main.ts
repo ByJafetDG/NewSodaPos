@@ -1064,3 +1064,27 @@ ipcMain.handle('sinpe:save-config', async (_: any, cfg: { port: number; senderFi
 })
 ipcMain.handle('sinpe:get-local-ip', getLocalIp)
 ipcMain.handle('sinpe:get-server-port', () => readSinpeConfig().port)
+
+// ===== Product Image Cache =====
+
+const PRODUCT_IMAGES_DIR = () => path.join(app.getPath('userData'), 'product-images')
+
+ipcMain.handle('product-image:download', async (_, productId: string, url: string) => {
+    try {
+        const dir = PRODUCT_IMAGES_DIR()
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+        const imgBuf = await downloadBuffer(url)
+        fs.writeFileSync(path.join(dir, `${productId}.jpg`), imgBuf)
+        return { success: true }
+    } catch (err: any) {
+        console.error('[ProductImage] Download failed:', err.message)
+        return { success: false, error: err.message }
+    }
+})
+
+ipcMain.handle('product-image:get-local', (_, productId: string) => {
+    const filePath = path.join(PRODUCT_IMAGES_DIR(), `${productId}.jpg`)
+    if (!fs.existsSync(filePath)) return null
+    const data = fs.readFileSync(filePath)
+    return `data:image/jpeg;base64,${data.toString('base64')}`
+})

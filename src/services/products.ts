@@ -117,9 +117,9 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
 
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(`
-            INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, price, cost, minStock, stockQty, isActive, isInfinite, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'PENDING', ?)
-        `, [id, productInput.name, productInput.barcode || null, productInput.categoryId, subcategoryIds?.[0] ?? null, productInput.price, productInput.cost || 0, productInput.minStock || 0, productInput.stockQty || 0, productInput.isInfinite ? 1 : 0, now]);
+            INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, unit, price, cost, minStock, stockQty, isActive, isInfinite, imageUrl, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 'PENDING', ?)
+        `, [id, productInput.name, productInput.barcode || null, productInput.categoryId, subcategoryIds?.[0] ?? null, productInput.unit || 'UNIDAD', productInput.price, productInput.cost || 0, productInput.minStock || 0, productInput.stockQty || 0, productInput.isInfinite ? 1 : 0, productInput.imageUrl || null, now]);
 
         if (subcategoryIds?.length) {
             for (const subId of subcategoryIds) {
@@ -130,7 +130,9 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
             }
         }
 
-        return { ...productInput, id, isActive: true, subcategoryIds: subcategoryIds ?? [], updatedAt: now } as unknown as Product;
+        const result = { ...productInput, id, isActive: true, subcategoryIds: subcategoryIds ?? [], updatedAt: now } as unknown as Product
+        if (result.imageUrl) window.electronAPI.downloadProductImage(result.id, result.imageUrl).catch(() => {})
+        return result
     }
 
     const { data, error } = await supabase
@@ -182,12 +184,14 @@ export async function updateProduct(id: string, input: Partial<Product>): Promis
              GROUP BY p.id`,
             [id]
         );
-        return {
+        const updated = {
             ...rows[0],
             isActive: !!rows[0].isActive,
             isInfinite: !!rows[0].isInfinite,
             subcategoryIds: rows[0].subcatIds ? rows[0].subcatIds.split(',') : [],
-        } as unknown as Product;
+        } as unknown as Product
+        if (updated.imageUrl) window.electronAPI.downloadProductImage(updated.id, updated.imageUrl).catch(() => {})
+        return updated
     }
 
     const { data, error } = await supabase
@@ -291,6 +295,19 @@ export async function hardDeleteProduct(id: string): Promise<void> {
     await supabase.from('ProductSubcategory').delete().eq('productId', id)
     const { error } = await supabase.from('Product').delete().eq('id', id)
     if (error) throw error
+}
+
+export async function uploadProductImage(dataUrl: string): Promise<string> {
+    const res = await fetch(dataUrl)
+    const blob = await res.blob()
+    const ext = blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'
+    const filename = `${crypto.randomUUID()}.${ext}`
+    const { data, error } = await supabase.storage
+        .from('product-images')
+        .upload(filename, blob, { contentType: blob.type, upsert: false })
+    if (error) throw error
+    const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(data.path)
+    return publicUrl
 }
 
 export async function deleteProduct(id: string): Promise<{ soft: boolean }> {

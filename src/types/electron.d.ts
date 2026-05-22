@@ -44,6 +44,9 @@ export interface ElectronAPI {
     onDbChanged: (callback: (data: { table: string }) => void) => () => void
     onSyncLog: (callback: (data: { level: string; msg: string }) => void) => () => void
     onBarcodeConflict: (callback: (data: { productId: string; productName: string }) => void) => () => void
+    // Product images
+    downloadProductImage: (productId: string, url: string) => Promise<{ success: boolean; error?: string }>
+    getProductLocalImage: (productId: string) => Promise<string | null>
     // Updates
     onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void
     installUpdate: () => Promise<void>

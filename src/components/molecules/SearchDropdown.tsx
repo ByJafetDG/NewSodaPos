@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ShoppingCart, Package } from 'lucide-react'
 import { cn, formatCurrency, normalizeStr } from '@/lib/utils'
@@ -10,6 +11,53 @@ interface SearchDropdownProps {
     cartItems?: CartItem[]
     allowOutOfStock?: boolean
     onSelect: (product: Product) => void
+}
+
+function ProductThumb({ product, inCart }: { product: Product; inCart: boolean }) {
+    const [imgSrc, setImgSrc] = useState<string | null>(product.imageUrl ?? null)
+    const [imgError, setImgError] = useState(false)
+
+    useEffect(() => {
+        setImgSrc(product.imageUrl ?? null)
+        setImgError(false)
+    }, [product.imageUrl])
+
+    useEffect(() => {
+        if (!product.imageUrl || !window.electronAPI) return
+        window.electronAPI.getProductLocalImage(product.id)
+            .then(local => { if (local) setImgSrc(local) })
+            .catch(() => {})
+    }, [product.id, product.imageUrl])
+
+    const hasImage = !!imgSrc && !imgError
+
+    if (hasImage) {
+        return (
+            <div className={cn(
+                'w-8 h-8 rounded-lg shrink-0 overflow-hidden border',
+                inCart ? 'border-orange-500/30' : 'border-[#1E2A40]'
+            )}>
+                <img
+                    src={imgSrc!}
+                    alt=""
+                    onError={() => setImgError(true)}
+                    className="w-full h-full object-cover"
+                />
+            </div>
+        )
+    }
+
+    return (
+        <div className={cn(
+            'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
+            inCart ? 'bg-orange-500/15' : 'bg-[#1C2438]'
+        )}>
+            {inCart
+                ? <ShoppingCart size={14} className="text-orange-400" />
+                : <Package size={14} className="text-[#3D506A]" />
+            }
+        </div>
+    )
 }
 
 export function SearchDropdown({ products, categories = [], search, cartItems = [], allowOutOfStock = false, onSelect }: SearchDropdownProps) {
@@ -46,7 +94,6 @@ export function SearchDropdown({ products, categories = [], search, cartItems = 
                             return (
                                 <button
                                     key={product.id}
-                                    /* onPointerDown prevents input losing focus (virtual keyboard compat) */
                                     onPointerDown={(e) => e.preventDefault()}
                                     onClick={() => !blocked && onSelect(product)}
                                     disabled={blocked}
@@ -59,20 +106,10 @@ export function SearchDropdown({ products, categories = [], search, cartItems = 
                                             : 'hover:bg-[#1A2236]'
                                     )}
                                 >
-                                    {/* Icon */}
-                                    <div className={cn(
-                                        'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
-                                        cartQty > 0 ? 'bg-orange-500/15' : 'bg-[#1C2438]'
-                                    )}>
-                                        {cartQty > 0
-                                            ? <ShoppingCart size={14} className="text-orange-400" />
-                                            : <Package size={14} className="text-[#3D506A]" />
-                                        }
-                                    </div>
+                                    <ProductThumb product={product} inCart={cartQty > 0} />
 
                                     {/* Name + barcode */}
                                     <div className="flex-1 min-w-0">
-                                        {/* Highlight matching part */}
                                         <HighlightedName name={product.name} query={search} />
                                         {product.barcode && (
                                             <p className="text-[10px] text-[#3D506A] font-mono mt-0.5">{product.barcode}</p>
