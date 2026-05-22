@@ -5,10 +5,10 @@ import {
     Monitor, Save, Plus, Trash2, ChevronRight, ChevronDown, Wifi, WifiOff,
     RefreshCw, HardDrive, Zap, LogOut, Minimize2, Maximize2,
     CheckCircle2, Search, Info, Edit2, Download, AlertTriangle, X,
-    Mail, Upload, RotateCcw, Package, MessageSquare, Server, Copy,
+    Mail, Upload, RotateCcw, Package, MessageSquare, Server, Copy, Building2,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { getDeletedClients, restoreClient, hardDeleteClient } from '@/services/clients'
+import { getDeletedClients, restoreClient, hardDeleteClient, getDeletedCompanies, restoreCompany, hardDeleteCompany } from '@/services/clients'
 import { getDeletedProducts, restoreProduct, hardDeleteProduct } from '@/services/products'
 import { getVoidedSales } from '@/services/sales'
 import { Button } from '@/components/atoms/Button'
@@ -1403,9 +1403,9 @@ function LogoUploadField({ logoUrl, uploading, onUpload, onClear, accentColor, h
 }
 
 function TrashSection() {
-    const [tab, setTab] = useState<'clients' | 'products' | 'sales' | 'sinpe'>('clients')
-    const [confirmHard, setConfirmHard] = useState<{ type: 'client' | 'product'; id: string; name: string } | null>(null)
-    const [confirmRestore, setConfirmRestore] = useState<{ type: 'client' | 'product'; id: string; name: string } | null>(null)
+    const [tab, setTab] = useState<'clients' | 'companies' | 'products' | 'sales' | 'sinpe'>('clients')
+    const [confirmHard, setConfirmHard] = useState<{ type: 'client' | 'company' | 'product'; id: string; name: string } | null>(null)
+    const [confirmRestore, setConfirmRestore] = useState<{ type: 'client' | 'company' | 'product'; id: string; name: string } | null>(null)
     const [isActing, setIsActing] = useState(false)
     const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null)
     const qc = useQueryClient()
@@ -1418,6 +1418,10 @@ function TrashSection() {
     const { data: deletedClients = [], isLoading: loadingClients } = useQuery({
         queryKey: ['trash-clients'],
         queryFn: getDeletedClients,
+    })
+    const { data: deletedCompanies = [], isLoading: loadingCompanies } = useQuery({
+        queryKey: ['trash-companies'],
+        queryFn: getDeletedCompanies,
     })
     const { data: deletedProducts = [], isLoading: loadingProducts } = useQuery({
         queryKey: ['trash-products'],
@@ -1466,6 +1470,11 @@ function TrashSection() {
                 qc.invalidateQueries({ queryKey: ['clients'] })
                 qc.invalidateQueries({ queryKey: ['trash-clients'] })
                 toast.success('Cliente restaurado')
+            } else if (confirmRestore.type === 'company') {
+                await restoreCompany(confirmRestore.id)
+                qc.invalidateQueries({ queryKey: ['companies'] })
+                qc.invalidateQueries({ queryKey: ['trash-companies'] })
+                toast.success('Empresa restaurada')
             } else {
                 await restoreProduct(confirmRestore.id)
                 qc.invalidateQueries({ queryKey: ['products'] })
@@ -1488,6 +1497,10 @@ function TrashSection() {
                 await hardDeleteClient(confirmHard.id)
                 qc.invalidateQueries({ queryKey: ['clients'] })
                 qc.invalidateQueries({ queryKey: ['trash-clients'] })
+            } else if (confirmHard.type === 'company') {
+                await hardDeleteCompany(confirmHard.id)
+                qc.invalidateQueries({ queryKey: ['companies'] })
+                qc.invalidateQueries({ queryKey: ['trash-companies'] })
             } else {
                 await hardDeleteProduct(confirmHard.id)
                 qc.invalidateQueries({ queryKey: ['trash-products'] })
@@ -1511,6 +1524,7 @@ function TrashSection() {
 
     const tabs = [
         { id: 'clients' as const, label: 'Clientes', count: (deletedClients as any[]).length },
+        { id: 'companies' as const, label: 'Empresas', count: (deletedCompanies as any[]).length },
         { id: 'products' as const, label: 'Productos', count: (deletedProducts as any[]).length },
         { id: 'sales' as const, label: 'Ventas anuladas', count: (voidedSales as any[]).length },
         { id: 'sinpe' as const, label: 'SINPE', count: sinpeDeleted.length },
@@ -1556,6 +1570,37 @@ function TrashSection() {
                                     <RotateCcw size={11} /> Restaurar
                                 </button>
                                 <button onClick={() => setConfirmHard({ type: 'client', id: c.id, name: c.name })} disabled={isActing} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] hover:bg-red-500/20 transition-all cursor-pointer disabled:opacity-50">
+                                    <Trash2 size={11} /> Borrar
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {tab === 'companies' && (
+                <div className="space-y-2">
+                    {loadingCompanies ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">Cargando...</p>
+                    ) : (deletedCompanies as any[]).length === 0 ? (
+                        <p className="text-[12px] text-[#3D506A] text-center py-8">No hay empresas eliminadas</p>
+                    ) : (deletedCompanies as any[]).map((co: any) => (
+                        <div key={co.id} className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#0B0E19] border border-[#192030]">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-[#141C2E] border border-[#1E2A40] flex items-center justify-center shrink-0">
+                                    <Building2 size={14} className="text-[#3D506A]" />
+                                </div>
+                                <div>
+                                    <p className="text-[13px] text-[#E4ECF7] font-medium">{co.name}</p>
+                                    <p className="text-[11px] text-[#3D506A]">{co.taxId || co.billingEmail || 'Sin cédula jurídica'}</p>
+                                    {co.deletedAt && <p className="text-[10px] text-[#3D506A]">Eliminada {crDateTime(co.deletedAt)}</p>}
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setConfirmRestore({ type: 'company', id: co.id, name: co.name })} disabled={isActing} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50">
+                                    <RotateCcw size={11} /> Restaurar
+                                </button>
+                                <button onClick={() => setConfirmHard({ type: 'company', id: co.id, name: co.name })} disabled={isActing} className="flex items-center gap-1 px-3 h-7 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] hover:bg-red-500/20 transition-all cursor-pointer disabled:opacity-50">
                                     <Trash2 size={11} /> Borrar
                                 </button>
                             </div>
