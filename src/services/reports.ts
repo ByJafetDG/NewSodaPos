@@ -37,7 +37,7 @@ export async function getReportData(from: string, to: string) {
             FROM Sale s
             LEFT JOIN Client c ON s.clientId = c.id
             LEFT JOIN Company co ON s.companyId = co.id
-            WHERE (s.date >= ? AND s.date <= ?)
+            WHERE (s.paidAt IS NULL AND s.date >= ? AND s.date <= ?)
                OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
             ORDER BY COALESCE(s.paidAt, s.date) DESC
         `, [from, to, from, to])
@@ -51,7 +51,7 @@ export async function getReportData(from: string, to: string) {
             FROM SaleItem si
             INNER JOIN Sale s ON si.saleId = s.id
             LEFT JOIN Product p ON si.productId = p.id
-            WHERE (s.date >= ? AND s.date <= ?)
+            WHERE (s.paidAt IS NULL AND s.date >= ? AND s.date <= ?)
                OR (s.paidAt IS NOT NULL AND s.paidAt >= ? AND s.paidAt <= ?)
         `, [from, to, from, to])
 
@@ -143,7 +143,7 @@ export async function getReportData(from: string, to: string) {
         supabase
             .from('Sale')
             .select('*, client:Client(name, code), company:Company(name), items:SaleItem(productId, quantity, unitPrice, subtotal, product:Product(name))')
-            .or(`and(date.gte.${from},date.lte.${to}),and(paidAt.gte.${from},paidAt.lte.${to},paidAt.not.is.null)`)
+            .or(`and(date.gte.${from},date.lte.${to},paidAt.is.null),and(paidAt.gte.${from},paidAt.lte.${to},paidAt.not.is.null)`)
             .order('date', { ascending: false }),
 
         supabase

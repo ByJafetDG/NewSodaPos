@@ -71,6 +71,48 @@ export function POSPage() {
     const total = getTotal()
     const itemCount = items.reduce((s, i) => s + i.quantity, 0)
 
+    function handleRemoveItem(id: string) {
+        const item = items.find(i => i.id === id)
+        removeItem(id)
+        if (!item) return
+        const name = item.product?.name ?? 'Producto'
+        const qty = item.quantity
+        const price = item.unitPrice
+        sileo.error({
+            title: 'Quitado del carrito',
+            description: (
+                <div style={{ marginTop: 8 }}>
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(239,68,68,0.13) 0%, rgba(239,68,68,0.04) 100%)',
+                        border: '1px solid rgba(239,68,68,0.24)',
+                        borderRadius: 10,
+                        padding: '11px 14px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                            <span style={{
+                                width: 6, height: 6, borderRadius: '50%',
+                                background: '#EF4444',
+                                boxShadow: '0 0 7px 2px rgba(239,68,68,0.6)',
+                                display: 'inline-block', flexShrink: 0,
+                            }} />
+                            <span style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const }}>PRODUCTO ELIMINADO</span>
+                        </div>
+                        <div style={{ fontSize: 13, color: '#E4ECF7', fontWeight: 600, lineHeight: 1.3, marginBottom: 6 }}>{name}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: 11, color: '#7A8FAA' }}>
+                                {qty > 1 ? `${qty} unidades` : '1 unidad'}
+                            </span>
+                            <span style={{ fontSize: 11, color: '#EF4444', fontWeight: 600 }}>
+                                −₡{(qty * price).toLocaleString('es-CR')}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            ),
+            position: 'top-left',
+        })
+    }
+
     // ── View mode ────────────────────────────────────────────────────────────
     const [viewMode, setViewMode] = useState<ViewMode>('scan')
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
@@ -803,13 +845,18 @@ export function POSPage() {
                 : method
             const mainPaymentMethod2 = capturedHasEfectivo && capturedHasSinpe ? 'SINPE' : null
             const mainAmount2 = capturedHasEfectivo && capturedHasSinpe ? splitAmountNum : null
-            const paymentTotal = capturedDebt ? saleTotal - capturedCreditAmt : mainTotal // full amount cashier must cover
+            const paymentTotal = capturedDebt ? saleTotal - capturedCreditAmt : mainTotal // full amount cashier must cover (incl. debt)
+            // When settling debt alongside new items, amountReceived/change span the full transaction
+            // but Sale.total only records the cart portion — storing them would make the record inconsistent.
+            // The receipt uses saleTotal (effectiveTotal) so it still prints correctly.
             const mainAmountReceived = isCredit ? null
+                : capturedDebt ? null
                 : capturedHasEfectivo ? saleReceived
                     : capturedHasSinpe ? paymentTotal
                         : (method === 'EFECTIVO' ? saleReceived : paymentTotal)
             const cashNeeded = paymentTotal - (capturedHasSinpe ? splitAmountNum : 0)
             const mainChange = isCredit ? 0
+                : capturedDebt ? 0
                 : capturedHasEfectivo ? Math.max(0, saleReceived - cashNeeded)
                     : (method === 'EFECTIVO' ? Math.max(0, saleReceived - paymentTotal) : 0)
             const saleInput = {
@@ -957,6 +1004,9 @@ export function POSPage() {
                         await settleSaleDirect(id, {
                             paymentMethod: method,
                             cashRegisterId: activeRegister?.id ?? null,
+                            // amountReceived/change belong to the full transaction, not individual debt sales
+                            amountReceived: null,
+                            change: null,
                         })
                     } catch (err) {
                         console.error(`[POS] Failed to settle debt ${id}:`, err)
@@ -1457,7 +1507,7 @@ export function POSPage() {
                                     const item = items.find(i => i.id === id)
                                     if (item) updateQuantity(id, item.quantity - 1)
                                 }}
-                                onRemove={removeItem}
+                                onRemove={handleRemoveItem}
                                 onEditPrice={(item) => {
                                     setEditingItem(item)
                                     setEditPriceValue(String(item.unitPrice))
@@ -1542,7 +1592,7 @@ export function POSPage() {
                                         const item = items.find(i => i.id === id)
                                         if (item) updateQuantity(id, item.quantity - 1)
                                     }}
-                                    onRemove={removeItem}
+                                    onRemove={handleRemoveItem}
                                     onClear={handleClearCart}
                                     onEditPrice={(item) => {
                                         setEditingItem(item)
