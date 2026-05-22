@@ -47,7 +47,7 @@ export function generateId(): string {
 // and would silently fall back to UTC (showing times 6 h ahead).
 const CR_OFFSET_MS = -6 * 60 * 60 * 1000
 
-function toCR(v: Date | string): Date {
+export function toCR(v: Date | string): Date {
     if (typeof v !== 'string') return new Date(v.getTime() + CR_OFFSET_MS)
     let s = v
     // SQLite datetime('now') format: "YYYY-MM-DD HH:MM:SS" (space, no Z) = UTC → apply offset

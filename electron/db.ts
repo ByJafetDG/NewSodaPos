@@ -700,6 +700,20 @@ export function initDb() {
     db.exec(`ALTER TABLE SinpeMessage ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'PENDING'`);
   } catch {}
 
+  // Migrate paidAt: add Z suffix to T-format strings without timezone info
+  // paidAt was saved via toISOString() (UTC with Z) but Supabase pull stripped the Z.
+  // toCR() only applies CR offset when Z is present — without Z it shows UTC time (+6h wrong).
+  try {
+    db.prepare(
+      `UPDATE Sale SET paidAt = paidAt || 'Z'
+       WHERE paidAt IS NOT NULL
+         AND paidAt LIKE '%T%'
+         AND paidAt NOT LIKE '%Z'
+         AND paidAt NOT LIKE '%+%'
+         AND paidAt NOT GLOB '*-[0-9][0-9]:[0-9][0-9]'`
+    ).run()
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);

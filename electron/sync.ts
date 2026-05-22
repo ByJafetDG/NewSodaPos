@@ -25,6 +25,13 @@ export function triggerPush() {
 // Los filtros de fecha usan formato ISO con T ('2026-05-19T...'), lo que causa falsos negativos
 // cuando se compara mismo día (espacio < T en ASCII). Normalizar al guardar.
 const d = (v: string | null | undefined): string | null => v ? v.replace(' ', 'T') : null
+// paidAt comes from Supabase without Z — add Z so toCR() applies the CR offset correctly
+const dZ = (v: string | null | undefined): string | null => {
+    if (!v) return null
+    let s = v.replace(' ', 'T')
+    if (!s.endsWith('Z') && !s.includes('+') && !/-\d{2}:\d{2}$/.test(s)) s += 'Z'
+    return s
+}
 
 function notifyUI(table: string) {
     if (windowRef && !windowRef.isDestroyed()) {
@@ -470,6 +477,9 @@ async function pullSync() {
         if (sales) {
             for (const sale of sales) {
                 try {
+                    // Skip if local sale is PENDING (not yet pushed) — avoid overwriting unsynced local changes
+                    const localSale = get('SELECT syncStatus FROM Sale WHERE id = ?', [sale.id]) as { syncStatus: string } | undefined
+                    if (localSale?.syncStatus === 'PENDING') continue
                     // Supabase es autoritativo en pull — eliminar venta local con mismo saleNumber pero distinto id
                     execute(`DELETE FROM SaleItem WHERE saleId IN (SELECT id FROM Sale WHERE saleNumber = ? AND id != ?)`, [sale.saleNumber, sale.id]);
                     execute(`DELETE FROM Sale WHERE saleNumber = ? AND id != ?`, [sale.saleNumber, sale.id]);
@@ -500,7 +510,7 @@ async function pullSync() {
                             paidAt = excluded.paidAt,
                             paymentMethod2 = excluded.paymentMethod2,
                             amount2 = excluded.amount2
-                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, sale.paidAt ?? null, sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
+                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
                 } catch (e) {
                     console.error(`[SyncEngine] Sale pull ${sale.id} (#${sale.saleNumber}):`, e);
                 }
@@ -1398,6 +1408,9 @@ function setupRealtimeSubscriptions() {
             const sale = payload.new as DbSaleRow;
             if (!sale?.id) return;
             try {
+                // Skip if local sale is PENDING — avoid overwriting unsynced local changes
+                const localSale = get('SELECT syncStatus FROM Sale WHERE id = ?', [sale.id]) as { syncStatus: string } | undefined
+                if (localSale?.syncStatus === 'PENDING') return
                 execute(`
                     INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName, physicalInvoiceNumber, originalSaleSnapshot, modifiedFromSaleId, paidAt, paymentMethod2, amount2)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1425,7 +1438,7 @@ function setupRealtimeSubscriptions() {
                         paidAt = excluded.paidAt,
                         paymentMethod2 = excluded.paymentMethod2,
                         amount2 = excluded.amount2
-                `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, sale.paidAt ?? null, sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
+                `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
             } catch (e) { console.error('[SyncRealtime] Sale:', e); }
             notifyUI('Sale');
         })

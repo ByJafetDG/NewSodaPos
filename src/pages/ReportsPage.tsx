@@ -11,7 +11,7 @@ import { useVoidSale } from '@/hooks/useSales'
 import { getSaleItemsForCart } from '@/services/sales'
 import { deleteCreditSale } from '@/services/clients'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, crTime, toCR } from '@/lib/utils'
 import { ReportSaleModal } from '@/components/modals/ReportSaleModal'
 import { TimeWheelPicker, HOURS, MINUTES } from '@/components/ui/TimeWheelPicker'
 import { usePendingSaleLoadStore } from '@/store/pendingSaleLoadStore'
@@ -220,7 +220,7 @@ export function ReportsPage() {
     const hourlyCounts = useMemo(() => {
         const arr = Array(24).fill(0)
         completedSales.forEach((s: any) => {
-            const h = new Date(s.paidAt ?? s.date).getHours()
+            const h = toCR(s.paidAt ?? s.date).getUTCHours()
             if (h >= 0 && h < 24) arr[h]++
         })
         return arr
@@ -243,12 +243,12 @@ export function ReportsPage() {
             if (filterCajero && extractCajero(s.notes) !== filterCajero) return false
             if (orderSearch && !s.saleNumber?.toString().includes(orderSearch)) return false
             if (timeActive) {
-                const d = new Date(s.paidAt ?? s.date)
-                const saleMinutes = d.getHours() * 60 + d.getMinutes()
+                const d = toCR(s.paidAt ?? s.date)
+                const saleMinutes = d.getUTCHours() * 60 + d.getUTCMinutes()
                 const filterMinutes = filterHour * 60 + parseInt(MINUTES[filterMinuteIdx])
                 if (saleMinutes < filterMinutes) return false
             }
-            if (selectedHour !== null && new Date(s.paidAt ?? s.date).getHours() !== selectedHour) return false
+            if (selectedHour !== null && toCR(s.paidAt ?? s.date).getUTCHours() !== selectedHour) return false
             return true
         })
         .sort((a: any, b: any) =>
@@ -605,7 +605,7 @@ export function ReportsPage() {
                                     const isAnulada = s.status === 'ANULADA'
                                     const isModificada = !!s.originalSaleSnapshot || !!s.modifiedFromSaleId
                                     const cfg = PM_CONFIG[s.paymentMethod] ?? PM_CONFIG['EFECTIVO']
-                                    const time = new Date(s.paidAt ?? s.date).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
+                                    const time = crTime(s.paidAt ?? s.date)
                                     const isSplit = s.notes?.startsWith('Crédito dividido') ?? false
                                     const clientName = s.client?.name ?? s.clientName ?? null
                                     return (

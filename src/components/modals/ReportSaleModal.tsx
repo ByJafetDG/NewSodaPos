@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { X, CreditCard, Banknote, Smartphone, User, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare } from 'lucide-react'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, crTime, crDateStr } from '@/lib/utils'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { sileo } from 'sileo'
 import { getSaleDetails } from '@/services/sales'
@@ -162,13 +162,11 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
     const [printing, setPrinting] = useState(false)
 
     const cfg = PM_CONFIG[sale.paymentMethod] ?? PM_CONFIG.EFECTIVO
-    const date = new Date(sale.date)
-    const dateStr = date.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
-    const timeStr = date.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
-    const paidAt = sale.paidAt ? new Date(sale.paidAt) : null
-    const paidDateStr = paidAt?.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
-    const paidTimeStr = paidAt?.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' })
-    const showBothDates = paidAt && paidDateStr !== dateStr
+    const dateStr = crDateStr(sale.date)
+    const timeStr = crTime(sale.date)
+    const paidDateStr = sale.paidAt ? crDateStr(sale.paidAt) : null
+    const paidTimeStr = sale.paidAt ? crTime(sale.paidAt) : null
+    const showBothDates = sale.paidAt && paidDateStr !== dateStr
 
     const handleReprint = async () => {
         const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
