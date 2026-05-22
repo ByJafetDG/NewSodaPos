@@ -87,6 +87,7 @@ export interface DbClientRow {
 export interface DbCompanyRow {
     id: string
     name: string
+    taxId: string | null
     billingEmail: string | null
     phone: string | null
     notes: string | null

@@ -59,9 +59,9 @@ export async function createCompany(input: CompanyInput): Promise<Company> {
     const newCompany: Company = { ...input, id, createdAt: new Date(now), updatedAt: new Date(now), syncStatus: 'PENDING' }
     if (window.electronAPI) {
         await window.electronAPI.dbExecute(
-            `INSERT INTO Company (id, name, billingEmail, phone, notes, isActive, syncStatus, createdAt, updatedAt)
-             VALUES (?, ?, ?, ?, ?, 1, 'PENDING', ?, ?)`,
-            [id, input.name, input.billingEmail ?? null, input.phone ?? null, input.notes ?? null, now, now]
+            `INSERT INTO Company (id, name, taxId, billingEmail, phone, notes, isActive, syncStatus, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, 1, 'PENDING', ?, ?)`,
+            [id, input.name, input.taxId ?? null, input.billingEmail ?? null, input.phone ?? null, input.notes ?? null, now, now]
         )
         return newCompany
     }

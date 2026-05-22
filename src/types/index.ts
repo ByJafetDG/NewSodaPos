@@ -39,7 +39,7 @@ export interface Product {
 }
 
 export interface Company {
-    id: string; name: string; billingEmail: string | null; phone: string | null
+    id: string; name: string; taxId: string | null; billingEmail: string | null; phone: string | null
     notes: string | null; isActive: boolean; syncStatus: SyncStatus
     createdAt: Date; updatedAt: Date
 }

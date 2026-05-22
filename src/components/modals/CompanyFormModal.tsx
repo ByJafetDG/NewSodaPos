@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Building2, Mail, Phone, FileText, Check } from 'lucide-react'
+import { X, Building2, Mail, Phone, FileText, Check, Hash } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { useKeyboardStore } from '@/store/keyboardStore'
@@ -16,7 +16,7 @@ interface CompanyFormModalProps {
     isPending?: boolean
 }
 
-const EMPTY: CompanyInput = { name: '', billingEmail: null, phone: null, notes: null, isActive: true }
+const EMPTY: CompanyInput = { name: '', taxId: null, billingEmail: null, phone: null, notes: null, isActive: true }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
     return (
@@ -48,7 +48,7 @@ export function CompanyFormModal({ isOpen, onClose, onConfirm, company, isPendin
         if (!isOpen) return
         useKeyboardStore.getState().close()
         if (company) {
-            setData({ name: company.name, billingEmail: company.billingEmail, phone: company.phone, notes: company.notes, isActive: company.isActive })
+            setData({ name: company.name, taxId: company.taxId, billingEmail: company.billingEmail, phone: company.phone, notes: company.notes, isActive: company.isActive })
         } else {
             setData(EMPTY)
         }
@@ -60,6 +60,7 @@ export function CompanyFormModal({ isOpen, onClose, onConfirm, company, isPendin
         if (!data.name.trim() || isPending) return
         onConfirm({
             name: data.name.trim(),
+            taxId: data.taxId?.trim() || null,
             billingEmail: data.billingEmail?.trim() || null,
             phone: data.phone?.trim() || null,
             notes: data.notes?.trim() || null,
@@ -68,6 +69,7 @@ export function CompanyFormModal({ isOpen, onClose, onConfirm, company, isPendin
     }
 
     const nameKb = useKeyboardInput(data.name, v => setData(d => ({ ...d, name: v })))
+    const taxIdKb = useKeyboardInput(data.taxId ?? '', v => setData(d => ({ ...d, taxId: v || null })), { mode: 'numeric' })
     const emailKb = useKeyboardInput(data.billingEmail ?? '', v => setData(d => ({ ...d, billingEmail: v || null })))
     const phoneKb = useKeyboardInput(data.phone ?? '', v => setData(d => ({ ...d, phone: v || null })), { mode: 'numeric' })
     const notesKb = useKeyboardInput(data.notes ?? '', v => setData(d => ({ ...d, notes: v || null })))
@@ -114,6 +116,18 @@ export function CompanyFormModal({ isOpen, onClose, onConfirm, company, isPendin
                                         placeholder="Ej: Constructora El Pelón S.A."
                                         className="w-full h-11 px-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[14px] font-semibold placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
                                     />
+                                </Field>
+
+                                <Field label="Cédula jurídica">
+                                    <div className="relative">
+                                        <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3D506A]" />
+                                        <input
+                                            type="text"
+                                            {...taxIdKb}
+                                            placeholder="3-101-000000"
+                                            className="w-full h-10 pl-8 pr-3 rounded-xl bg-[#101520] border border-[#1E2A40] text-[#E4ECF7] text-[13px] placeholder:text-[#3D506A] outline-none focus:border-orange-500/40 transition-colors"
+                                        />
+                                    </div>
                                 </Field>
 
                                 <Field label="Correo de facturación">

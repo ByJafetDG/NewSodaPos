@@ -102,7 +102,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
 
     function handleSelectCompany(co: Company) {
         setName(co.name)
-        setCedula('')
+        setCedula(co.taxId || '')
         setEmail(co.billingEmail || '')
         setSelectedCompanyId(co.id)
         setSelectedId(undefined)
@@ -319,7 +319,7 @@ export function InvoiceNameModal({ isOpen, onClose, onAccept, clients, companies
                                             {co.name}
                                         </p>
                                         <p className="text-[10px] text-[#3D506A] truncate">
-                                            {co.billingEmail || 'Sin correo de facturación'}
+                                            {co.taxId ? co.taxId : (co.billingEmail || 'Sin correo de facturación')}
                                         </p>
                                     </div>
                                     {selectedCompanyId === co.id && <Check size={14} className="shrink-0 text-orange-400" />}

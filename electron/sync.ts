@@ -298,17 +298,18 @@ async function pullSync() {
             transaction(() => {
                 for (const co of companies) {
                     execute(`
-            INSERT INTO Company (id, name, billingEmail, phone, notes, isActive, syncStatus, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, 'SYNCED', ?)
+            INSERT INTO Company (id, name, taxId, billingEmail, phone, notes, isActive, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
               name =         CASE WHEN Company.syncStatus = 'PENDING' THEN Company.name         ELSE excluded.name         END,
+              taxId =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.taxId        ELSE excluded.taxId        END,
               billingEmail = CASE WHEN Company.syncStatus = 'PENDING' THEN Company.billingEmail ELSE excluded.billingEmail END,
               phone =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.phone        ELSE excluded.phone        END,
               notes =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.notes        ELSE excluded.notes        END,
               isActive =     CASE WHEN Company.syncStatus = 'PENDING' THEN Company.isActive     ELSE excluded.isActive     END,
               syncStatus =   CASE WHEN Company.syncStatus = 'PENDING' THEN 'PENDING'            ELSE 'SYNCED'              END,
               updatedAt =    CASE WHEN Company.syncStatus = 'PENDING' THEN Company.updatedAt    ELSE excluded.updatedAt    END
-          `, [co.id, co.name, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.updatedAt]);
+          `, [co.id, co.name, co.taxId ?? null, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.updatedAt]);
                 }
             });
         }
@@ -814,6 +815,7 @@ async function _pushSync(): Promise<string[]> {
             const { error } = await supabase.from('Company').upsert({
                 id: co.id,
                 name: co.name,
+                taxId: co.taxId ?? null,
                 billingEmail: co.billingEmail ?? null,
                 phone: co.phone ?? null,
                 notes: co.notes ?? null,

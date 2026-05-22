@@ -667,6 +667,10 @@ export function initDb() {
   } catch {}
 
   try {
+    db.exec(`ALTER TABLE Company ADD COLUMN taxId TEXT`);
+  } catch {}
+
+  try {
     db.exec(`ALTER TABLE Sale ADD COLUMN companyId TEXT`);
   } catch {}
 
