@@ -124,6 +124,8 @@ export function ClientFormModal({ isOpen, onClose, onConfirm, client, isPending 
             companyId: data.companyId || null,
             notes:     data.notes.trim() || null,
             isActive:  data.isActive,
+            isDeleted: false,
+            deletedAt: null,
         })
     }
 

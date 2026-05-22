@@ -16,7 +16,7 @@ interface CompanyFormModalProps {
     isPending?: boolean
 }
 
-const EMPTY: CompanyInput = { name: '', taxId: null, billingEmail: null, phone: null, notes: null, isActive: true }
+const EMPTY: CompanyInput = { name: '', taxId: null, billingEmail: null, phone: null, notes: null, isActive: true, isDeleted: false, deletedAt: null }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
     return (
@@ -48,7 +48,7 @@ export function CompanyFormModal({ isOpen, onClose, onConfirm, company, isPendin
         if (!isOpen) return
         useKeyboardStore.getState().close()
         if (company) {
-            setData({ name: company.name, taxId: company.taxId, billingEmail: company.billingEmail, phone: company.phone, notes: company.notes, isActive: company.isActive })
+            setData({ name: company.name, taxId: company.taxId, billingEmail: company.billingEmail, phone: company.phone, notes: company.notes, isActive: company.isActive, isDeleted: company.isDeleted, deletedAt: company.deletedAt })
         } else {
             setData(EMPTY)
         }
@@ -65,6 +65,8 @@ export function CompanyFormModal({ isOpen, onClose, onConfirm, company, isPendin
             phone: data.phone?.trim() || null,
             notes: data.notes?.trim() || null,
             isActive: data.isActive,
+            isDeleted: false,
+            deletedAt: null,
         })
     }
 

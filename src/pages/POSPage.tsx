@@ -415,7 +415,9 @@ export function POSPage() {
                         phone: null,
                         company: null,
                         companyId: null,
-                        notes: null
+                        notes: null,
+                        isDeleted: false,
+                        deletedAt: null,
                     })
                     finalId = newClient.id
                 }
