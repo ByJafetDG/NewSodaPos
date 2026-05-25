@@ -50,9 +50,11 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
     const [tab, setTab] = useState<'detail' | 'compare'>('detail')
     const [originalSale, setOriginalSale] = useState<any | null>(null)
     const [loadingOriginal, setLoadingOriginal] = useState(false)
+    const [settledTotal, setSettledTotal] = useState(0)
 
     useEffect(() => {
         if (!sale) { setTab('detail'); setOriginalSale(null) }
+        setSettledTotal(0)
     }, [sale])
 
     const handleLoadOriginal = async () => {
@@ -137,8 +139,8 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
                                 <>
                                     <SaleMeta sale={sale} />
                                     <SaleItems items={sale.items ?? []} />
-                                    <SettledDebtsSection settledSaleIds={sale.settledSaleIds ?? null} />
-                                    <SaleTotals sale={sale} />
+                                    <SettledDebtsSection settledSaleIds={sale.settledSaleIds ?? null} onTotalLoaded={setSettledTotal} />
+                                    <SaleTotals sale={sale} settledTotal={settledTotal} />
                                     {sale.status !== 'ANULADA' && (onVoid || onModify) && (
                                         <SaleActions sale={sale} onVoid={onVoid} onModify={onModify} onClose={onClose} />
                                     )}
@@ -405,11 +407,12 @@ function SaleItems({ items }: { items: any[] }) {
     )
 }
 
-function SaleTotals({ sale }: { sale: any }) {
+function SaleTotals({ sale, settledTotal = 0 }: { sale: any; settledTotal?: number }) {
+    const combinedTotal = sale.total + settledTotal
     return (
         <div className="px-5 pt-3 pb-4 border-t border-[#192030] space-y-1.5 bg-[#090C14]">
             <div className="flex justify-between text-[12px]">
-                <span className="text-[#3D506A]">Subtotal</span>
+                <span className="text-[#3D506A]">{settledTotal > 0 ? 'Subtotal compra' : 'Subtotal'}</span>
                 <span className="text-[#7A8FAA]">{formatCurrency(sale.subtotal)}</span>
             </div>
             {sale.discount > 0 && (
@@ -418,9 +421,15 @@ function SaleTotals({ sale }: { sale: any }) {
                     <span className="text-emerald-400">−{formatCurrency(sale.discount)}</span>
                 </div>
             )}
+            {settledTotal > 0 && (
+                <div className="flex justify-between text-[12px]">
+                    <span className="text-[#3D506A]">Cuentas saldadas</span>
+                    <span className="text-[#7A8FAA]">{formatCurrency(settledTotal)}</span>
+                </div>
+            )}
             <div className="flex justify-between items-baseline pt-1.5 border-t border-[#192030]">
-                <span className="text-[13px] text-[#7A8FAA] font-medium">Total</span>
-                <span className="text-[20px] font-bold text-[#E4ECF7]">{formatCurrency(sale.total)}</span>
+                <span className="text-[13px] text-[#7A8FAA] font-medium">{settledTotal > 0 ? 'Total cobrado' : 'Total'}</span>
+                <span className="text-[20px] font-bold text-[#E4ECF7]">{formatCurrency(combinedTotal)}</span>
             </div>
             {sale.amountReceived != null && !sale.isCredit && sale.amountReceived > 0 && (
                 <div className="flex justify-between text-[11px]">
@@ -438,7 +447,7 @@ function SaleTotals({ sale }: { sale: any }) {
     )
 }
 
-function SettledDebtsSection({ settledSaleIds }: { settledSaleIds: string | null }) {
+function SettledDebtsSection({ settledSaleIds, onTotalLoaded }: { settledSaleIds: string | null; onTotalLoaded?: (total: number) => void }) {
     const [sales, setSales] = useState<any[] | null>(null)
 
     useEffect(() => {
@@ -446,7 +455,11 @@ function SettledDebtsSection({ settledSaleIds }: { settledSaleIds: string | null
         let ids: string[]
         try { ids = JSON.parse(settledSaleIds) } catch { return }
         if (!ids.length) return
-        getSalesByIds(ids).then(setSales).catch(() => {})
+        getSalesByIds(ids).then(result => {
+            setSales(result)
+            const total = result.reduce((sum, s) => sum + s.total, 0)
+            onTotalLoaded?.(total)
+        }).catch(() => {})
     }, [settledSaleIds])
 
     if (!settledSaleIds) return null
