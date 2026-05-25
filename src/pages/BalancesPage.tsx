@@ -1853,6 +1853,7 @@ function ClientDetailView({ client, onBack, onEdit }: {
                             allSales.map((s: any) => {
                                 const sDate = s.date instanceof Date ? s.date : new Date(s.date)
                                 const dateStr = sDate.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
+                                const paidAtStr = s.paidAt ? new Date(s.paidAt).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) : null
                                 const isPending = s.isCredit
                                 const isAnulada = s.status === 'ANULADA'
                                 const mixed = parseMixedNotes((s as any).notes)
@@ -1893,7 +1894,11 @@ function ClientDetailView({ client, onBack, onEdit }: {
                                                         <span className="text-[10px] text-[#3D506A]">· {dateStr}</span>
                                                     </div>
                                                 ) : (
-                                                    <p className="text-[11px] text-[#3D506A]">{dateStr} · {s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}</p>
+                                                    <p className="text-[11px] text-[#3D506A]">
+                                                        {dateStr}
+                                                        {!isPending && !isAnulada && paidAtStr && <span className="text-emerald-500/70"> · Pagada {paidAtStr}</span>}
+                                                        {' · '}{s.items?.length ?? 0} producto{(s.items?.length ?? 0) !== 1 ? 's' : ''}
+                                                    </p>
                                                 )}
                                                 {isModified && (
                                                     <button

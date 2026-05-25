@@ -30,6 +30,7 @@ interface CreateSaleInput {
     consumerName?: string | null
     originalSaleSnapshot?: string | null
     physicalInvoiceNumber?: string | null
+    settledSaleIds?: string | null
 }
 
 /**
@@ -90,8 +91,8 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
 
         const ops: Array<{ sql: string; params: SqlParam[] }> = [
             {
-                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2, modifiedFromSaleId, companyId, consumerName, originalSaleSnapshot, physicalInvoiceNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING', input.paymentMethod2 ?? null, input.amount2 ?? null, input.modifiedFromSaleId ?? null, input.companyId ?? null, input.consumerName ?? null, input.originalSaleSnapshot ?? null, input.physicalInvoiceNumber ?? null]
+                sql: `INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, isCredit, clientId, cashRegisterId, status, notes, syncStatus, paymentMethod2, amount2, modifiedFromSaleId, companyId, consumerName, originalSaleSnapshot, physicalInvoiceNumber, settledSaleIds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, saleNumber, now, input.subtotal, input.discount, input.total, input.paymentMethod, input.amountReceived, input.change, input.isCredit ? 1 : 0, input.clientId, input.cashRegisterId, 'COMPLETADA', input.notes, 'PENDING', input.paymentMethod2 ?? null, input.amount2 ?? null, input.modifiedFromSaleId ?? null, input.companyId ?? null, input.consumerName ?? null, input.originalSaleSnapshot ?? null, input.physicalInvoiceNumber ?? null, input.settledSaleIds ?? null]
             }
         ]
 
@@ -155,6 +156,7 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
             modifiedFromSaleId: input.modifiedFromSaleId ?? null,
             companyId: input.companyId ?? null,
             consumerName: input.consumerName ?? null,
+            settledSaleIds: input.settledSaleIds ?? null,
         })
         .select('*')
         .single()
@@ -694,6 +696,46 @@ export async function getSaleDetails(saleId: string): Promise<(DbSaleRow & { cli
         .single()
     if (error || !data) return null
     return data
+}
+
+export async function getSalesByIds(ids: string[]): Promise<{ id: string; saleNumber: number; date: string; total: number; clientName: string | null; items: { name: string; quantity: number; unitPrice: number; subtotal: number }[] }[]> {
+    if (ids.length === 0) return []
+    const placeholders = ids.map(() => '?').join(',')
+    if (window.electronAPI) {
+        const rows = await window.electronAPI.dbQuery(
+            `SELECT s.id, s.saleNumber, s.date, s.total,
+                    c.name as clientName,
+                    si.quantity, si.unitPrice, si.subtotal as item_subtotal,
+                    COALESCE(p.name, 'Producto') as product_name
+             FROM Sale s
+             LEFT JOIN Client c ON c.id = s.clientId
+             LEFT JOIN SaleItem si ON si.saleId = s.id
+             LEFT JOIN Product p ON p.id = si.productId
+             WHERE s.id IN (${placeholders})
+             ORDER BY s.date ASC`,
+            ids
+        ) as any[]
+        const map = new Map<string, any>()
+        for (const row of rows) {
+            if (!map.has(row.id)) {
+                map.set(row.id, { id: row.id, saleNumber: row.saleNumber, date: row.date, total: row.total, clientName: row.clientName ?? null, items: [] })
+            }
+            if (row.quantity != null) {
+                map.get(row.id)!.items.push({ name: row.product_name, quantity: row.quantity, unitPrice: row.unitPrice, subtotal: row.item_subtotal })
+            }
+        }
+        return Array.from(map.values())
+    }
+    const { data } = await supabase
+        .from('Sale')
+        .select('id, saleNumber, date, total, client:Client(name), items:SaleItem(quantity, unitPrice, subtotal, product:Product(name))')
+        .in('id', ids)
+        .order('date', { ascending: true })
+    return (data ?? []).map((s: any) => ({
+        id: s.id, saleNumber: s.saleNumber, date: s.date, total: s.total,
+        clientName: s.client?.name ?? null,
+        items: (s.items ?? []).map((i: any) => ({ name: i.product?.name ?? 'Producto', quantity: i.quantity, unitPrice: i.unitPrice, subtotal: i.subtotal })),
+    }))
 }
 
 export async function getVoidedSales(): Promise<any[]> {

@@ -510,19 +510,46 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
         bytes.push(LF)
 
         // Items
-        const items = data.items || []
-        for (const item of items) {
-            const qty = `${item.quantity}x `
-            const itemName = item.name || ''
-            const price = ` ${displayCurrency}${formatMoney(item.subtotal)}`
-            const maxName = 32 - qty.length - price.length
-            const truncName = itemName.length > maxName ? itemName.substring(0, maxName) : itemName.padEnd(maxName)
-            addText(`${qty}${truncName}${price}`)
+        const printItems = (items: any[]) => {
+            for (const item of items) {
+                const qty = `${item.quantity}x `
+                const itemName = item.name || ''
+                const price = ` ${displayCurrency}${formatMoney(item.subtotal)}`
+                const maxName = 32 - qty.length - price.length
+                const truncName = itemName.length > maxName ? itemName.substring(0, maxName) : itemName.padEnd(maxName)
+                addText(`${qty}${truncName}${price}`)
+                bytes.push(LF)
+                if (data.showUnitPrice && item.unitPrice) {
+                    addText(`   ${displayCurrency}${formatMoney(item.unitPrice)} c/u`)
+                    bytes.push(LF)
+                }
+            }
+        }
+
+        if (data.debtSections && data.debtSections.length > 0) {
+            // Sectioned layout for debt settlement receipts
+            bytes.push(ESC, 0x61, 0x01) // Center
+            bytes.push(ESC, 0x45, 0x01) // Bold
+            addText('LIQUIDACION DE CUENTAS')
             bytes.push(LF)
-            if (data.showUnitPrice && item.unitPrice) {
-                addText(`   ${displayCurrency}${formatMoney(item.unitPrice)} c/u`)
+            bytes.push(ESC, 0x45, 0x00)
+            bytes.push(ESC, 0x61, 0x00) // Left
+            for (const section of data.debtSections) {
+                addText('--------------------------------')
+                bytes.push(LF)
+                const secDate = new Date(section.date).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' })
+                bytes.push(ESC, 0x45, 0x01)
+                addText(`Cuenta #${section.saleNumber} (${secDate})`)
+                bytes.push(LF)
+                bytes.push(ESC, 0x45, 0x00)
+                printItems(section.items)
+                const subtotalLabel = 'Subtotal:'
+                const subtotalAmt = ` ${displayCurrency}${formatMoney(section.total)}`
+                addText(`${subtotalLabel.padEnd(32 - subtotalAmt.length)}${subtotalAmt}`)
                 bytes.push(LF)
             }
+        } else {
+            printItems(data.items || [])
         }
 
         if (data.splitClients && data.splitClients.length > 0) {
@@ -573,7 +600,7 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
         }
 
         bytes.push(LF, LF, LF)
-        bytes.push(GS, 0x56, 0x01) // GS V 1 = Partial cut
+        bytes.push(GS, 0x56, data.cutType === 'full' ? 0x00 : 0x01) // GS V 0=Full cut  1=Partial cut
 
         const ok = await sendToComPort(comPort, bytes)
         if (ok) return { success: true }

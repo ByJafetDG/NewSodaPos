@@ -36,8 +36,8 @@ function timeAgo(date: Date) {
     return `hace ${Math.floor(min / 60)}h`
 }
 
-type TicketOptions = { showCashier: boolean; showChange: boolean; showHeader: boolean; showUnitPrice: boolean; showDecimals: boolean; currencySymbol: string }
-const DEFAULT_TICKET_OPTIONS: TicketOptions = { showCashier: true, showChange: true, showHeader: true, showUnitPrice: false, showDecimals: true, currencySymbol: '₡' }
+type TicketOptions = { showCashier: boolean; showChange: boolean; showHeader: boolean; showUnitPrice: boolean; showDecimals: boolean; currencySymbol: string; cutType: 'partial' | 'full' }
+const DEFAULT_TICKET_OPTIONS: TicketOptions = { showCashier: true, showChange: true, showHeader: true, showUnitPrice: false, showDecimals: true, currencySymbol: '₡', cutType: 'partial' }
 const CURRENCY_OPTIONS = ['₡', '$', '€', '£', '¥']
 
 const SECTIONS: { id: Section; label: string; desc: string; icon: React.ElementType; color: string }[] = [
@@ -463,6 +463,7 @@ export function SettingsPage() {
             showUnitPrice: opts.showUnitPrice,
             showDecimals: opts.showDecimals,
             currencySymbol: opts.currencySymbol,
+            cutType: opts.cutType,
         })
         setTestResult({ success: ok.success, msg: ok.success ? '¡Impresión enviada!' : (ok.error || 'Error al imprimir') })
         setTimeout(() => setTestResult(null), 3000)
@@ -640,6 +641,31 @@ export function SettingsPage() {
                                         value={ticketOpts.showDecimals}
                                         onChange={v => setTicketOpts(p => ({ ...p, showDecimals: v }))}
                                     />
+                                    <div>
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <div>
+                                                <p className="text-[13px] font-medium text-[#C8D8EC]">Tipo de corte</p>
+                                                <p className="text-[11px] text-[#3D506A]">Cómo la impresora corta el papel al terminar</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {(['partial', 'full'] as const).map(ct => (
+                                                <button
+                                                    key={ct}
+                                                    onClick={() => setTicketOpts(p => ({ ...p, cutType: ct }))}
+                                                    className={cn(
+                                                        'flex-1 h-10 rounded-xl text-[12px] font-semibold border transition-all cursor-pointer',
+                                                        ticketOpts.cutType === ct
+                                                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                                                            : 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA] hover:bg-[#1C2438]'
+                                                    )}
+                                                >
+                                                    {ct === 'partial' ? 'Parcial' : 'Completo'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <p className="text-[10px] text-[#3D506A] mt-1.5">Parcial deja una unión mínima — el ticket no cae solo</p>
+                                    </div>
                                     {ticketHeader && (
                                         <ToggleRow
                                             label="Mostrar encabezado personalizado"
@@ -1959,6 +1985,7 @@ function SinpeSettingsSection() {
     }
 
     const localUrl = `http://${localIp}:${port}/sms`
+    const edgeFnUrl = 'https://ckyivkxnnarxkcxzlukm.supabase.co/functions/v1/sinpe-receiver'
 
     return (
         <SectionContent
@@ -1996,7 +2023,7 @@ function SinpeSettingsSection() {
                     </button>
                 </div>
                 <p className="text-[10px] text-[#3D506A]">
-                    URL para mismo WiFi. Para usar desde cualquier red, configura Cloudflare Tunnel en la guía de abajo.
+                    URL para mismo WiFi. Desde cualquier red usa la Edge Function — no requiere nada extra.
                 </p>
             </div>
 
@@ -2038,47 +2065,40 @@ function SinpeSettingsSection() {
                 </button>
                 {showGuide && (
                     <div className="px-4 pb-4 space-y-4 border-t border-[#192030] pt-4">
+                        <p className="text-[11px] text-[#3D506A]">MacroDroid captura la notificación de QBien y la envía a la nube — sin túneles ni configuración extra en la PC.</p>
+
                         <SinpeStepBlock n={1} title="Instalar MacroDroid en el celular">
-                            <p className="text-[#7A8FAA] text-[12px]">Descarga <span className="text-[#E4ECF7] font-semibold">MacroDroid</span> (gratis) de ArloSoft en Play Store. Permite automatizar el reenvío de notificaciones al servidor.</p>
+                            <p className="text-[#7A8FAA] text-[12px]">Descarga <span className="text-[#E4ECF7] font-semibold">MacroDroid</span> (gratis) de ArloSoft en Play Store.</p>
                         </SinpeStepBlock>
 
-                        <SinpeStepBlock n={2} title="Instalar Cloudflare Tunnel en la PC">
-                            <p className="text-[#7A8FAA] text-[12px] mb-2">Descarga <span className="text-[#E4ECF7]">cloudflared.exe</span> desde:</p>
-                            <SinpeCodeBlock text="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" onCopy={copyText} />
-                            <p className="text-[#7A8FAA] text-[12px] mt-2">Mueve el archivo a una carpeta fija, ej: <span className="font-mono text-[#E4ECF7]">C:\cloudflared\</span></p>
-                        </SinpeStepBlock>
-
-                        <SinpeStepBlock n={3} title="Iniciar el túnel">
-                            <p className="text-[#7A8FAA] text-[12px] mb-2">Abre PowerShell y ejecuta:</p>
-                            <SinpeCodeBlock text={`C:\\cloudflared\\cloudflared.exe tunnel --url http://localhost:${port}`} onCopy={copyText} />
-                            <p className="text-[#7A8FAA] text-[12px] mt-2">Verás una URL pública así:</p>
-                            <SinpeCodeBlock text="https://xxxx-xxxx.trycloudflare.com/sms" onCopy={copyText} />
-                            <p className="text-[#7A8FAA] text-[12px] mt-1">Copia esa URL — la necesitas en el paso 4.</p>
-                        </SinpeStepBlock>
-
-                        <SinpeStepBlock n={4} title="Crear macro en MacroDroid">
+                        <SinpeStepBlock n={2} title="Crear macro en MacroDroid">
                             <div className="space-y-2 text-[12px] text-[#7A8FAA]">
-                                <p>En MacroDroid, toca <span className="text-[#E4ECF7]">+ Agregar macro</span> y configura:</p>
+                                <p>Toca <span className="text-[#E4ECF7]">+ Agregar macro</span> y configura:</p>
                                 <div className="space-y-1.5 pl-1">
-                                    <p><span className="text-green-400 font-semibold">Trigger:</span> <span className="text-[#E4ECF7]">Notificación recibida</span> → App de Mensajes</p>
+                                    <p><span className="text-green-400 font-semibold">Trigger:</span> <span className="text-[#E4ECF7]">Notificación recibida</span> → App de Mensajes (o la app de QBien)</p>
                                     <p><span className="text-green-400 font-semibold">Acción:</span> <span className="text-[#E4ECF7]">Solicitud HTTP</span></p>
                                 </div>
-                                <p className="pt-1">En la acción HTTP pon:</p>
-                                <div className="space-y-1.5 p-2.5 rounded-xl bg-[#080B14] border border-[#192030]">
-                                    <div className="flex gap-2"><span className="text-[#3D506A] shrink-0 w-16">URL:</span><span className="text-[#E4ECF7] font-mono text-[10px] break-all">{localUrl}</span></div>
-                                    <div className="flex gap-2"><span className="text-[#3D506A] shrink-0 w-16">Método:</span><span className="text-[#E4ECF7]">POST</span></div>
-                                    <div className="flex gap-2 items-start"><span className="text-[#3D506A] shrink-0 w-16">Cuerpo:</span><span className="text-[#E4ECF7] font-mono text-[10px] break-all">{`{"from":"{titulo de notificacion}","message":"{texto de notificacion}"}`}</span></div>
-                                    <div className="flex gap-2"><span className="text-[#3D506A] shrink-0 w-16">Header:</span><span className="text-[#E4ECF7] font-mono text-[10px]">Content-Type: application/json</span></div>
+                                <p className="pt-1">En la acción HTTP configura así:</p>
+                                <div className="space-y-2 p-2.5 rounded-xl bg-[#080B14] border border-[#192030]">
+                                    <div className="flex gap-2 items-start">
+                                        <span className="text-[#3D506A] shrink-0 w-14 pt-0.5">URL:</span>
+                                        <div className="flex-1 flex items-start gap-1.5">
+                                            <span className="text-[#E4ECF7] font-mono text-[10px] break-all flex-1">{edgeFnUrl}</span>
+                                            <button onClick={() => copyText(edgeFnUrl)} className="shrink-0 text-[#3D506A] active:text-green-400 transition-colors cursor-pointer mt-0.5"><Copy size={11} /></button>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2"><span className="text-[#3D506A] shrink-0 w-14">Método:</span><span className="text-[#E4ECF7]">POST</span></div>
+                                    <div className="flex gap-2 items-start">
+                                        <span className="text-[#3D506A] shrink-0 w-14 pt-0.5">Cuerpo:</span>
+                                        <div className="flex-1 flex items-start gap-1.5">
+                                            <span className="text-[#E4ECF7] font-mono text-[10px] break-all flex-1">{`{"from":"{titulo de notificacion}","message":"{texto de notificacion}"}`}</span>
+                                            <button onClick={() => copyText(`{"from":"{titulo de notificacion}","message":"{texto de notificacion}"}`)} className="shrink-0 text-[#3D506A] active:text-green-400 transition-colors cursor-pointer mt-0.5"><Copy size={11} /></button>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2"><span className="text-[#3D506A] shrink-0 w-14">Header:</span><span className="text-[#E4ECF7] font-mono text-[10px]">Content-Type: application/json</span></div>
                                 </div>
-                                <p className="text-[10px] text-[#3D506A] pt-1">Cuando instales Cloudflare Tunnel, cambia la URL por la pública <span className="text-[#7A8FAA]">https://xxxx.trycloudflare.com/sms</span>.</p>
+                                <p className="text-[10px] text-[#3D506A] pt-1">La URL es fija y siempre disponible — funciona desde cualquier red sin configuración adicional.</p>
                             </div>
-                        </SinpeStepBlock>
-
-                        <SinpeStepBlock n={5} title="Inicio automático del túnel (opcional)">
-                            <p className="text-[#7A8FAA] text-[12px]">Para que el túnel inicie con Windows, abre Ejecutar (<span className="text-[#E4ECF7]">Win+R</span>) y escribe:</p>
-                            <SinpeCodeBlock text="shell:startup" onCopy={copyText} />
-                            <p className="text-[#7A8FAA] text-[12px] mt-1.5">Crea un acceso directo del comando cloudflared en esa carpeta.</p>
-                            <p className="text-[#7A8FAA] text-[10px] mt-1.5">Nota: la URL cambia al reiniciar el túnel. Para URL fija permanente, crea cuenta gratuita en <span className="text-[#E4ECF7]">dash.cloudflare.com</span></p>
                         </SinpeStepBlock>
                     </div>
                 )}

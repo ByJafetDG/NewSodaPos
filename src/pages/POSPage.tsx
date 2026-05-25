@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { sileo } from 'sileo'
 import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
@@ -235,10 +235,13 @@ export function POSPage() {
         onCreditSplitComplete: () => { setShowCreditModal(false); setPaymentMethod('EFECTIVO') },
     })
 
+    const isChargingRef = useRef(false)
+    const [isCharging, setIsCharging] = useState(false)
+
     // ── Derived ───────────────────────────────────────────────────────────────
     const canCharge =
         (items.length > 0 || pendingDebt.hasDebt) &&
-        !createSale.isPending &&
+        !createSale.isPending && !isCharging &&
         (isMixed
             ? (
                 (!hasCuentaMixed || (creditAmountNum > 0 && creditAmountNum < effectiveTotal && !!creditClientId)) &&
@@ -616,8 +619,16 @@ export function POSPage() {
     }
 
     const handleCharge = async () => {
-        if (paymentMethod === 'CREDITO') { setShowCreditModal(true); return }
-        await processSale({ method: paymentMethod })
+        if (isChargingRef.current) return
+        isChargingRef.current = true
+        setIsCharging(true)
+        try {
+            if (paymentMethod === 'CREDITO') { setShowCreditModal(true); return }
+            await processSale({ method: paymentMethod })
+        } finally {
+            isChargingRef.current = false
+            setIsCharging(false)
+        }
     }
 
     const handleOpenDrawer = () => {
@@ -934,7 +945,7 @@ export function POSPage() {
                                 discount={discount}
                                 total={total}
                                 canCharge={canCharge}
-                                isPending={createSale.isPending}
+                                isPending={createSale.isPending || isCharging}
                                 onCharge={handleCharge}
                                 onClear={handleClearCart}
                                 hasItems={items.length > 0}
@@ -1021,7 +1032,7 @@ export function POSPage() {
                                     discount={discount}
                                     total={total}
                                     canCharge={canCharge}
-                                    isPending={createSale.isPending}
+                                    isPending={createSale.isPending || isCharging}
                                     onCharge={handleCharge}
                                     onClear={handleClearCart}
                                     hasItems={items.length > 0}

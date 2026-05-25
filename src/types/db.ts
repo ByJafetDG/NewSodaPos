@@ -30,6 +30,7 @@ export interface DbSaleRow {
     originalSaleSnapshot: string | null
     modifiedFromSaleId: string | null
     paidAt: string | null
+    settledSaleIds: string | null
     updatedAt: string
 }
 

@@ -27,6 +27,7 @@ type GroupedSale = {
     discount: number; total: number; paymentMethod: string; isCredit: boolean
     clientId: string | null; status: string; notes: string | null; syncStatus: string
     modifiedFromSaleId: string | null; originalSaleSnapshot: string | null
+    paidAt: string | null
     createdAt: Date | undefined; updatedAt: Date; items: GroupedSaleItem[]
 }
 
@@ -405,6 +406,7 @@ function groupSaleRows(rows: SaleJoinRow[]): GroupedSale[] {
                 notes: row.notes, syncStatus: row.syncStatus,
                 modifiedFromSaleId: row.modifiedFromSaleId ?? null,
                 originalSaleSnapshot: row.originalSaleSnapshot ?? null,
+                paidAt: row.paidAt ?? null,
                 createdAt: row.createdAt ? new Date(row.createdAt) : undefined, updatedAt: new Date(row.updatedAt),
                 items: [],
             })

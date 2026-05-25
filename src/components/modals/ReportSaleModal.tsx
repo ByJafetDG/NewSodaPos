@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, CreditCard, Banknote, Smartphone, User, UserCheck, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare } from 'lucide-react'
+import { X, CreditCard, Banknote, Smartphone, User, UserCheck, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare, CheckCircle2 } from 'lucide-react'
 import { cn, formatCurrency, crTime, crDateStr } from '@/lib/utils'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { sileo } from 'sileo'
-import { getSaleDetails } from '@/services/sales'
+import { getSaleDetails, getSalesByIds } from '@/services/sales'
 
 function MarqueeText({ text, className }: { text: string; className?: string }) {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -137,6 +137,7 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
                                 <>
                                     <SaleMeta sale={sale} />
                                     <SaleItems items={sale.items ?? []} />
+                                    <SettledDebtsSection settledSaleIds={sale.settledSaleIds ?? null} />
                                     <SaleTotals sale={sale} />
                                     {sale.status !== 'ANULADA' && (onVoid || onModify) && (
                                         <SaleActions sale={sale} onVoid={onVoid} onModify={onModify} onClose={onClose} />
@@ -414,6 +415,59 @@ function SaleTotals({ sale }: { sale: any }) {
                     <span className="text-[#7A8FAA]">{formatCurrency(sale.change)}</span>
                 </div>
             )}
+        </div>
+    )
+}
+
+function SettledDebtsSection({ settledSaleIds }: { settledSaleIds: string | null }) {
+    const [sales, setSales] = useState<any[] | null>(null)
+
+    useEffect(() => {
+        if (!settledSaleIds) return
+        let ids: string[]
+        try { ids = JSON.parse(settledSaleIds) } catch { return }
+        if (!ids.length) return
+        getSalesByIds(ids).then(setSales).catch(() => {})
+    }, [settledSaleIds])
+
+    if (!settledSaleIds) return null
+    if (!sales) return (
+        <div className="px-5 py-3 border-t border-[#192030]">
+            <p className="text-[11px] text-[#3D506A]">Cargando cuentas saldadas...</p>
+        </div>
+    )
+    if (!sales.length) return null
+
+    return (
+        <div className="border-t border-[#192030]">
+            <div className="px-5 py-2.5 bg-[#090C14] flex items-center gap-2">
+                <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
+                <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">Cuentas saldadas</span>
+            </div>
+            {sales.map((s, idx) => (
+                <div key={s.id} className={cn('px-5 py-2.5 border-t border-[#192030]/60', idx % 2 === 0 ? 'bg-[#0B1019]' : 'bg-[#090C14]')}>
+                    <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[12px] font-semibold text-[#7A8FAA] font-mono shrink-0">#{s.saleNumber}</span>
+                            {s.clientName && <span className="text-[11px] text-[#4A6080] truncate">· {s.clientName}</span>}
+                        </div>
+                        <span className="text-[10px] text-[#3D506A] shrink-0 ml-2">{crDateStr(s.date)}</span>
+                    </div>
+                    {s.items.map((item: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between text-[11px] py-0.5">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-[#3D506A] shrink-0">{item.quantity}×</span>
+                                <span className="text-[#7A8FAA] truncate">{item.name}</span>
+                            </div>
+                            <span className="text-[#3D506A] ml-2 shrink-0">{formatCurrency(item.subtotal)}</span>
+                        </div>
+                    ))}
+                    <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[#192030]/50">
+                        <span className="text-[10px] text-emerald-500/60 flex items-center gap-1"><CheckCircle2 size={9} />Saldada</span>
+                        <span className="text-[11px] font-semibold text-[#7A8FAA]">{formatCurrency(s.total)}</span>
+                    </div>
+                </div>
+            ))}
         </div>
     )
 }

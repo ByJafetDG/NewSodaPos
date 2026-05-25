@@ -768,6 +768,10 @@ export function initDb() {
     ).run()
   } catch {}
 
+  try {
+    db.exec(`ALTER TABLE Sale ADD COLUMN settledSaleIds TEXT`);
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);

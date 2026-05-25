@@ -100,6 +100,7 @@ export function usePOSSale(params: UsePOSSaleParams) {
                     showUnitPrice: tOpts.showUnitPrice ?? false,
                     showDecimals: tOpts.showDecimals ?? true,
                     currencySymbol: tOpts.currencySymbol ?? '₡',
+                    cutType: tOpts.cutType ?? 'partial',
                     splitClients: data.clientAssignments.map(a => ({
                         name: a.clientName,
                         amount: a.products.reduce((s, p) => s + p.amount, 0),
@@ -198,6 +199,15 @@ export function usePOSSale(params: UsePOSSaleParams) {
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
                 qc.invalidateQueries({ queryKey: ['active-register'] })
 
+                if (capturedDebt.saleIds.length > 1 && window.electronAPI) {
+                    try {
+                        await window.electronAPI.dbExecute(
+                            `UPDATE Sale SET settledSaleIds = ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ?`,
+                            [JSON.stringify(capturedDebt.saleIds), new Date().toISOString(), capturedDebt.saleIds[0]]
+                        )
+                    } catch {}
+                }
+
                 const settledClient = clients.find((c: any) => c.id === capturedDebt.clientId)
                 if (settledClient?.email) {
                     sendSettledEmail({
@@ -248,6 +258,17 @@ export function usePOSSale(params: UsePOSSaleParams) {
                         clientName: settledClient?.name,
                         clientCode: settledClient?.code,
                         items: debtItems,
+                        debtSections: capturedDebt.sales.map((s: any) => ({
+                            saleNumber: s.saleNumber,
+                            date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
+                            items: (s.items ?? []).map((item: any) => ({
+                                name: item.product?.name ?? item.name ?? 'Producto',
+                                quantity: item.quantity,
+                                unitPrice: item.unitPrice,
+                                subtotal: item.subtotal,
+                            })),
+                            total: s.total,
+                        })),
                         total: capturedDebt.debtTotal,
                         paymentMethod: method,
                         amountReceived: method === 'EFECTIVO' ? saleReceived : null,
@@ -260,6 +281,7 @@ export function usePOSSale(params: UsePOSSaleParams) {
                         showUnitPrice: tOpts2.showUnitPrice ?? false,
                         showDecimals: tOpts2.showDecimals ?? true,
                         currencySymbol: tOpts2.currencySymbol ?? '₡',
+                        cutType: tOpts2.cutType ?? 'partial',
                     }).catch((err: any) => console.error('[POS] Auto-print error:', err))
                 }
                 return
@@ -300,6 +322,7 @@ export function usePOSSale(params: UsePOSSaleParams) {
                 consumerName: capturedInvoiceClient?.consumerName ?? pendingSaleLoad.originalConsumerName ?? null,
                 originalSaleSnapshot: pendingSaleLoad.originalSaleSnapshot ?? null,
                 physicalInvoiceNumber: capturedInvoiceClient?.physicalInvoiceNumber ?? pendingSaleLoad.originalPhysicalInvoiceNumber ?? null,
+                settledSaleIds: capturedDebt ? JSON.stringify(capturedDebt.saleIds) : null,
             }
 
             const capturedOriginalId = pendingSaleLoad.originalSaleId
@@ -499,6 +522,7 @@ export function usePOSSale(params: UsePOSSaleParams) {
                     showDecimals: tOpts.showDecimals ?? true,
                     ticketLogoUrl: config?.ticketLogoUrl || null,
                     currencySymbol: tOpts.currencySymbol ?? '₡',
+                    cutType: tOpts.cutType ?? 'partial',
                 }).then(r => {
                     if (!r.success) sileo.error({
                         title: 'Error de impresora',

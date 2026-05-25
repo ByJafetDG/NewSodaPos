@@ -86,7 +86,9 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
         console.log('[SyncEngine] Dev mode: reset local syncStatus to SYNCED — Supabase will overwrite on pull.');
     }
 
-    // Resolve saleNumber conflicts: reassign pending local sales that collide with Supabase
+    // Resolve saleNumber conflicts: reassign pending local sales that collide with Supabase.
+    // Only reassign truly NEW sales (UUID not in Supabase yet) — skip in-place updates
+    // (updateSaleInPlace) which intentionally keep the same saleNumber.
     try {
         const { data: remoteTop } = await supabase
             .from('Sale')
@@ -100,10 +102,24 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
             "SELECT id, saleNumber FROM Sale WHERE syncStatus = 'PENDING' ORDER BY saleNumber ASC"
         ) as { id: string; saleNumber: number }[];
 
+        // Batch-check which pending sales already exist in Supabase (= in-place updates, not new sales)
+        let existingRemoteIds = new Set<string>()
+        if (pendingSales.length > 0) {
+            try {
+                const { data: remoteExisting } = await supabase
+                    .from('Sale')
+                    .select('id')
+                    .in('id', pendingSales.map(s => s.id))
+                if (remoteExisting) {
+                    existingRemoteIds = new Set(remoteExisting.map((s: { id: string }) => s.id))
+                }
+            } catch {}
+        }
+
         let nextNum = maxRemote;
         let reassigned = 0;
         for (const sale of pendingSales) {
-            if (sale.saleNumber <= maxRemote) {
+            if (sale.saleNumber <= maxRemote && !existingRemoteIds.has(sale.id)) {
                 nextNum += 1;
                 execute(
                     "UPDATE Sale SET saleNumber = ?, updatedAt = ? WHERE id = ?",
@@ -113,7 +129,7 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
             }
         }
         if (reassigned > 0) {
-            console.log(`[SyncEngine] Reassigned ${reassigned} pending sales (saleNumber ≤ ${maxRemote}) starting from ${maxRemote + 1}.`);
+            console.log(`[SyncEngine] Reassigned ${reassigned} new pending sales (saleNumber ≤ ${maxRemote}) starting from ${maxRemote + 1}.`);
         }
     } catch (err) {
         console.error('[SyncEngine] saleNumber conflict resolution failed:', err);
@@ -1020,7 +1036,7 @@ async function _pushSync(): Promise<string[]> {
     // 7. Sales + SaleItems — after CashRegister, Client, Product
     for (const sale of pendingSales) {
         try {
-            const items = query(`SELECT * FROM SaleItem WHERE saleId = ?`, [sale.id]);
+            const items = query(`SELECT * FROM SaleItem WHERE saleId = ?`, [sale.id]) as DbSaleItemRow[];
             const { error: saleError } = await supabase.from('Sale').upsert({
                 id: sale.id,
                 saleNumber: sale.saleNumber,
@@ -1046,9 +1062,14 @@ async function _pushSync(): Promise<string[]> {
                 paidAt: sale.paidAt ?? null,
                 paymentMethod2: sale.paymentMethod2 ?? null,
                 amount2: sale.amount2 ?? null,
+                settledSaleIds: sale.settledSaleIds ?? null,
             });
             if (saleError) throw saleError;
-            for (const item of items as DbSaleItemRow[]) {
+            // Delete all Supabase SaleItems for this sale before reinserting current ones.
+            // updateSaleInPlace deletes+recreates items locally (new UUIDs), so without
+            // this step old Supabase items with different IDs would persist and re-sync on pull.
+            await supabase.from('SaleItem').delete().eq('saleId', sale.id)
+            for (const item of items) {
                 const { error: itemError } = await supabase.from('SaleItem').upsert({
                     id: item.id,
                     saleId: item.saleId,
