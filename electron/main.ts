@@ -526,8 +526,15 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
             }
         }
 
+        if (data.items && data.items.length > 0) {
+            printItems(data.items)
+        }
+
         if (data.debtSections && data.debtSections.length > 0) {
-            // Sectioned layout for debt settlement receipts
+            if (data.items && data.items.length > 0) {
+                addText('--------------------------------')
+                bytes.push(LF)
+            }
             bytes.push(ESC, 0x61, 0x01) // Center
             bytes.push(ESC, 0x45, 0x01) // Bold
             addText('LIQUIDACION DE CUENTAS')
@@ -548,8 +555,6 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
                 addText(`${subtotalLabel.padEnd(32 - subtotalAmt.length)}${subtotalAmt}`)
                 bytes.push(LF)
             }
-        } else {
-            printItems(data.items || [])
         }
 
         if (data.splitClients && data.splitClients.length > 0) {

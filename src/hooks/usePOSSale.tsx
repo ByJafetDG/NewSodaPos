@@ -257,7 +257,7 @@ export function usePOSSale(params: UsePOSSaleParams) {
                         cashier: saleCashier,
                         clientName: settledClient?.name,
                         clientCode: settledClient?.code,
-                        items: debtItems,
+                        items: [],
                         debtSections: capturedDebt.sales.map((s: any) => ({
                             saleNumber: s.saleNumber,
                             date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
@@ -450,6 +450,29 @@ export function usePOSSale(params: UsePOSSaleParams) {
                 pendingDebt.clear()
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
                 qc.invalidateQueries({ queryKey: ['active-register'] })
+
+                const settledClientP2 = clients.find((c: any) => c.id === capturedDebt.clientId)
+                if (settledClientP2?.email) {
+                    sendSettledEmail({
+                        to: settledClientP2.email,
+                        clientName: settledClientP2.name,
+                        businessName: config?.name ?? '',
+                        logoUrl: config?.emailLogoUrl,
+                        sales: capturedDebt.sales.map((s: any) => ({
+                            saleNumber: s.saleNumber,
+                            date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
+                            items: (s.items ?? []).map((item: any) => ({
+                                name: item.product?.name ?? item.name ?? 'Producto',
+                                quantity: item.quantity,
+                                unitPrice: item.unitPrice,
+                                subtotal: item.subtotal,
+                            })),
+                            subtotal: s.subtotal,
+                            discount: s.discount ?? 0,
+                            total: s.total,
+                        })),
+                    }).catch(() => {})
+                }
             }
 
             if (capturedSorteo && !capturedDeclined) {
@@ -496,20 +519,23 @@ export function usePOSSale(params: UsePOSSaleParams) {
                     cashier: saleCashier,
                     clientName: selClient?.name,
                     clientCode: selClient?.code,
-                    items: [
-                        ...saleItems.map(i => ({
-                            name: i.product.name,
-                            quantity: i.quantity,
-                            unitPrice: i.unitPrice,
-                            subtotal: i.subtotal,
+                    items: saleItems.map(i => ({
+                        name: i.product.name,
+                        quantity: i.quantity,
+                        unitPrice: i.unitPrice,
+                        subtotal: i.subtotal,
+                    })),
+                    debtSections: capturedDebt ? capturedDebt.sales.map((s: any) => ({
+                        saleNumber: s.saleNumber,
+                        date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
+                        items: (s.items ?? []).map((item: any) => ({
+                            name: item.product?.name ?? item.name ?? 'Producto',
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            subtotal: item.subtotal,
                         })),
-                        ...(capturedDebt ? [{
-                            name: `Abono deuda (${capturedDebt.clientName})`,
-                            quantity: 1,
-                            unitPrice: capturedDebt.debtTotal,
-                            subtotal: capturedDebt.debtTotal,
-                        }] : []),
-                    ],
+                        total: s.total,
+                    })) : undefined,
                     total: saleTotal,
                     paymentMethod: isCredit ? 'CREDITO' : method,
                     amountReceived: method === 'EFECTIVO' && !isCredit ? saleReceived : null,
