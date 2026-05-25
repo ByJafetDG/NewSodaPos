@@ -471,7 +471,7 @@ async function pullSync() {
                             status = excluded.status,
                             syncStatus = 'SYNCED',
                             updatedAt = excluded.updatedAt
-                    `, [reg.id, d(reg.openedAt), d(reg.closedAt) ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
+                    `, [reg.id, dZ(reg.openedAt), dZ(reg.closedAt) ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
                 }
             });
         }
@@ -1410,7 +1410,7 @@ function setupRealtimeSubscriptions() {
                         status = excluded.status,
                         syncStatus = 'SYNCED',
                         updatedAt = excluded.updatedAt
-                `, [reg.id, d(reg.openedAt), d(reg.closedAt) ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
+                `, [reg.id, dZ(reg.openedAt), dZ(reg.closedAt) ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
             } catch (e) { console.error('[SyncRealtime] CashRegister:', e); }
             notifyUI('CashRegister');
         })

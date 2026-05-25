@@ -736,6 +736,28 @@ export function initDb() {
     ).run()
   } catch {}
 
+  // Migrate CashRegister openedAt/closedAt: same Z-suffix fix as paidAt (rule #23)
+  try {
+    db.prepare(
+      `UPDATE CashRegister SET openedAt = openedAt || 'Z'
+       WHERE openedAt IS NOT NULL
+         AND openedAt LIKE '%T%'
+         AND openedAt NOT LIKE '%Z'
+         AND openedAt NOT LIKE '%+%'
+         AND openedAt NOT GLOB '*-[0-9][0-9]:[0-9][0-9]'`
+    ).run()
+  } catch {}
+  try {
+    db.prepare(
+      `UPDATE CashRegister SET closedAt = closedAt || 'Z'
+       WHERE closedAt IS NOT NULL
+         AND closedAt LIKE '%T%'
+         AND closedAt NOT LIKE '%Z'
+         AND closedAt NOT LIKE '%+%'
+         AND closedAt NOT GLOB '*-[0-9][0-9]:[0-9][0-9]'`
+    ).run()
+  } catch {}
+
   // ===== Performance Indexes =====
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sale_cash_register ON Sale(cashRegisterId);
