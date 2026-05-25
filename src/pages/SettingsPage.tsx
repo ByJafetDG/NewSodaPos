@@ -1874,7 +1874,7 @@ function EmpPrefsRow({ employee }: { employee: Employee }) {
                 </div>
                 <div>
                     <p className="text-[13px] font-semibold text-[#E4ECF7]">{employee.name}</p>
-                    <p className="text-[11px] text-[#3D506A]">{employee.role === 'ADMIN' ? 'Administrador' : employee.role === 'TEMPORAL' ? 'Temporal' : 'Cajero'}</p>
+                    <p className="text-[11px] text-[#3D506A]">{employee.role === 'DUEÑO' ? 'Administrador' : employee.role === 'TEMPORAL' ? 'Temporal' : 'Cajero'}</p>
                 </div>
             </div>
             <div className="flex items-center gap-2.5">
