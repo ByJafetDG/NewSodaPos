@@ -202,6 +202,24 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
 
         setPrinting(true)
         try {
+            let debtSections: any[] | undefined
+            let printTotal = sale.total
+            if (sale.settledSaleIds) {
+                try {
+                    const ids: string[] = JSON.parse(sale.settledSaleIds)
+                    if (ids.length > 0) {
+                        const settled = await getSalesByIds(ids)
+                        debtSections = settled.map(s => ({
+                            saleNumber: s.saleNumber,
+                            date: s.date,
+                            items: s.items,
+                            total: s.total,
+                        }))
+                        printTotal = sale.total + settled.reduce((sum, s) => sum + s.total, 0)
+                    }
+                } catch {}
+            }
+
             await window.electronAPI.printReceipt(printerPort, {
                 businessName: config?.name || 'Soda El Pelón',
                 address: config?.address,
@@ -218,7 +236,8 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
                     unitPrice: i.unitPrice,
                     subtotal: i.subtotal,
                 })),
-                total: sale.total,
+                debtSections,
+                total: printTotal,
                 paymentMethod: sale.paymentMethod,
                 amountReceived: sale.amountReceived,
                 change: sale.change,

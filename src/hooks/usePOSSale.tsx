@@ -451,28 +451,6 @@ export function usePOSSale(params: UsePOSSaleParams) {
                 qc.invalidateQueries({ queryKey: ['credit-sales'] })
                 qc.invalidateQueries({ queryKey: ['active-register'] })
 
-                const settledClientP2 = clients.find((c: any) => c.id === capturedDebt.clientId)
-                if (settledClientP2?.email) {
-                    sendSettledEmail({
-                        to: settledClientP2.email,
-                        clientName: settledClientP2.name,
-                        businessName: config?.name ?? '',
-                        logoUrl: config?.emailLogoUrl,
-                        sales: capturedDebt.sales.map((s: any) => ({
-                            saleNumber: s.saleNumber,
-                            date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
-                            items: (s.items ?? []).map((item: any) => ({
-                                name: item.product?.name ?? item.name ?? 'Producto',
-                                quantity: item.quantity,
-                                unitPrice: item.unitPrice,
-                                subtotal: item.subtotal,
-                            })),
-                            subtotal: s.subtotal,
-                            discount: s.discount ?? 0,
-                            total: s.total,
-                        })),
-                    }).catch(() => {})
-                }
             }
 
             if (capturedSorteo && !capturedDeclined) {
@@ -636,35 +614,55 @@ export function usePOSSale(params: UsePOSSaleParams) {
                     : null
                 const recipientEmail = capturedInvoiceClient.email.trim() || invoiceFull?.email || null
                 const recipientName = capturedInvoiceClient.name
-                const invoicePayload = {
-                    clientName: recipientName,
-                    businessName: config?.name ?? 'Mi Soda',
-                    saleNumber: sale.saleNumber,
-                    date: sale.date,
-                    items: saleItems.map(i => ({
-                        name: i.product.name,
-                        quantity: i.quantity,
-                        unitPrice: i.unitPrice,
-                        subtotal: i.subtotal,
+                const debtSalesPayload = capturedDebt ? capturedDebt.sales.map((s: any) => ({
+                    saleNumber: s.saleNumber,
+                    date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
+                    items: (s.items ?? []).map((item: any) => ({
+                        name: item.product?.name ?? item.name ?? 'Producto',
+                        quantity: item.quantity, unitPrice: item.unitPrice, subtotal: item.subtotal,
                     })),
-                    subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
-                    paymentMethod: method,
-                    logoUrl: config?.emailLogoUrl,
-                }
+                    subtotal: s.subtotal, discount: s.discount ?? 0, total: s.total,
+                })) : null
                 if (recipientEmail) {
-                    sendInvoiceReceiptEmail({ to: recipientEmail, ...invoicePayload }).then(result => {
-                        if (result.success) {
-                            toast.success(`Recibo enviado a ${recipientEmail}`)
-                        } else if (result.isVerificationError) {
-                            toast.error('Dominio de correo no verificado. Configura el dominio en Resend.')
-                        } else {
-                            toast.error(`Error al enviar recibo: ${result.error}`)
+                    if (capturedDebt && debtSalesPayload) {
+                        sendSettledEmail({
+                            to: recipientEmail,
+                            clientName: recipientName,
+                            businessName: config?.name ?? 'Mi Soda',
+                            logoUrl: config?.emailLogoUrl,
+                            sales: debtSalesPayload,
+                            newSale: {
+                                saleNumber: sale.saleNumber,
+                                items: saleItems.map(i => ({ name: i.product.name, quantity: i.quantity, unitPrice: i.unitPrice, subtotal: i.subtotal })),
+                                subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
+                                paymentMethod: method,
+                            },
+                        }).then(result => {
+                            if (result.success) toast.success(`Recibo enviado a ${recipientEmail}`)
+                            else if (result.isVerificationError) toast.error('Dominio de correo no verificado.')
+                            else toast.error(`Error al enviar recibo: ${result.error}`)
+                        }).catch(() => {})
+                    } else {
+                        const invoicePayload = {
+                            clientName: recipientName,
+                            businessName: config?.name ?? 'Mi Soda',
+                            saleNumber: sale.saleNumber,
+                            date: sale.date,
+                            items: saleItems.map(i => ({ name: i.product.name, quantity: i.quantity, unitPrice: i.unitPrice, subtotal: i.subtotal })),
+                            subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
+                            paymentMethod: method,
+                            logoUrl: config?.emailLogoUrl,
                         }
-                    }).catch(() => {})
-                }
-                for (const ccAddr of capturedInvoiceClient.ccEmails ?? []) {
-                    const trimmed = ccAddr.trim()
-                    if (trimmed) sendInvoiceReceiptEmail({ to: trimmed, ...invoicePayload }).catch(() => {})
+                        sendInvoiceReceiptEmail({ to: recipientEmail, ...invoicePayload }).then(result => {
+                            if (result.success) toast.success(`Recibo enviado a ${recipientEmail}`)
+                            else if (result.isVerificationError) toast.error('Dominio de correo no verificado. Configura el dominio en Resend.')
+                            else toast.error(`Error al enviar recibo: ${result.error}`)
+                        }).catch(() => {})
+                        for (const ccAddr of capturedInvoiceClient.ccEmails ?? []) {
+                            const trimmed = ccAddr.trim()
+                            if (trimmed) sendInvoiceReceiptEmail({ to: trimmed, ...invoicePayload }).catch(() => {})
+                        }
+                    }
                 }
             }
         } catch (err) { console.error(err) }

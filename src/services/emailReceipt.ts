@@ -30,12 +30,22 @@ interface SettledSaleInfo {
     total: number
 }
 
+interface NewSaleInfo {
+    saleNumber: number
+    items: ReceiptItem[]
+    subtotal: number
+    discount: number
+    total: number
+    paymentMethod: string
+}
+
 interface SendSettledInput {
     to: string
     clientName: string
     businessName: string
     sales: SettledSaleInfo[]
     logoUrl?: string | null
+    newSale?: NewSaleInfo
 }
 
 export interface MixedPaymentInfo {
@@ -450,7 +460,6 @@ function buildHTML(input: SendReceiptInput, logoUrl?: string | null): string {
 function buildSettledHTML(input: SendSettledInput, logoUrl?: string | null): string {
     const initial = input.businessName.charAt(0).toUpperCase()
     const isSingle = input.sales.length === 1
-    const grandTotal = input.sales.reduce((s, sale) => s + sale.total, 0)
 
     function saleBlock(sale: SettledSaleInfo, first: boolean) {
         const dateStr = new Date(sale.date).toLocaleDateString('es-CR', {
@@ -505,6 +514,52 @@ function buildSettledHTML(input: SendSettledInput, logoUrl?: string | null): str
         hour: '2-digit', minute: '2-digit',
     }) : ''
     const salesContent = input.sales.map((sale, i) => saleBlock(sale, i === 0)).join('')
+    const grandTotal = (input.newSale?.total ?? 0) + input.sales.reduce((s, sale) => s + sale.total, 0)
+
+    const newSaleBlock = input.newSale ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
+      <tr>
+        <td bgcolor="#0f172a" style="font-size:12px;font-weight:700;color:#38bdf8;background:#0f172a;">Compra del día &nbsp;·&nbsp; #${input.newSale.saleNumber}</td>
+        <td bgcolor="#0f172a" style="font-size:11px;color:#475569;text-align:right;background:#0f172a;">${fmtMethod(input.newSale.paymentMethod)}</td>
+      </tr>
+    </table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      ${input.newSale.items.map(it => `
+      <tr>
+        <td bgcolor="#0f172a" style="padding:12px 0;border-bottom:1px solid #1e293b;background:#0f172a;">
+          <span style="display:block;font-size:14px;color:#e2e8f0;font-weight:600;">${it.name}</span>
+          <span style="display:block;font-size:11px;color:#475569;margin-top:3px;">${it.quantity} unid. &nbsp;·&nbsp; ${fmt(it.unitPrice)} c/u</span>
+        </td>
+        <td bgcolor="#0f172a" style="padding:12px 0;border-bottom:1px solid #1e293b;text-align:right;vertical-align:top;background:#0f172a;white-space:nowrap;">
+          <span style="font-size:14px;color:#f1f5f9;font-weight:600;font-family:'Courier New',Courier,monospace;">${fmt(it.subtotal)}</span>
+        </td>
+      </tr>`).join('')}
+    </table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;padding-top:10px;border-top:1px dashed #1e293b;">
+      <tr>
+        <td bgcolor="#0f172a" style="font-size:12px;color:#475569;padding:3px 0;background:#0f172a;">Subtotal compra</td>
+        <td bgcolor="#0f172a" style="font-size:12px;color:#64748b;text-align:right;font-family:'Courier New',Courier,monospace;padding:3px 0;background:#0f172a;">${fmt(input.newSale.subtotal)}</td>
+      </tr>
+      ${input.newSale.discount > 0 ? `<tr>
+        <td bgcolor="#0f172a" style="padding:3px 0;font-size:12px;color:#34d399;background:#0f172a;">Descuento</td>
+        <td bgcolor="#0f172a" style="padding:3px 0;font-size:12px;color:#34d399;text-align:right;font-family:'Courier New',Courier,monospace;background:#0f172a;">&#8722; ${fmt(input.newSale.discount)}</td>
+      </tr>` : ''}
+      <tr>
+        <td bgcolor="#0f172a" style="font-size:13px;font-weight:700;color:#38bdf8;padding:4px 0;background:#0f172a;">Total compra</td>
+        <td bgcolor="#0f172a" style="font-size:13px;font-weight:700;color:#38bdf8;text-align:right;font-family:'Courier New',Courier,monospace;padding:4px 0;background:#0f172a;">${fmt(input.newSale.total)}</td>
+      </tr>
+    </table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#0f172a" height="18" style="height:18px;background:#0f172a;">&nbsp;</td></tr></table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#0f172a" height="1" style="height:1px;background:#1e293b;font-size:0;">&nbsp;</td></tr></table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#0f172a" height="14" style="height:14px;background:#0f172a;">&nbsp;</td></tr></table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td bgcolor="#0f172a" style="font-size:12px;font-weight:700;color:#34d399;background:#0f172a;">Cuentas saldadas</td>
+        <td bgcolor="#0f172a" style="font-size:11px;color:#475569;text-align:right;background:#0f172a;">${input.sales.length} cuenta${input.sales.length !== 1 ? 's' : ''}</td>
+      </tr>
+    </table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;"><tr><td bgcolor="#0f172a" height="6" style="height:6px;background:#0f172a;">&nbsp;</td></tr></table>
+    ` : ''
 
     const inner = `
   ${accentTop('#059669', '#10b981')}
@@ -570,7 +625,7 @@ function buildSettledHTML(input: SendSettledInput, logoUrl?: string | null): str
           </td>
         </tr>
       </table>
-      ${salesContent}
+      ${newSaleBlock}${salesContent}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td bgcolor="#0f172a" height="24" style="height:24px;background:#0f172a;">&nbsp;</td></tr></table>
     </td>
   </tr>
@@ -578,7 +633,7 @@ function buildSettledHTML(input: SendSettledInput, logoUrl?: string | null): str
   <!-- Total -->
   <tr>
     <td bgcolor="#071f12" style="background:#071f12;padding:28px 36px;text-align:center;border-left:1px solid #10b98144;border-right:1px solid #10b98144;border-top:1px solid #10b98133;" class="email-pad">
-      <p style="margin:0 0 6px;font-size:10px;color:#065f46;text-transform:uppercase;letter-spacing:2.5px;">${isSingle ? 'Total Pagado' : 'Total Saldado'}</p>
+      <p style="margin:0 0 6px;font-size:10px;color:#065f46;text-transform:uppercase;letter-spacing:2.5px;">${input.newSale ? 'Total Cobrado' : isSingle ? 'Total Pagado' : 'Total Saldado'}</p>
       <p style="margin:0 0 12px;font-size:44px;font-weight:800;color:#f1f5f9;font-family:'Courier New',Courier,monospace;letter-spacing:-2px;line-height:1;">${fmt(grandTotal)}</p>
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
         <tr>
@@ -856,10 +911,13 @@ export async function sendSettledEmail(input: SendSettledInput): Promise<{ succe
         const html = buildSettledHTML(input, input.logoUrl)
         if (!window.electronAPI?.sendEmail) return { success: false, error: 'Entorno Electron no detectado' }
         const isSingle = input.sales.length === 1
-        const grandTotal = input.sales.reduce((s, sale) => s + sale.total, 0)
-        const subject = isSingle
-            ? `Pago recibido #${input.sales[0].saleNumber} — ${fmt(grandTotal)} | ${input.businessName}`
-            : `${input.sales.length} cuentas saldadas — ${fmt(grandTotal)} | ${input.businessName}`
+        const debtTotal = input.sales.reduce((s, sale) => s + sale.total, 0)
+        const combinedTotal = (input.newSale?.total ?? 0) + debtTotal
+        const subject = input.newSale
+            ? `Recibo #${input.newSale.saleNumber} + ${input.sales.length} cuenta${input.sales.length !== 1 ? 's' : ''} saldada${input.sales.length !== 1 ? 's' : ''} — ${fmt(combinedTotal)} | ${input.businessName}`
+            : isSingle
+                ? `Pago recibido #${input.sales[0].saleNumber} — ${fmt(debtTotal)} | ${input.businessName}`
+                : `${input.sales.length} cuentas saldadas — ${fmt(debtTotal)} | ${input.businessName}`
         const result = await window.electronAPI.sendEmail({
             from: `${input.businessName.trim() || 'Recibos'} <noreply@jafetduarte.dev>`,
             to: [input.to],
