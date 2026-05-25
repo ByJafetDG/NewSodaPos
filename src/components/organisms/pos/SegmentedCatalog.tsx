@@ -9,9 +9,10 @@ interface SegmentedCatalogProps {
     subcategories: Subcategory[]   // already filtered: active + matching today
     cartItems: CartItem[]
     onAddProduct: (product: Product) => void
+    forceNoImage?: boolean
 }
 
-export function SegmentedCatalog({ products, subcategories, cartItems, onAddProduct }: SegmentedCatalogProps) {
+export function SegmentedCatalog({ products, subcategories, cartItems, onAddProduct, forceNoImage }: SegmentedCatalogProps) {
     const visibleSubcatIds = new Set(subcategories.map(s => s.id))
 
     const grouped = new Map<string | null, Product[]>()
@@ -68,6 +69,7 @@ export function SegmentedCatalog({ products, subcategories, cartItems, onAddProd
                                         cartQty={cartItems.find(item => item.id === product.id)?.quantity ?? 0}
                                         onAdd={() => onAddProduct(product)}
                                         index={i}
+                                        forceNoImage={forceNoImage}
                                     />
                                 ))}
                             </AnimatePresence>
@@ -93,6 +95,7 @@ export function SegmentedCatalog({ products, subcategories, cartItems, onAddProd
                                     cartQty={cartItems.find(item => item.id === product.id)?.quantity ?? 0}
                                     onAdd={() => onAddProduct(product)}
                                     index={i}
+                                    forceNoImage={forceNoImage}
                                 />
                             ))}
                         </AnimatePresence>

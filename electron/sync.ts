@@ -286,7 +286,7 @@ async function pullSync() {
               imageUrl =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.imageUrl      ELSE excluded.imageUrl      END,
               syncStatus =    CASE WHEN Product.syncStatus = 'PENDING' THEN 'PENDING'             ELSE 'SYNCED'               END,
               updatedAt =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.updatedAt     ELSE excluded.updatedAt     END
-          `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, prod.updatedAt]);
+          `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, dZ(prod.updatedAt)]);
                 }
             });
         }
@@ -311,7 +311,7 @@ async function pullSync() {
               deletedAt =    CASE WHEN Company.syncStatus = 'PENDING' THEN Company.deletedAt    ELSE excluded.deletedAt    END,
               syncStatus =   CASE WHEN Company.syncStatus = 'PENDING' THEN 'PENDING'            ELSE 'SYNCED'              END,
               updatedAt =    CASE WHEN Company.syncStatus = 'PENDING' THEN Company.updatedAt    ELSE excluded.updatedAt    END
-          `, [co.id, co.name, co.taxId ?? null, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.isDeleted ? 1 : 0, co.deletedAt ?? null, co.updatedAt]);
+          `, [co.id, co.name, co.taxId ?? null, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.isDeleted ? 1 : 0, dZ(co.deletedAt) ?? null, dZ(co.updatedAt)]);
                 }
             });
         }
@@ -341,7 +341,7 @@ async function pullSync() {
               deletedAt = CASE WHEN Client.syncStatus = 'PENDING' THEN Client.deletedAt ELSE excluded.deletedAt END,
               syncStatus = CASE WHEN Client.syncStatus = 'PENDING' THEN 'PENDING' ELSE 'SYNCED' END,
               updatedAt =  CASE WHEN Client.syncStatus = 'PENDING' THEN Client.updatedAt ELSE excluded.updatedAt END
-          `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, client.isDeleted ? 1 : 0, client.deletedAt ?? null, client.updatedAt]);
+          `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, client.isDeleted ? 1 : 0, dZ(client.deletedAt) ?? null, dZ(client.updatedAt)]);
                 }
             });
         }
@@ -515,7 +515,7 @@ async function pullSync() {
                             paidAt = excluded.paidAt,
                             paymentMethod2 = excluded.paymentMethod2,
                             amount2 = excluded.amount2
-                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
+                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, dZ(sale.updatedAt), sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
                 } catch (e) {
                     console.error(`[SyncEngine] Sale pull ${sale.id} (#${sale.saleNumber}):`, e);
                 }
@@ -1295,7 +1295,7 @@ function setupRealtimeSubscriptions() {
             isActive =     excluded.isActive,
             syncStatus =   'SYNCED',
             updatedAt =    excluded.updatedAt
-        `, [co.id, co.name, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, co.updatedAt]);
+        `, [co.id, co.name, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, dZ(co.updatedAt)]);
                 notifyUI('Company');
             }
         })
@@ -1321,7 +1321,7 @@ function setupRealtimeSubscriptions() {
             isActive = excluded.isActive,
             syncStatus = 'SYNCED',
             updatedAt = excluded.updatedAt
-        `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, client.updatedAt]);
+        `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, dZ(client.updatedAt)]);
                 notifyUI('Client');
             }
         })
@@ -1350,7 +1350,7 @@ function setupRealtimeSubscriptions() {
             imageUrl =      CASE WHEN Product.syncStatus = 'PENDING' THEN Product.imageUrl      ELSE excluded.imageUrl      END,
             syncStatus =    CASE WHEN Product.syncStatus = 'PENDING' THEN 'PENDING'             ELSE 'SYNCED'               END,
             updatedAt =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.updatedAt     ELSE excluded.updatedAt     END
-        `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, prod.updatedAt]);
+        `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, dZ(prod.updatedAt)]);
                 notifyUI('Product');
             }
         })
@@ -1448,7 +1448,7 @@ function setupRealtimeSubscriptions() {
                         paidAt = excluded.paidAt,
                         paymentMethod2 = excluded.paymentMethod2,
                         amount2 = excluded.amount2
-                `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, sale.updatedAt, sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
+                `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, dZ(sale.updatedAt), sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
             } catch (e) { console.error('[SyncRealtime] Sale:', e); }
             notifyUI('Sale');
         })

@@ -6,6 +6,7 @@ import {
     RefreshCw, HardDrive, Zap, LogOut, Minimize2, Maximize2,
     CheckCircle2, Search, Info, Edit2, Download, AlertTriangle, X,
     Mail, Upload, RotateCcw, Package, MessageSquare, Server, Copy, Building2,
+    SlidersHorizontal, ImageOff, Image,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { getDeletedClients, restoreClient, hardDeleteClient, getDeletedCompanies, restoreCompany, hardDeleteCompany } from '@/services/clients'
@@ -22,9 +23,10 @@ import { useEmployees, useDeactivateEmployee } from '@/hooks/useEmployees'
 import { useBusinessConfig, useUpdateConfig } from '@/hooks/useConfig'
 import { useUIStore } from '@/store/uiStore'
 import { cn, crDateTime, crDateStr } from '@/lib/utils'
+import { getEmployeePrefs, useEmployeePrefs } from '@/hooks/useEmployeePrefs'
 import type { Employee } from '@/types'
 
-type Section = 'business' | 'ticket' | 'email' | 'printer' | 'employees' | 'sync' | 'system' | 'updates' | 'trash' | 'sinpe'
+type Section = 'business' | 'ticket' | 'email' | 'printer' | 'employees' | 'emp-prefs' | 'sync' | 'system' | 'updates' | 'trash' | 'sinpe'
 
 function timeAgo(date: Date) {
     const diff = Date.now() - date.getTime()
@@ -43,8 +45,9 @@ const SECTIONS: { id: Section; label: string; desc: string; icon: React.ElementT
     { id: 'ticket',     label: 'Ticket',           desc: 'Logo, encabezado y pie del recibo', icon: Receipt,  color: 'text-amber-400' },
     { id: 'email',      label: 'Correo',           desc: 'Logo y apariencia del recibo',      icon: Mail,     color: 'text-sky-400' },
     { id: 'printer',    label: 'Impresora',        desc: 'Detección y configuración',         icon: Printer,  color: 'text-cyan-400' },
-    { id: 'employees',  label: 'Empleados',        desc: 'Cajeros y personal',                icon: Users,    color: 'text-violet-400' },
-    { id: 'sync',       label: 'Sincronización',   desc: 'Estado de la nube',                 icon: Cloud,    color: 'text-blue-400' },
+    { id: 'employees',  label: 'Empleados',        desc: 'Cajeros y personal',                icon: Users,              color: 'text-violet-400' },
+    { id: 'emp-prefs',  label: 'Preferencias',     desc: 'Configuración por empleado',        icon: SlidersHorizontal,  color: 'text-indigo-400' },
+    { id: 'sync',       label: 'Sincronización',   desc: 'Estado de la nube',                 icon: Cloud,              color: 'text-blue-400' },
     { id: 'system',     label: 'Sistema',          desc: 'Control de ventana y app',          icon: Monitor,  color: 'text-slate-400' },
     { id: 'updates',    label: 'Actualizaciones',  desc: 'Versión y actualizaciones del app',  icon: Download, color: 'text-emerald-400' },
     { id: 'trash',      label: 'Papelera',         desc: 'Eliminados y ventas anuladas',       icon: Trash2,      color: 'text-red-400' },
@@ -922,6 +925,15 @@ export function SettingsPage() {
                                     )}
                                 </div>
                             </div>
+                        </SectionContent>
+                    )}
+
+                    {section === 'emp-prefs' && (
+                        <SectionContent
+                            icon={SlidersHorizontal} color="text-indigo-400" iconBg="bg-indigo-500/10"
+                            title="Preferencias por Empleado" desc="Personaliza la experiencia del POS para cada cajero"
+                        >
+                            <EmpPrefsSection employees={employees ?? []} />
                         </SectionContent>
                     )}
 
@@ -1849,6 +1861,59 @@ function SystemActionCard({ icon, iconBg, label, desc, onClick }: {
                 <p className="text-[11px] text-[#3D506A]">{desc}</p>
             </div>
         </button>
+    )
+}
+
+function EmpPrefsRow({ employee }: { employee: Employee }) {
+    const { prefs, update } = useEmployeePrefs(employee.id)
+    return (
+        <div className="flex items-center justify-between px-4 py-3.5 rounded-xl bg-[#0C1420] border border-[#1A2535]">
+            <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-500/20 flex items-center justify-center text-[15px] font-black text-violet-300 shrink-0">
+                    {employee.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                    <p className="text-[13px] font-semibold text-[#E4ECF7]">{employee.name}</p>
+                    <p className="text-[11px] text-[#3D506A]">{employee.role === 'ADMIN' ? 'Administrador' : employee.role === 'TEMPORAL' ? 'Temporal' : 'Cajero'}</p>
+                </div>
+            </div>
+            <div className="flex items-center gap-2.5">
+                {prefs.showImagesInGrid
+                    ? <Image size={13} className="text-indigo-400" />
+                    : <ImageOff size={13} className="text-[#3D506A]" />
+                }
+                <p className="text-[11px] text-[#3D506A] w-[88px] text-right">
+                    {prefs.showImagesInGrid ? 'Con imágenes' : 'Sin imágenes'}
+                </p>
+                <button
+                    onClick={() => update({ showImagesInGrid: !prefs.showImagesInGrid })}
+                    className={cn(
+                        'relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0',
+                        prefs.showImagesInGrid ? 'bg-indigo-500' : 'bg-[#1E2D42]'
+                    )}
+                >
+                    <span className={cn(
+                        'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-200',
+                        prefs.showImagesInGrid ? 'left-[22px]' : 'left-0.5'
+                    )} />
+                </button>
+            </div>
+        </div>
+    )
+}
+
+function EmpPrefsSection({ employees }: { employees: Employee[] }) {
+    const active = employees.filter(e => e.isActive)
+    if (active.length === 0) return (
+        <p className="text-[12px] text-[#3D506A] text-center py-6">No hay empleados activos</p>
+    )
+    return (
+        <div className="space-y-2">
+            <p className="text-[11px] text-[#3D506A] mb-3">
+                Activa o desactiva las imágenes en el modo grilla del POS para cada empleado.
+            </p>
+            {active.map(emp => <EmpPrefsRow key={emp.id} employee={emp} />)}
+        </div>
     )
 }
 

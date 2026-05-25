@@ -8,6 +8,7 @@ interface ProductCardProps {
     cartQty: number
     onAdd: () => void
     index: number
+    forceNoImage?: boolean
 }
 
 const ACCENTS = [
@@ -50,7 +51,7 @@ function StockBadge({ product, onImage = false }: { product: Product; onImage?: 
     )
 }
 
-export function ProductCard({ product, cartQty, onAdd, index }: ProductCardProps) {
+export function ProductCard({ product, cartQty, onAdd, index, forceNoImage = false }: ProductCardProps) {
     const isOutOfStock = !product.isInfinite && product.stockQty <= 0
     const inCart = cartQty > 0
     const [imgSrc, setImgSrc] = useState<string | null>(product.imageUrl ?? null)
@@ -70,7 +71,7 @@ export function ProductCard({ product, cartQty, onAdd, index }: ProductCardProps
             .catch(() => {})
     }, [product.id, product.imageUrl])
 
-    const hasImage = !!imgSrc && !imgError
+    const hasImage = !!imgSrc && !imgError && !forceNoImage
 
     return (
         <motion.button

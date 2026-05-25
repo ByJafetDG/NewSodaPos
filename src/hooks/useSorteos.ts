@@ -7,7 +7,7 @@ import {
 import { getTombolaEntries } from '@/services/tombola'
 import type { Sorteo, SorteoOption, SorteoParticipant } from '@/types'
 
-interface CartSorteoResult {
+export interface CartSorteoResult {
     sorteo: Sorteo
     options: SorteoOption[]
     participants: SorteoParticipant[]

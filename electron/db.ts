@@ -736,6 +736,16 @@ export function initDb() {
     ).run()
   } catch {}
 
+  // Migrate updatedAt/deletedAt on Client, Company, Product, Sale: T-without-Z → add Z
+  for (const col of [
+    'UPDATE Client SET updatedAt = updatedAt || \'Z\' WHERE updatedAt LIKE \'%T%\' AND updatedAt NOT LIKE \'%Z\' AND updatedAt NOT LIKE \'%+%\'',
+    'UPDATE Client SET deletedAt = deletedAt || \'Z\' WHERE deletedAt IS NOT NULL AND deletedAt LIKE \'%T%\' AND deletedAt NOT LIKE \'%Z\' AND deletedAt NOT LIKE \'%+%\'',
+    'UPDATE Company SET updatedAt = updatedAt || \'Z\' WHERE updatedAt LIKE \'%T%\' AND updatedAt NOT LIKE \'%Z\' AND updatedAt NOT LIKE \'%+%\'',
+    'UPDATE Company SET deletedAt = deletedAt || \'Z\' WHERE deletedAt IS NOT NULL AND deletedAt LIKE \'%T%\' AND deletedAt NOT LIKE \'%Z\' AND deletedAt NOT LIKE \'%+%\'',
+    'UPDATE Product SET updatedAt = updatedAt || \'Z\' WHERE updatedAt LIKE \'%T%\' AND updatedAt NOT LIKE \'%Z\' AND updatedAt NOT LIKE \'%+%\'',
+    'UPDATE Sale SET updatedAt = updatedAt || \'Z\' WHERE updatedAt LIKE \'%T%\' AND updatedAt NOT LIKE \'%Z\' AND updatedAt NOT LIKE \'%+%\'',
+  ]) { try { db.prepare(col).run() } catch {} }
+
   // Migrate CashRegister openedAt/closedAt: same Z-suffix fix as paidAt (rule #23)
   try {
     db.prepare(

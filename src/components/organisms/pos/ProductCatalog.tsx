@@ -13,10 +13,11 @@ interface ProductCatalogProps {
     onSelectCategory: (id: string | null) => void
     onAddProduct: (product: Product) => void
     hideCategoryBar?: boolean
+    forceNoImage?: boolean
 }
 
 export function ProductCatalog({
-    products, categories, cartItems, selectedCategory, onSelectCategory, onAddProduct, hideCategoryBar
+    products, categories, cartItems, selectedCategory, onSelectCategory, onAddProduct, hideCategoryBar, forceNoImage
 }: ProductCatalogProps) {
     const filtered = products.filter(p =>
         p.isActive && (!selectedCategory || p.categoryId === selectedCategory)
@@ -53,6 +54,7 @@ export function ProductCatalog({
                                         cartQty={cartQty}
                                         onAdd={() => onAddProduct(product)}
                                         index={i}
+                                        forceNoImage={forceNoImage}
                                     />
                                 )
                             })}

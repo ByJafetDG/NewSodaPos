@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { updateProductStock } from './products'
+import { CREDIT_PRODUCT_ID, TOMBOLA_PRODUCT_ID } from '@/constants/products'
 import type { CartItem, PaymentMethod, ProductUnit, SyncStatus } from '@/types'
 import type { SqlParam, DbSaleRow, DbSaleRowForUpdate, DbSaleItemRow, DbProductRow, SaleSnapshotEntry, CompanySaleView } from '@/types/db'
 
@@ -118,7 +119,7 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
             })
             ops.push({
                 sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                params: [crypto.randomUUID(), creditId, 'credit-charge', 1, creditAmt, creditAmt, `Ref. venta #${saleNumber}`]
+                params: [crypto.randomUUID(), creditId, CREDIT_PRODUCT_ID, 1, creditAmt, creditAmt, `Ref. venta #${saleNumber}`]
             })
         }
 
@@ -175,7 +176,7 @@ export async function createSale(input: CreateSaleInput): Promise<any> {
         })
         if (!creditError) {
             await supabase.from('SaleItem').insert({
-                id: crypto.randomUUID(), saleId: creditId, productId: 'credit-charge',
+                id: crypto.randomUUID(), saleId: creditId, productId: CREDIT_PRODUCT_ID,
                 quantity: 1, unitPrice: creditAmt, subtotal: creditAmt, notes: `Ref. venta #${saleNumber}`,
                 createdAt: now
             })
@@ -269,7 +270,7 @@ export async function voidSale(saleId: string): Promise<void> {
                 sql: `UPDATE Product SET stockQty = stockQty + ?, syncStatus = 'PENDING', updatedAt = ? WHERE id = ? AND isInfinite = 0`,
                 params: [item.quantity, now, item.productId]
             })
-            if (item.productId === 'tombola-entry' && item.notes) {
+            if (item.productId === TOMBOLA_PRODUCT_ID && item.notes) {
                 const m = item.notes.match(/^Número (\d+)/)
                 if (m) {
                     ops.push({
@@ -373,7 +374,7 @@ export async function getSaleItemsForCart(saleId: string): Promise<import('@/typ
         .from('SaleItem')
         .select('productId, quantity, unitPrice, subtotal, notes, product:Product(id, name, barcode, categoryId, price, cost, unit, stockQty, minStock, isActive, isInfinite, imageUrl, syncStatus, createdAt, updatedAt)')
         .eq('saleId', saleId)
-        .neq('productId', 'credit-charge')
+        .neq('productId', CREDIT_PRODUCT_ID)
     if (error) throw error
     type SupabaseSaleItemRow = { productId: string; quantity: number; unitPrice: number; subtotal: number; notes: string | null; product: import('@/types').Product | null }
     return ((data ?? []) as unknown as SupabaseSaleItemRow[])
@@ -622,7 +623,7 @@ export async function getSalesForCompany(companyId: string): Promise<CompanySale
                 items: items.map(i => ({
                     ...i,
                     product: { name: i.productName },
-                    notes: i.productId === 'tombola-entry' ? null : i.notes,
+                    notes: i.productId === TOMBOLA_PRODUCT_ID ? null : i.notes,
                 })),
             })
         }
@@ -682,7 +683,7 @@ export async function getSaleDetails(saleId: string): Promise<(DbSaleRow & { cli
             items: items.map(i => ({
                 ...i,
                 product: { name: i.productName },
-                notes: i.productId === 'tombola-entry' ? null : i.notes,
+                notes: i.productId === TOMBOLA_PRODUCT_ID ? null : i.notes,
             })),
         }
     }
@@ -858,7 +859,7 @@ export async function updateSaleInPlace(
             })
             ops.push({
                 sql: `INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                params: [crypto.randomUUID(), creditId, 'credit-charge', 1, creditAmt, creditAmt, `Ref. venta #${orig.saleNumber}`]
+                params: [crypto.randomUUID(), creditId, CREDIT_PRODUCT_ID, 1, creditAmt, creditAmt, `Ref. venta #${orig.saleNumber}`]
             })
         }
 

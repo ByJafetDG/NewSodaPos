@@ -5,27 +5,23 @@ import { useHeldOrdersStore } from '@/store/heldOrdersStore'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { usePendingSettleStore } from '@/store/pendingSettleStore'
 import { usePendingSaleLoadStore } from '@/store/pendingSaleLoadStore'
-import { settleSaleDirect } from '@/services/clients'
-import { createCreditNote, createSplitCreditSales, updateSaleInPlace } from '@/services/sales'
-import { logSorteoEntry } from '@/services/sorteos'
-import type { SplitCreditData } from '@/components/modals/CreditModal'
 import { useKeyboardInput, useSuppressKeyboard } from '@/hooks/useKeyboardInput'
 import { useProducts, useCreateProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useClients, useCreateClient, useUpdateClient, useCompanies } from '@/hooks/useClients'
 import { useEmployees } from '@/hooks/useEmployees'
 import { useCreateSale } from '@/hooks/useSales'
-import { useActiveRegister } from '@/hooks/useCashRegister'
 import { usePOSSorteo } from '@/hooks/usePOSSorteo'
 import { usePOSScanModals } from '@/hooks/usePOSScanModals'
 import { useCashierSelection } from '@/hooks/useCashierSelection'
-import { useQueryClient } from '@tanstack/react-query'
+import { getEmployeePrefs } from '@/hooks/useEmployeePrefs'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { ModifyingSaleBanner } from '@/components/molecules/ModifyingSaleBanner'
 import { POSTopBar } from '@/components/organisms/pos/POSTopBar'
 import { POSSorteoModals } from '@/components/organisms/pos/POSSorteoModals'
-import { sendReceiptEmail, sendSettledEmail, sendMixedCreditEmail, sendSplitCreditEmail, sendInvoiceReceiptEmail } from '@/services/emailReceipt'
-import { MixedPaymentModal, type MixedModalView } from '@/components/modals/MixedPaymentModal'
+import { MixedPaymentModal } from '@/components/modals/MixedPaymentModal'
+import { usePOSCheckout } from '@/hooks/usePOSCheckout'
+import { usePOSSale } from '@/hooks/usePOSSale'
 import { ViewModeBar, type ViewMode } from '@/components/molecules/ViewModeBar'
 import { ProductCatalog } from '@/components/organisms/pos/ProductCatalog'
 import { SegmentedCatalog } from '@/components/organisms/pos/SegmentedCatalog'
@@ -59,7 +55,6 @@ export function POSPage() {
     const createSale = useCreateSale()
     const createProduct = useCreateProduct()
     const updateProduct = useUpdateProduct()
-    const { data: activeRegister } = useActiveRegister()
     const { data: config } = useBusinessConfig()
     const createClient = useCreateClient()
     const updateClient = useUpdateClient()
@@ -134,21 +129,11 @@ export function POSPage() {
     }, [items, viewMode])
 
     // ── Payment ──────────────────────────────────────────────────────────────
-    const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('EFECTIVO')
-    const [amountReceived, setAmountReceived] = useState(() => localStorage.getItem('pos_amount_received') ?? '')
-    const [mixedMethods, setMixedMethods] = useState<string[]>([])
-    const [splitAmount, setSplitAmount] = useState('')
-    const [creditAmount, setCreditAmount] = useState('')
-    const [creditClientId, setCreditClientId] = useState<string | null>(null)
-    const [showMixedModal, setShowMixedModal] = useState(false)
-    const [mixedModalView, setMixedModalView] = useState<MixedModalView>('select')
-
-    useEffect(() => {
-        localStorage.setItem('pos_amount_received', amountReceived)
-    }, [amountReceived])
+    // (state managed by usePOSCheckout — see below after pendingDebt)
 
     // ── Cashier ──────────────────────────────────────────────────────────────
     const { showCashierModal, setShowCashierModal, selectedEmployee, selectEmployee } = useCashierSelection()
+    const forceNoImage = selectedEmployee ? !getEmployeePrefs(selectedEmployee.id).showImagesInGrid : false
 
     // ── Sale success ──────────────────────────────────────────────────────────
     const [saleSuccess, setSaleSuccess] = useState<SaleSuccessData | null>(null)
@@ -180,7 +165,6 @@ export function POSPage() {
     }, [items, discount, activeOrderId, invoiceClient])
 
     // ── Modals ───────────────────────────────────────────────────────────────
-    const [showCreditModal, setShowCreditModal] = useState(false)
     const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
     const [editingItem, setEditingItem] = useState<CartItem | null>(null)
     const [editPriceValue, setEditPriceValue] = useState('')
@@ -211,21 +195,47 @@ export function POSPage() {
 
     // ── Pending debt (from Balances page) ────────────────────────────────────
     const pendingDebt = usePendingSettleStore()
+    const effectiveTotal = total + (pendingDebt.hasDebt ? pendingDebt.debtTotal : 0)
+    const checkout = usePOSCheckout(effectiveTotal)
+    const {
+        paymentMethod, setPaymentMethod,
+        amountReceived, setAmountReceived,
+        mixedMethods, setMixedMethods,
+        splitAmount, setSplitAmount,
+        creditAmount, setCreditAmount,
+        creditClientId, setCreditClientId,
+        showMixedModal, setShowMixedModal,
+        mixedModalView, setMixedModalView,
+        showCreditModal, setShowCreditModal,
+        received, splitAmountNum, creditAmountNum,
+        isMixed, hasSinpeMixed, hasEfectivoMixed, hasCuentaMixed,
+        cashPortion,
+        handleOpenMixedSelect, handleOpenMixedCancel, handleMixedConfirm, handleCancelMixed,
+    } = checkout
 
     // ── Sorteos ──────────────────────────────────────────────────────────────
-    const qc = useQueryClient()
     const { cartSorteo, showSorteoButton, qualifyingCount, isRaspadita, raspaditaCards, sorteoOpen, setSorteoOpen, sorteoDeclined, setSorteoDeclined, handleSorteoResult, handleRaspaditaCardScratched, handleRaspaditaClose } = usePOSSorteo(items)
 
+    const handlePostSaleReset = () => {
+        checkout.reset()
+        setSelectedClientId(null)
+        setActiveOrderId(null)
+        setActiveOrderName(null)
+        setMergeSnapshot(null)
+        setAutoSavedFusionId(null)
+        setSorteoDeclined(false)
+    }
+    const { processSale, splitCreditPending, handleSplitCreditConfirm } = usePOSSale({
+        paymentMethod, isMixed, hasSinpeMixed, hasEfectivoMixed, hasCuentaMixed,
+        creditAmountNum, creditClientId, received, splitAmountNum, effectiveTotal,
+        mixedMethods, activeOrderId, selectedEmployee, viewMode, searchKbRef: searchKb.ref,
+        cartSorteo, sorteoDeclined, qualifyingCount,
+        onSaleSuccess: setSaleSuccess,
+        onPostSaleReset: handlePostSaleReset,
+        onCreditSplitComplete: () => { setShowCreditModal(false); setPaymentMethod('EFECTIVO') },
+    })
+
     // ── Derived ───────────────────────────────────────────────────────────────
-    const received = parseFloat(amountReceived) || 0
-    const effectiveTotal = total + (pendingDebt.hasDebt ? pendingDebt.debtTotal : 0)
-    const splitAmountNum = parseFloat(splitAmount) || 0
-    const creditAmountNum = parseFloat(creditAmount) || 0
-    const isMixed = mixedMethods.length >= 2
-    const hasSinpeMixed = isMixed && mixedMethods.includes('SINPE')
-    const hasEfectivoMixed = isMixed && mixedMethods.includes('EFECTIVO')
-    const hasCuentaMixed = isMixed && mixedMethods.includes('CUENTA')
-    const cashPortion = effectiveTotal - (hasSinpeMixed ? splitAmountNum : 0) - (hasCuentaMixed ? creditAmountNum : 0)
     const canCharge =
         (items.length > 0 || pendingDebt.hasDebt) &&
         !createSale.isPending &&
@@ -605,614 +615,9 @@ export function POSPage() {
         if (method === 'CREDITO' && items.length > 0) setShowCreditModal(true)
     }
 
-    const handleOpenMixedSelect = () => { setMixedModalView('select'); setShowMixedModal(true) }
-    const handleOpenMixedCancel = () => { setMixedModalView('cancel'); setShowMixedModal(true) }
-    const handleMixedConfirm = (methods: string[]) => { setMixedMethods(methods); setShowMixedModal(false) }
-    const handleCancelMixed = () => { setMixedMethods([]); setShowMixedModal(false) }
-
-    const [splitCreditPending, setSplitCreditPending] = useState(false)
-
-    const handleSplitCreditConfirm = async (data: SplitCreditData) => {
-        setSplitCreditPending(true)
-        try {
-            const sales = await createSplitCreditSales({
-                clientAssignments: data.clientAssignments,
-                cartItems: data.selectedCartItems,
-                cashRegisterId: activeRegister?.id ?? null,
-                cashierName: selectedEmployee?.name ?? null,
-            })
-            removeItems(data.selectedCartItems.map(i => i.id))
-            qc.invalidateQueries({ queryKey: ['credit-sales'] })
-            qc.invalidateQueries({ queryKey: ['active-register'] })
-            setShowCreditModal(false)
-            setPaymentMethod('EFECTIVO')
-            toast.success(`Crédito dividido entre ${data.clientAssignments.length} cuentas`)
-
-            const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
-            if (printerPort && window.electronAPI?.printReceipt) {
-                const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
-                const splitTotal = data.selectedCartItems.reduce((s, i) => s + i.subtotal, 0)
-                window.electronAPI.printReceipt(printerPort, {
-                    businessName: config?.name || 'Soda El Pelón',
-                    address: config?.address,
-                    phone: config?.phone,
-                    header: config?.ticketHeader || null,
-                    saleNumber: sales.baseSaleNumber,
-                    date: new Date().toISOString(),
-                    cashier: selectedEmployee?.name ?? null,
-                    items: data.selectedCartItems.map(i => ({
-                        name: i.product.name,
-                        quantity: i.quantity,
-                        unitPrice: i.unitPrice,
-                        subtotal: i.subtotal,
-                    })),
-                    total: splitTotal,
-                    paymentMethod: 'CREDITO DIVIDIDO',
-                    footer: config?.ticketFooter || '¡Gracias por su compra!',
-                    ticketLogoUrl: config?.ticketLogoUrl || null,
-                    showCashier: tOpts.showCashier ?? true,
-                    showChange: false,
-                    showHeader: tOpts.showHeader ?? true,
-                    showUnitPrice: tOpts.showUnitPrice ?? false,
-                    showDecimals: tOpts.showDecimals ?? true,
-                    currencySymbol: tOpts.currencySymbol ?? '₡',
-                    splitClients: data.clientAssignments.map(a => ({
-                        name: a.clientName,
-                        amount: a.products.reduce((s, p) => s + p.amount, 0),
-                    })),
-                }).catch((err: any) => console.error('[POS] Split credit print error:', err))
-            }
-
-            const allClientNames = data.clientAssignments.map(a => a.clientName)
-            const now = new Date().toISOString()
-            data.clientAssignments.forEach((assignment, idx) => {
-                const client = clients.find((c: any) => c.id === assignment.clientId)
-                if (!client?.email) return
-                const clientTotal = assignment.products.reduce((s, p) => s + p.amount, 0)
-                sendSplitCreditEmail({
-                    to: client.email,
-                    clientName: client.name,
-                    businessName: config?.name ?? '',
-                    logoUrl: config?.emailLogoUrl,
-                    saleNumber: (sales?.baseSaleNumber ?? 0) + idx,
-                    date: now,
-                    products: assignment.products.map(p => {
-                        const cartItem = data.selectedCartItems.find(i => i.id === p.productId)
-                        return {
-                            name: cartItem?.product.name ?? 'Producto',
-                            totalPrice: cartItem?.subtotal ?? p.amount,
-                            clientAmount: p.amount,
-                        }
-                    }),
-                    allClientNames,
-                    totalCharged: clientTotal,
-                }).catch(() => { })
-            })
-        } catch (err) {
-            console.error(err)
-            toast.error('Error al procesar crédito dividido')
-        } finally {
-            setSplitCreditPending(false)
-        }
-    }
-
     const handleCharge = async () => {
         if (paymentMethod === 'CREDITO') { setShowCreditModal(true); return }
         await processSale({ method: paymentMethod })
-    }
-
-    const processSale = async ({ isCredit = false, clientId = null as string | null, method = paymentMethod, companyId = null as string | null }) => {
-        try {
-            // Capture before clearCart — closures over Zustand state can become stale after async points
-            const saleItems = items
-            const cartOnlyTotal = total        // only cart items — for the Sale record
-            const saleTotal = effectiveTotal   // cart + debt — for change calculation & UI
-            const capturedSorteo = cartSorteo
-            const capturedDeclined = sorteoDeclined
-            const capturedQtyCount = qualifyingCount
-            const saleSubtotal = subtotal
-            const saleDiscount = discount
-            const saleReceived = received
-            const saleCashier = selectedEmployee?.name ?? null
-            const capturedDebt = pendingDebt.hasDebt ? { ...pendingDebt } : null
-            const capturedIsMixed = isMixed && !isCredit
-            const capturedHasSinpe = capturedIsMixed && mixedMethods.includes('SINPE')
-            const capturedHasEfectivo = capturedIsMixed && mixedMethods.includes('EFECTIVO')
-            const capturedHasCuenta = capturedIsMixed && mixedMethods.includes('CUENTA')
-            const capturedCreditAmt = capturedHasCuenta ? creditAmountNum : 0
-            const capturedCreditClientId = capturedHasCuenta ? creditClientId : null
-            const capturedInvoiceClient = invoiceClient
-            const capturedCreditCompanyId = companyId
-
-            // Cart empty + debt only: settle original sales (no new sale, avoids empty-items record)
-            if (saleItems.length === 0 && capturedDebt && !isCredit) {
-                const debtItems = capturedDebt.sales.flatMap((s: any) =>
-                    (s.items ?? []).map((item: any) => ({
-                        name: item.product?.name ?? 'Producto',
-                        quantity: item.quantity,
-                        unitPrice: item.unitPrice,
-                        subtotal: item.subtotal,
-                    }))
-                )
-                const debtItemCount = debtItems.reduce((n: number, i: any) => n + i.quantity, 0)
-                const changeGiven = method === 'EFECTIVO' ? Math.max(0, saleReceived - capturedDebt.debtTotal) : 0
-                const firstSale = capturedDebt.sales[0] as any
-
-                const failedSettles: string[] = []
-                for (let idx = 0; idx < capturedDebt.saleIds.length; idx++) {
-                    const id = capturedDebt.saleIds[idx]
-                    try {
-                        await settleSaleDirect(id, {
-                            paymentMethod: method,
-                            cashRegisterId: activeRegister?.id ?? null,
-                            amountReceived: idx === 0 ? (method === 'EFECTIVO' ? saleReceived : capturedDebt.debtTotal) : null,
-                            change: idx === 0 ? changeGiven : null,
-                        })
-                    } catch (err) {
-                        console.error(`[POS] Failed to settle sale ${id}:`, err)
-                        failedSettles.push(id)
-                    }
-                }
-                if (failedSettles.length > 0) {
-                    toast.error(`${failedSettles.length} de ${capturedDebt.saleIds.length} deuda(s) no se pudieron liquidar. Revisa Cuentas.`, 8000)
-                    if (failedSettles.length === capturedDebt.saleIds.length) return // all failed — abort
-                }
-                pendingDebt.clear()
-                qc.invalidateQueries({ queryKey: ['credit-sales'] })
-                qc.invalidateQueries({ queryKey: ['active-register'] })
-
-                const settledClient = clients.find((c: any) => c.id === capturedDebt.clientId)
-                if (settledClient?.email) {
-                    sendSettledEmail({
-                        to: settledClient.email,
-                        clientName: settledClient.name,
-                        businessName: config?.name ?? '',
-                        logoUrl: config?.emailLogoUrl,
-                        sales: capturedDebt.sales.map((s: any) => ({
-                            saleNumber: s.saleNumber,
-                            date: s.date instanceof Date ? s.date.toISOString() : String(s.date),
-                            items: (s.items ?? []).map((item: any) => ({
-                                name: item.product?.name ?? item.name ?? 'Producto',
-                                quantity: item.quantity,
-                                unitPrice: item.unitPrice,
-                                subtotal: item.subtotal,
-                            })),
-                            subtotal: s.subtotal,
-                            discount: s.discount,
-                            total: s.total,
-                        })),
-                    }).catch(() => { })
-                }
-
-                setSaleSuccess({
-                    total: capturedDebt.debtTotal,
-                    itemCount: debtItemCount,
-                    items: debtItems,
-                    cashier: saleCashier ?? 'Sin cajero',
-                    paymentMethod: method,
-                })
-                if (activeOrderId) deleteHeldOrder(activeOrderId)
-                clearCart()
-                setAmountReceived('')
-                setPaymentMethod('EFECTIVO')
-                setMixedMethods([])
-                setCreditAmount('')
-                setCreditClientId(null)
-                setSelectedClientId(null)
-                setShowCreditModal(false)
-                setActiveOrderId(null)
-                setActiveOrderName(null)
-                setMergeSnapshot(null)
-                setAutoSavedFusionId(null)
-                setSorteoDeclined(false)
-                setInvoiceClient(null)
-                if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
-
-                const printerPort2 = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
-                if (printerPort2 && window.electronAPI?.printReceipt && firstSale) {
-                    const tOpts2 = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
-                    await window.electronAPI.printReceipt(printerPort2, {
-                        businessName: config?.name || 'Soda El Pelón',
-                        address: config?.address,
-                        phone: config?.phone,
-                        header: config?.ticketHeader || null,
-                        saleNumber: firstSale.saleNumber,
-                        date: new Date().toISOString(),
-                        cashier: saleCashier,
-                        clientName: settledClient?.name,
-                        clientCode: settledClient?.code,
-                        items: debtItems,
-                        total: capturedDebt.debtTotal,
-                        paymentMethod: method,
-                        amountReceived: method === 'EFECTIVO' ? saleReceived : null,
-                        change: changeGiven,
-                        footer: config?.ticketFooter || '¡Gracias por su compra!',
-                        ticketLogoUrl: config?.ticketLogoUrl || null,
-                        showCashier: tOpts2.showCashier ?? true,
-                        showChange: tOpts2.showChange ?? true,
-                        showHeader: tOpts2.showHeader ?? true,
-                        showUnitPrice: tOpts2.showUnitPrice ?? false,
-                        showDecimals: tOpts2.showDecimals ?? true,
-                        currencySymbol: tOpts2.currencySymbol ?? '₡',
-                    }).catch((err: any) => console.error('[POS] Auto-print error:', err))
-                }
-                return
-            }
-
-            const mainTotal = isCredit ? cartOnlyTotal : cartOnlyTotal - capturedCreditAmt
-            const mainPaymentMethod = isCredit ? 'CREDITO' : capturedIsMixed
-                ? (capturedHasEfectivo ? 'EFECTIVO' : 'SINPE')
-                : method
-            const mainPaymentMethod2 = capturedHasEfectivo && capturedHasSinpe ? 'SINPE' : null
-            const mainAmount2 = capturedHasEfectivo && capturedHasSinpe ? splitAmountNum : null
-            const paymentTotal = capturedDebt ? saleTotal - capturedCreditAmt : mainTotal // full amount cashier must cover (incl. debt)
-            // When settling debt alongside new items, amountReceived/change span the full transaction
-            // but Sale.total only records the cart portion — storing them would make the record inconsistent.
-            // The receipt uses saleTotal (effectiveTotal) so it still prints correctly.
-            const mainAmountReceived = isCredit ? null
-                : capturedDebt ? null
-                : capturedHasEfectivo ? saleReceived
-                    : capturedHasSinpe ? paymentTotal
-                        : (method === 'EFECTIVO' ? saleReceived : paymentTotal)
-            const cashNeeded = paymentTotal - (capturedHasSinpe ? splitAmountNum : 0)
-            const mainChange = isCredit ? 0
-                : capturedDebt ? 0
-                : capturedHasEfectivo ? Math.max(0, saleReceived - cashNeeded)
-                    : (method === 'EFECTIVO' ? Math.max(0, saleReceived - paymentTotal) : 0)
-            const saleInput = {
-                items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: mainTotal,
-                paymentMethod: mainPaymentMethod as any,
-                amountReceived: mainAmountReceived,
-                change: mainChange,
-                isCredit, clientId: clientId || capturedInvoiceClient?.existingId || null,
-                cashRegisterId: activeRegister?.id ?? null,
-                notes: `Cajero: ${saleCashier ?? 'Sin cajero'}`,
-                paymentMethod2: mainPaymentMethod2 as any,
-                amount2: mainAmount2,
-                creditPart: (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId)
-                    ? { clientId: capturedCreditClientId, amount: capturedCreditAmt }
-                    : null,
-                modifiedFromSaleId: pendingSaleLoad.originalSaleId ?? null,
-                companyId: capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? pendingSaleLoad.originalCompanyId ?? null,
-                consumerName: capturedInvoiceClient?.consumerName ?? pendingSaleLoad.originalConsumerName ?? null,
-                originalSaleSnapshot: pendingSaleLoad.originalSaleSnapshot ?? null,
-                physicalInvoiceNumber: capturedInvoiceClient?.physicalInvoiceNumber ?? pendingSaleLoad.originalPhysicalInvoiceNumber ?? null,
-            }
-
-            // When modifying any sale (including company credit), update in place
-            const capturedOriginalId = pendingSaleLoad.originalSaleId
-            let sale: any
-            if (capturedOriginalId) {
-                const updated = await updateSaleInPlace(capturedOriginalId, saleInput)
-                if (updated) {
-                    sale = { ...updated, ...saleInput }
-                    qc.invalidateQueries({ queryKey: ['products'] })
-                    qc.invalidateQueries({ queryKey: ['sales'] })
-                } else {
-                    // Original no longer exists (was a deleted credit sale) — create new
-                    sale = await createSale.mutateAsync(saleInput)
-                }
-            } else {
-                sale = await createSale.mutateAsync(saleInput)
-            }
-
-            const resolvedCompanyId = capturedCreditCompanyId ?? capturedInvoiceClient?.companyId ?? pendingSaleLoad.originalCompanyId ?? null
-            if (resolvedCompanyId) {
-                qc.invalidateQueries({ queryKey: ['company-sales', resolvedCompanyId] })
-                qc.invalidateQueries({ queryKey: ['all-company-sales'] })
-            }
-
-            if (capturedHasCuenta && capturedCreditAmt > 0 && capturedCreditClientId) {
-                qc.invalidateQueries({ queryKey: ['credit-sales'] })
-                qc.invalidateQueries({ queryKey: ['clients'] })
-
-                const creditClient = clients.find((c: any) => c.id === capturedCreditClientId)
-                if (creditClient?.email) {
-                    const mixedPayCtx = {
-                        ...(capturedHasEfectivo ? { ef: Math.max(0, mainTotal - (capturedHasSinpe ? splitAmountNum : 0)) } : {}),
-                        ...(capturedHasSinpe ? { sinpe: splitAmountNum } : {}),
-                        cuenta: capturedCreditAmt,
-                    }
-                    sendMixedCreditEmail({
-                        to: creditClient.email,
-                        clientName: creditClient.name,
-                        businessName: config?.name ?? '',
-                        logoUrl: config?.emailLogoUrl,
-                        saleNumber: sale.saleNumber,
-                        creditNoteNumber: sale.saleNumber + 1,
-                        date: sale.date,
-                        items: saleItems.map(i => ({
-                            name: i.product.name,
-                            quantity: i.quantity,
-                            unitPrice: i.unitPrice,
-                            subtotal: i.subtotal,
-                        })),
-                        subtotal: saleSubtotal,
-                        discount: saleDiscount,
-                        fullTotal: saleTotal,
-                        payment: {
-                            ...(capturedHasEfectivo ? { efectivo: mixedPayCtx.ef } : {}),
-                            ...(capturedHasSinpe ? { sinpe: mixedPayCtx.sinpe } : {}),
-                            cuenta: capturedCreditAmt,
-                        },
-                    }).catch(() => { })
-                }
-            }
-
-            setSaleSuccess({
-                total: saleTotal,
-                itemCount: saleItems.reduce((s, i) => s + i.quantity, 0),
-                items: [
-                    ...saleItems.map(i => ({ name: i.product.name, quantity: i.quantity })),
-                    ...(capturedDebt ? [{ name: `Abono deuda (${capturedDebt.clientName})`, quantity: 1 }] : []),
-                ],
-                cashier: saleCashier ?? 'Sin cajero',
-                paymentMethod: isCredit ? 'CREDITO' : method,
-            })
-            if (activeOrderId) deleteHeldOrder(activeOrderId)
-            const depleted = saleItems.filter(i => !i.product.isInfinite && i.product.stockQty - i.quantity <= 0)
-            if (depleted.length > 0)
-                sileo.warning({
-                    title: depleted.length === 1 ? 'Producto agotado' : `${depleted.length} productos agotados`,
-                    description: (
-                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                            {depleted.slice(0, 3).map(i => (
-                                <div key={i.product.id} style={{
-                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                                    padding: '5px 10px', borderRadius: 8,
-                                    background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.14)',
-                                }}>
-                                    <span style={{ fontSize: 11, color: '#CBD5E1', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {i.product.name}
-                                    </span>
-                                    <span style={{
-                                        fontSize: 9, background: 'rgba(239,68,68,0.18)', color: '#FCA5A5',
-                                        padding: '2px 8px', borderRadius: 99, fontWeight: 800, letterSpacing: '0.1em',
-                                        border: '1px solid rgba(239,68,68,0.28)', flexShrink: 0,
-                                    }}>AGOTADO</span>
-                                </div>
-                            ))}
-                            {depleted.length > 3 && (
-                                <div style={{ fontSize: 10, color: '#6B7280', paddingLeft: 4 }}>+{depleted.length - 3} producto{depleted.length - 3 > 1 ? 's' : ''} más</div>
-                            )}
-                        </div>
-                    ),
-                    position: 'top-right',
-                })
-            clearCart()
-            pendingSaleLoad.clearModifying()
-            setAmountReceived('')
-            setPaymentMethod('EFECTIVO')
-            setMixedMethods([])
-            setCreditAmount('')
-            setCreditClientId(null)
-            setSelectedClientId(null)
-            setShowCreditModal(false)
-            setActiveOrderId(null)
-            setActiveOrderName(null)
-            setMergeSnapshot(null)
-            setAutoSavedFusionId(null)
-            setSorteoDeclined(false)
-            setInvoiceClient(null)
-            if (viewMode === 'scan') setTimeout(() => searchKb.ref.current?.focus(), 50)
-
-            // Settle pending debt sales if navigated from Balances
-            if (capturedDebt && capturedDebt.saleIds.length > 0) {
-                const settleFailures: string[] = []
-                for (const id of capturedDebt.saleIds) {
-                    try {
-                        await settleSaleDirect(id, {
-                            paymentMethod: method,
-                            cashRegisterId: activeRegister?.id ?? null,
-                            // amountReceived/change belong to the full transaction, not individual debt sales
-                            amountReceived: null,
-                            change: null,
-                        })
-                    } catch (err) {
-                        console.error(`[POS] Failed to settle debt ${id}:`, err)
-                        settleFailures.push(id)
-                    }
-                }
-                if (settleFailures.length > 0) {
-                    toast.error(`${settleFailures.length} deuda(s) no se liquidaron correctamente. Revisa Cuentas.`)
-                }
-                pendingDebt.clear()
-                qc.invalidateQueries({ queryKey: ['credit-sales'] })
-                qc.invalidateQueries({ queryKey: ['active-register'] })
-            }
-
-            // Auto-record non-participation if sorteo was eligible but never used
-            if (capturedSorteo && !capturedDeclined) {
-                await logSorteoEntry({ sorteoId: capturedSorteo.sorteo.id, didParticipate: false, unitCount: capturedQtyCount })
-                qc.invalidateQueries({ queryKey: ['sorteoStats', capturedSorteo.sorteo.id] })
-            }
-
-            const printerPort = config?.printerPort || config?.printerModel || localStorage.getItem('pos_printer_port')
-
-            // --- AUTOMATIC PRINTING — await before drawer to avoid COM port conflict ---
-            if (!printerPort && window.electronAPI) {
-                sileo.warning({
-                    title: 'Sin impresora',
-                    description: (
-                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <div style={{
-                                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)',
-                                borderRadius: 10, padding: '9px 12px',
-                                display: 'flex', alignItems: 'center', gap: 8,
-                            }}>
-                                <span style={{ fontSize: 15 }}>🖨️</span>
-                                <div style={{ fontSize: 12, color: '#FCD34D', fontWeight: 600, lineHeight: 1.3 }}>
-                                    No se imprimirá ticket
-                                </div>
-                            </div>
-                            <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
-                                No se detecta impresora. Ve a Ajustes → Impresora para configurarla.
-                            </div>
-                        </div>
-                    ),
-                    position: 'top-right',
-                })
-            }
-            if (printerPort && window.electronAPI?.printReceipt) {
-                const tOpts = (() => { try { return JSON.parse(localStorage.getItem('pos_ticket_options') ?? '{}') } catch { return {} } })()
-                const selClient = capturedInvoiceClient
-                    ? { name: capturedInvoiceClient.name, code: capturedInvoiceClient.cedula || null }
-                    : (clientId ? clients.find((c: any) => c.id === clientId) : null)
-                await window.electronAPI.printReceipt(printerPort, {
-                    businessName: config?.name || 'Soda El Pelón',
-                    address: config?.address,
-                    phone: config?.phone,
-                    header: config?.ticketHeader || null,
-                    saleNumber: sale.saleNumber,
-                    date: sale.date,
-                    cashier: saleCashier,
-                    clientName: selClient?.name,
-                    clientCode: selClient?.code,
-                    items: [
-                        ...saleItems.map(i => ({
-                            name: i.product.name,
-                            quantity: i.quantity,
-                            unitPrice: i.unitPrice,
-                            subtotal: i.subtotal,
-                        })),
-                        ...(capturedDebt ? [{
-                            name: `Abono deuda (${capturedDebt.clientName})`,
-                            quantity: 1,
-                            unitPrice: capturedDebt.debtTotal,
-                            subtotal: capturedDebt.debtTotal,
-                        }] : []),
-                    ],
-                    total: saleTotal,
-                    paymentMethod: isCredit ? 'CREDITO' : method,
-                    amountReceived: method === 'EFECTIVO' && !isCredit ? saleReceived : null,
-                    change: method === 'EFECTIVO' && !isCredit ? Math.max(0, saleReceived - saleTotal) : 0,
-                    footer: config?.ticketFooter || '¡Gracias por su compra!',
-                    showCashier: tOpts.showCashier ?? true,
-                    showChange: tOpts.showChange ?? true,
-                    showHeader: tOpts.showHeader ?? true,
-                    showUnitPrice: tOpts.showUnitPrice ?? false,
-                    showDecimals: tOpts.showDecimals ?? true,
-                    ticketLogoUrl: config?.ticketLogoUrl || null,
-                    currencySymbol: tOpts.currencySymbol ?? '₡',
-                }).then(r => {
-                    if (!r.success) sileo.error({
-                        title: 'Error de impresora',
-                        description: (
-                            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                <div style={{
-                                    background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-                                    borderRadius: 10, padding: '8px 12px',
-                                }}>
-                                    <div style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Detalles del error</div>
-                                    <div style={{ fontSize: 11, color: '#FCA5A5', lineHeight: 1.4 }}>{r.error || 'Error desconocido'}</div>
-                                </div>
-                                <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
-                                    Verifica que la impresora esté encendida y conectada por USB
-                                </div>
-                            </div>
-                        ),
-                        position: 'top-right',
-                    })
-                }).catch(() => sileo.error({
-                    title: 'Error de impresora',
-                    description: (
-                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <div style={{
-                                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-                                borderRadius: 10, padding: '8px 12px',
-                            }}>
-                                <div style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Sin conexión</div>
-                                <div style={{ fontSize: 11, color: '#FCA5A5', lineHeight: 1.4 }}>No se pudo comunicar con la impresora</div>
-                            </div>
-                            <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
-                                Verifica que esté encendida y conectada por USB
-                            </div>
-                        </div>
-                    ),
-                    position: 'top-right',
-                }))
-            }
-
-            if (isCredit && clientId) {
-                const client = clients.find(c => c.id === clientId)
-                if (client?.email) {
-                    sileo.promise(
-                        sendReceiptEmail({
-                            to: client.email,
-                            clientName: client.name,
-                            businessName: config?.name ?? 'Mi Soda',
-                            logoUrl: config?.emailLogoUrl,
-                            saleNumber: sale.saleNumber,
-                            date: sale.date,
-                            items: saleItems.map(i => ({
-                                name: i.product.name,
-                                quantity: i.quantity,
-                                unitPrice: i.unitPrice,
-                                subtotal: i.subtotal,
-                            })),
-                            subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
-                            modifiedFromSaleNumber: pendingSaleLoad.originalSaleNumber ?? undefined,
-                        }).then(r => { if (!r.success) throw r; return r }),
-                        {
-                            loading: { title: 'Enviando recibo...', description: client.email, position: 'top-right' },
-                            success: {
-                                title: 'Recibo enviado',
-                                description: (
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 2 }}>
-                                        <span style={{ color: '#10B981' }}>✓</span>
-                                        <span style={{ color: '#7A8FAA' }}>{client.email}</span>
-                                    </span>
-                                ),
-                                position: 'top-right' as const,
-                            },
-                            error: (err: any) => ({
-                                title: err?.isVerificationError ? 'Dominio no verificado' : 'Error al enviar recibo',
-                                description: err?.isVerificationError ? 'Configura el dominio en Resend' : (err?.error ?? ''),
-                                position: 'top-right' as const,
-                            }),
-                        }
-                    )
-                }
-            }
-
-            if (!isCredit && capturedInvoiceClient) {
-                const invoiceFull = capturedInvoiceClient.existingId
-                    ? clients.find(c => c.id === capturedInvoiceClient.existingId)
-                    : null
-                const recipientEmail = capturedInvoiceClient.email.trim() || invoiceFull?.email || null
-                const recipientName = capturedInvoiceClient.name
-                const invoicePayload = {
-                    clientName: recipientName,
-                    businessName: config?.name ?? 'Mi Soda',
-                    saleNumber: sale.saleNumber,
-                    date: sale.date,
-                    items: saleItems.map(i => ({
-                        name: i.product.name,
-                        quantity: i.quantity,
-                        unitPrice: i.unitPrice,
-                        subtotal: i.subtotal,
-                    })),
-                    subtotal: saleSubtotal, discount: saleDiscount, total: cartOnlyTotal,
-                    paymentMethod: method,
-                    logoUrl: config?.emailLogoUrl,
-                }
-                if (recipientEmail) {
-                    sendInvoiceReceiptEmail({ to: recipientEmail, ...invoicePayload }).then(result => {
-                        if (result.success) {
-                            toast.success(`Recibo enviado a ${recipientEmail}`)
-                        } else if (result.isVerificationError) {
-                            toast.error('Dominio de correo no verificado. Configura el dominio en Resend.')
-                        } else {
-                            toast.error(`Error al enviar recibo: ${result.error}`)
-                        }
-                    }).catch(() => {})
-                }
-                for (const ccAddr of capturedInvoiceClient.ccEmails ?? []) {
-                    const trimmed = ccAddr.trim()
-                    if (trimmed) sendInvoiceReceiptEmail({ to: trimmed, ...invoicePayload }).catch(() => {})
-                }
-            }
-        } catch (err) { console.error(err) }
     }
 
     const handleOpenDrawer = () => {
@@ -1567,6 +972,7 @@ export function POSPage() {
                                     subcategories={visibleSubcats}
                                     cartItems={items}
                                     onAddProduct={tryAddProduct}
+                                    forceNoImage={forceNoImage}
                                 />
                             ) : (
                                 <ProductCatalog
@@ -1577,6 +983,7 @@ export function POSPage() {
                                     onSelectCategory={setSelectedCategory}
                                     onAddProduct={tryAddProduct}
                                     hideCategoryBar
+                                    forceNoImage={forceNoImage}
                                 />
                             )}
                         </div>

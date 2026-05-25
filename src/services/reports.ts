@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { TOMBOLA_PRODUCT_ID } from '@/constants/products'
 
 export async function getCashierHistoricalLeaderboard(): Promise<Array<{ notes: string | null; total: number; month: string }>> {
     if (window.electronAPI) {
@@ -64,7 +65,7 @@ export async function getReportData(from: string, to: string) {
                 unitPrice: item.unitPrice,
                 subtotal: item.subtotal,
                 product: { name: item.productName },
-                notes: item.productId === 'tombola-entry' ? null : item.itemNotes,
+                notes: item.productId === TOMBOLA_PRODUCT_ID ? null : item.itemNotes,
             })
         }
 
