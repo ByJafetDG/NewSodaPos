@@ -129,9 +129,9 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
 
     // Setup intervals for periodic sync
     if (!readOnly) {
-        setInterval(pushSync, 5000);  // Push every 5s
+        setInterval(pushSync, 15 * 60 * 1000);  // Push every 15min safety net (event-driven via triggerPush)
     }
-    setInterval(pullSync, readOnly ? 3000 : 300000); // Dev: 3s | Prod: 5m fallback
+    setInterval(pullSync, readOnly ? 3000 : 15 * 60 * 1000); // Dev: 3s | Prod: 15min fallback
     setInterval(processEmailQueue, 60000); // Retry emails every 1m
 
     // Auto-end sorteos when endAt is reached
@@ -152,7 +152,7 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
         } catch {}
     }, 30000)
 
-    // Poll Supabase every 3s for new SinpeMessages (Realtime is unreliable)
+    // Poll Supabase every 30s as fallback for missed SinpeMessage realtime events
     let lastSinpeCheck = new Date().toISOString()
     setInterval(async () => {
         try {
@@ -181,7 +181,7 @@ export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = fal
                 windowRef.webContents.send('db-changed', { table: 'SinpeMessage' })
             }
         } catch {}
-    }, 3000)
+    }, 30000)
 }
 
 /**

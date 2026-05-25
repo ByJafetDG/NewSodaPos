@@ -82,7 +82,6 @@ export function useCartSorteo(productIds: string[], categoryIds: string[]) {
         },
         enabled: productIds.length > 0,
         staleTime: 1000 * 30,
-        refetchInterval: 1000 * 60,
     })
 }
 

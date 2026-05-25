@@ -6,7 +6,6 @@ export function useActiveRegister() {
         queryKey: ['active-register'],
         queryFn: getActiveRegister,
         staleTime: 0,
-        refetchInterval: 10_000,
     })
 }
 

@@ -112,6 +112,9 @@ export function useRealtimeSync() {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'CashRegister' }, () => {
                 invalidateForTable(qc, 'CashRegister')
             })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'Sorteo' }, () => {
+                invalidateForTable(qc, 'Sorteo')
+            })
             .subscribe()
 
         return () => { supabase.removeChannel(channel) }
