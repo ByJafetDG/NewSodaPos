@@ -111,10 +111,8 @@ export function ProductCard({ product, cartQty, onAdd, index }: ProductCardProps
                         className="absolute inset-0 w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
                     />
 
-                    {/* Base scrim so dark text always reads */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/92 via-black/35 to-black/10 pointer-events-none" />
-                    {/* Extra contrast layer behind text zone */}
-                    <div className="absolute inset-x-0 bottom-0 h-[70px] bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
+                    {/* Subtle scrim */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent pointer-events-none" />
 
                     {inCart && <div className="absolute inset-0 bg-orange-500/8 pointer-events-none" />}
 
@@ -126,28 +124,27 @@ export function ProductCard({ product, cartQty, onAdd, index }: ProductCardProps
                         </div>
                     )}
 
-                    {/* Text overlaid at bottom */}
-                    <div className="absolute bottom-0 inset-x-0 px-3 pb-3 pt-4 z-10">
-                        <p
-                            className={cn(
-                                'text-[13px] font-semibold leading-snug line-clamp-2 mb-1.5',
+                    {/* Text chip at bottom */}
+                    <div className="absolute bottom-0 inset-x-0 px-2 pb-2 z-10">
+                        <div className={cn(
+                            'rounded-xl px-2.5 py-1.5 backdrop-blur-sm border border-white/8',
+                            inCart ? 'bg-orange-950/80' : 'bg-black/72'
+                        )}>
+                            <p className={cn(
+                                'text-[12px] font-semibold leading-tight line-clamp-2 mb-1',
                                 inCart ? 'text-orange-100' : 'text-white'
-                            )}
-                            style={{ textShadow: '0 1px 6px rgba(0,0,0,0.95), 0 2px 12px rgba(0,0,0,0.8)' }}
-                        >
-                            {product.name}
-                        </p>
-                        <div className="flex items-center justify-between gap-2">
-                            <span
-                                className={cn(
-                                    'text-[15px] font-bold font-mono leading-none',
+                            )}>
+                                {product.name}
+                            </p>
+                            <div className="flex items-center justify-between gap-2">
+                                <span className={cn(
+                                    'text-[14px] font-bold font-mono leading-none',
                                     inCart ? 'text-orange-300' : 'text-white/90'
-                                )}
-                                style={{ textShadow: '0 1px 4px rgba(0,0,0,0.9)' }}
-                            >
-                                {formatCurrency(product.price)}
-                            </span>
-                            <StockBadge product={product} onImage />
+                                )}>
+                                    {formatCurrency(product.price)}
+                                </span>
+                                <StockBadge product={product} onImage />
+                            </div>
                         </div>
                     </div>
                 </>
@@ -184,7 +181,7 @@ export function ProductCard({ product, cartQty, onAdd, index }: ProductCardProps
                     </div>
 
                     {/* Content */}
-                    <div className="flex flex-col flex-1 px-3 pt-2.5 pb-2.5 min-h-0">
+                    <div className="flex flex-col flex-1 px-3 pt-2.5 pb-2.5 min-h-0 bg-[#080E18]/60">
                         <p className={cn(
                             'text-[13px] font-semibold leading-snug flex-1 line-clamp-2',
                             inCart ? 'text-orange-100' : 'text-[#C8D8E8]',
