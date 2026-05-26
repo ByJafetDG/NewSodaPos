@@ -469,6 +469,8 @@ async function pullSync() {
         if (registers) {
             transaction(() => {
                 for (const reg of registers) {
+                    const localReg = get('SELECT syncStatus FROM CashRegister WHERE id = ?', [reg.id]) as { syncStatus: string } | undefined;
+                    if (localReg?.syncStatus === 'PENDING') continue;
                     execute(`
                         INSERT INTO CashRegister (id, openedAt, closedAt, initialAmount, finalAmount, salesCash, salesCard, salesSinpe, salesTransfer, salesCredit, expensesTotal, notes, status, syncStatus, updatedAt)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
