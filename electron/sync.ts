@@ -61,7 +61,7 @@ function persistSyncError(tableName: string, recordId: string, errorMsg: string)
 }
 
 function clearResolvedSyncErrors() {
-    const syncedTables = ['CashRegister','Employee','Client','Category','Subcategory','Product','Sale','Expense','InventoryMovement','Payment','SinpeMessage']
+    const syncedTables = ['CashRegister','Employee','Client','Category','Subcategory','Product','Sale','Expense','InventoryMovement','Payment','SinpeMessage','Company','Return']
     for (const t of syncedTables) {
         try {
             execute(`DELETE FROM SyncError WHERE tableName = ? AND recordId IN (SELECT id FROM ${t} WHERE syncStatus = 'SYNCED')`, [t])
