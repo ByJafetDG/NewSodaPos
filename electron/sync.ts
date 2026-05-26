@@ -252,6 +252,13 @@ async function processEmailQueue() {
  */
 async function pullSync() {
     console.log('[SyncEngine] Pulling updates from Supabase...');
+    let lastPullAt: string | null = null;
+    try {
+        const row = get('SELECT value FROM LocalConfig WHERE key = ?', ['lastPullAt']) as { value: string } | undefined;
+        lastPullAt = row?.value ?? null;
+    } catch {}
+    const pullStartedAt = new Date().toISOString();
+    console.log(`[SyncEngine] Pull mode: ${lastPullAt ? `incremental (since ${lastPullAt})` : 'initial full pull'}`);
     try {
         execute('PRAGMA foreign_keys = OFF');
         // 1. Sync Categories
@@ -464,7 +471,10 @@ async function pullSync() {
         }
 
         // 8. Sync CashRegisters (parent of Sale and Expense)
-        const { data: registers, error: regError } = await supabase.from('CashRegister').select('*').limit(1000);
+        let cashRegQuery = supabase.from('CashRegister').select('*').order('updatedAt', { ascending: false });
+        if (lastPullAt) cashRegQuery = cashRegQuery.gt('updatedAt', lastPullAt);
+        cashRegQuery = cashRegQuery.limit(lastPullAt ? 100 : 1000);
+        const { data: registers, error: regError } = await cashRegQuery;
         if (regError) throw regError;
         if (registers) {
             transaction(() => {
@@ -495,7 +505,10 @@ async function pullSync() {
         }
 
         // 9. Sync Sales (depends on CashRegister, Client)
-        const { data: sales, error: saleError } = await supabase.from('Sale').select('*').order('date', { ascending: false }).limit(2000);
+        let saleQuery = supabase.from('Sale').select('*').order('date', { ascending: false });
+        if (lastPullAt) saleQuery = saleQuery.gt('updatedAt', lastPullAt);
+        else saleQuery = saleQuery.limit(2000);
+        const { data: sales, error: saleError } = await saleQuery;
         if (saleError) throw saleError;
         if (sales) {
             for (const sale of sales) {
@@ -507,8 +520,8 @@ async function pullSync() {
                     execute(`DELETE FROM SaleItem WHERE saleId IN (SELECT id FROM Sale WHERE saleNumber = ? AND id != ?)`, [sale.saleNumber, sale.id]);
                     execute(`DELETE FROM Sale WHERE saleNumber = ? AND id != ?`, [sale.saleNumber, sale.id]);
                     execute(`
-                        INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName, physicalInvoiceNumber, originalSaleSnapshot, modifiedFromSaleId, paidAt, paymentMethod2, amount2)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName, physicalInvoiceNumber, originalSaleSnapshot, modifiedFromSaleId, paidAt, paymentMethod2, amount2, settledSaleIds)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             saleNumber = excluded.saleNumber,
                             date = excluded.date,
@@ -532,20 +545,26 @@ async function pullSync() {
                             modifiedFromSaleId = excluded.modifiedFromSaleId,
                             paidAt = excluded.paidAt,
                             paymentMethod2 = excluded.paymentMethod2,
-                            amount2 = excluded.amount2
-                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, dZ(sale.updatedAt), sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
+                            amount2 = excluded.amount2,
+                            settledSaleIds = excluded.settledSaleIds
+                    `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, dZ(sale.updatedAt), sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null, sale.settledSaleIds ?? null]);
                 } catch (e) {
                     console.error(`[SyncEngine] Sale pull ${sale.id} (#${sale.saleNumber}):`, e);
                 }
             }
         }
 
-        // 10. Sync SaleItems (depends on Sale, Product)
-        const { data: saleItems, error: saleItemError } = await supabase.from('SaleItem').select('*').order('createdAt', { ascending: false }).limit(5000);
-        if (saleItemError) throw saleItemError;
-        if (saleItems) {
+        // 10. Sync SaleItems — only for Sales pulled in this cycle (avoids re-downloading all items every pull)
+        const changedSaleIds = (sales ?? []).map((s: any) => s.id);
+        const allSaleItems: any[] = [];
+        for (let i = 0; i < changedSaleIds.length; i += 300) {
+            const chunk = changedSaleIds.slice(i, i + 300);
+            const { data: chunkItems } = await supabase.from('SaleItem').select('*').in('saleId', chunk);
+            if (chunkItems) allSaleItems.push(...chunkItems);
+        }
+        if (allSaleItems.length > 0) {
             transaction(() => {
-                for (const item of saleItems) {
+                for (const item of allSaleItems) {
                     execute(`
                         INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -562,7 +581,10 @@ async function pullSync() {
         }
 
         // 11. Sync Expenses (depends on CashRegister, ExpenseCategory)
-        const { data: expenses, error: expError } = await supabase.from('Expense').select('*');
+        let expQuery = supabase.from('Expense').select('*').order('date', { ascending: false });
+        if (lastPullAt) expQuery = expQuery.gt('updatedAt', lastPullAt);
+        else expQuery = expQuery.limit(1000);
+        const { data: expenses, error: expError } = await expQuery;
         if (expError && expError.code !== 'PGRST205') throw expError;
         if (expenses) {
             transaction(() => {
@@ -586,7 +608,10 @@ async function pullSync() {
         }
 
         // 12. Sync InventoryMovements (depends on Product)
-        const { data: movements, error: movError } = await supabase.from('InventoryMovement').select('*');
+        let movQuery = supabase.from('InventoryMovement').select('*').order('date', { ascending: false });
+        if (lastPullAt) movQuery = movQuery.gt('date', lastPullAt);
+        else movQuery = movQuery.limit(2000);
+        const { data: movements, error: movError } = await movQuery;
         if (movError) throw movError;
         if (movements) {
             transaction(() => {
@@ -609,7 +634,10 @@ async function pullSync() {
         }
 
         // 13. Sync Payments (depends on Client)
-        const { data: payments, error: payError } = await supabase.from('Payment').select('*');
+        let payQuery = supabase.from('Payment').select('*').order('date', { ascending: false });
+        if (lastPullAt) payQuery = payQuery.gt('date', lastPullAt);
+        else payQuery = payQuery.limit(1000);
+        const { data: payments, error: payError } = await payQuery;
         if (payError) throw payError;
         if (payments) {
             transaction(() => {
@@ -675,7 +703,7 @@ async function pullSync() {
         }
 
         // 16. Sync TombolaEntry (depends on Sorteo)
-        const { data: tombolaEntries, error: tombolaError } = await supabase.from('TombolaEntry').select('*');
+        const { data: tombolaEntries, error: tombolaError } = await supabase.from('TombolaEntry').select('*').order('createdAt', { ascending: false }).limit(5000);
         if (tombolaError && tombolaError.code !== 'PGRST205') throw tombolaError;
         if (tombolaEntries) {
             transaction(() => {
@@ -738,10 +766,33 @@ async function pullSync() {
             });
         }
 
+        // Guardar timestamp del pull exitoso para próximo pull incremental
+        try {
+            execute(`INSERT INTO LocalConfig (key, value) VALUES ('lastPullAt', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [pullStartedAt]);
+        } catch {}
+
         console.log('[SyncEngine] Pull items success.');
 
-        // Notificar UI para que React Query invalide todas las queries afectadas
-        for (const table of ['Product', 'Category', 'Subcategory', 'Client', 'Company', 'Employee', 'BusinessConfig', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment', 'Sorteo', 'TombolaEntry', 'Return']) {
+        // Solo notificar tablas que realmente recibieron datos en este pull
+        const tablesWithData: string[] = [];
+        if (categories?.length) tablesWithData.push('Category');
+        if (products?.length) tablesWithData.push('Product');
+        if (companies?.length) tablesWithData.push('Company');
+        if (clients?.length) tablesWithData.push('Client');
+        if (employees?.length) tablesWithData.push('Employee');
+        if (configs?.length) tablesWithData.push('BusinessConfig');
+        if (subcategories?.length) tablesWithData.push('Subcategory');
+        if (registers?.length) tablesWithData.push('CashRegister');
+        if (sales?.length) tablesWithData.push('Sale');
+        if (allSaleItems.length) tablesWithData.push('Sale');
+        if (expenses?.length) tablesWithData.push('Expense');
+        if (movements?.length) tablesWithData.push('InventoryMovement');
+        if (payments?.length) tablesWithData.push('Payment');
+        if (sorteos?.length) tablesWithData.push('Sorteo');
+        if (tombolaEntries?.length) tablesWithData.push('TombolaEntry');
+        if (returns?.length) tablesWithData.push('Return');
+        const uniqueTables = [...new Set(tablesWithData)];
+        for (const table of uniqueTables) {
             notifyUI(table);
         }
     } catch (err) {

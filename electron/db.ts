@@ -377,6 +377,11 @@ export function initDb() {
       updatedAt TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (cashRegisterId) REFERENCES CashRegister(id)
     );
+
+    CREATE TABLE IF NOT EXISTS LocalConfig (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   // ===== Migrations for existing databases =====
