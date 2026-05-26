@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, CreditCard, Banknote, Smartphone, User, UserCheck, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare, CheckCircle2 } from 'lucide-react'
+import { X, CreditCard, Banknote, Smartphone, User, UserCheck, Clock, Printer, Receipt, Trash2, Pencil, AlertTriangle, GitCompare, CheckCircle2, RotateCcw } from 'lucide-react'
 import { cn, formatCurrency, crTime, crDateStr } from '@/lib/utils'
 import { useBusinessConfig } from '@/hooks/useConfig'
 import { sileo } from 'sileo'
 import { getSaleDetails, getSalesByIds } from '@/services/sales'
+import { useReturnsBySaleId } from '@/hooks/useReturns'
+import type { ReturnRecord } from '@/types'
 
 function MarqueeText({ text, className }: { text: string; className?: string }) {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -47,10 +49,11 @@ interface ReportSaleModalProps {
 }
 
 export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleModalProps) {
-    const [tab, setTab] = useState<'detail' | 'compare'>('detail')
+    const [tab, setTab] = useState<'detail' | 'compare' | 'returns'>('detail')
     const [originalSale, setOriginalSale] = useState<any | null>(null)
     const [loadingOriginal, setLoadingOriginal] = useState(false)
     const [settledTotal, setSettledTotal] = useState(0)
+    const { data: saleReturns = [] } = useReturnsBySaleId(sale?.id)
 
     useEffect(() => {
         if (!sale) { setTab('detail'); setOriginalSale(null) }
@@ -82,6 +85,7 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
     }
 
     const hasCompare = !!sale?.modifiedFromSaleId
+    const hasReturns = saleReturns.length > 0
 
     return (
         <AnimatePresence>
@@ -108,10 +112,10 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
                             )}
                             onClick={e => e.stopPropagation()}
                         >
-                            <SaleHeader sale={sale} onClose={onClose} />
+                            <SaleHeader sale={sale} onClose={onClose} returnCount={saleReturns.length} />
 
-                            {/* Tab bar — only when sale was modified */}
-                            {hasCompare && (
+                            {/* Tab bar — when sale was modified or has returns */}
+                            {(hasCompare || hasReturns) && (
                                 <div className="flex border-b border-[#192030]">
                                     <button
                                         onClick={() => setTab('detail')}
@@ -122,16 +126,33 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
                                     >
                                         Detalle
                                     </button>
-                                    <button
-                                        onClick={handleTabCompare}
-                                        className={cn(
-                                            'flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px] font-medium transition-all cursor-pointer',
-                                            tab === 'compare' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
-                                        )}
-                                    >
-                                        <GitCompare size={12} />
-                                        Comparativa
-                                    </button>
+                                    {hasCompare && (
+                                        <button
+                                            onClick={handleTabCompare}
+                                            className={cn(
+                                                'flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px] font-medium transition-all cursor-pointer',
+                                                tab === 'compare' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                            )}
+                                        >
+                                            <GitCompare size={12} />
+                                            Comparativa
+                                        </button>
+                                    )}
+                                    {hasReturns && (
+                                        <button
+                                            onClick={() => setTab('returns')}
+                                            className={cn(
+                                                'flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px] font-medium transition-all cursor-pointer',
+                                                tab === 'returns' ? 'text-orange-400 border-b-2 border-orange-400' : 'text-[#3D506A] hover:text-[#7A8FAA]'
+                                            )}
+                                        >
+                                            <RotateCcw size={12} />
+                                            Devoluciones
+                                            <span className="ml-0.5 text-[10px] bg-orange-500/20 text-orange-400 px-1 rounded">
+                                                {saleReturns.length}
+                                            </span>
+                                        </button>
+                                    )}
                                 </div>
                             )}
 
@@ -145,12 +166,14 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
                                         <SaleActions sale={sale} onVoid={onVoid} onModify={onModify} onClose={onClose} />
                                     )}
                                 </>
-                            ) : (
+                            ) : tab === 'compare' ? (
                                 <CompareView
                                     currentSale={sale}
                                     originalSale={originalSale}
                                     loading={loadingOriginal}
                                 />
+                            ) : (
+                                <ReturnsTab returns={saleReturns} />
                             )}
                         </div>
                     </motion.div>
@@ -160,7 +183,7 @@ export function ReportSaleModal({ sale, onClose, onVoid, onModify }: ReportSaleM
     )
 }
 
-function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
+function SaleHeader({ sale, onClose, returnCount = 0 }: { sale: any; onClose: () => void; returnCount?: number }) {
     const { data: config } = useBusinessConfig()
     const [printing, setPrinting] = useState(false)
 
@@ -290,7 +313,15 @@ function SaleHeader({ sale, onClose }: { sale: any; onClose: () => void }) {
     return (
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#192030]">
             <div>
-                <h2 className="text-[16px] font-semibold text-[#E4ECF7]">Venta #{sale.saleNumber}</h2>
+                <div className="flex items-center gap-2">
+                    <h2 className="text-[16px] font-semibold text-[#E4ECF7]">Venta #{sale.saleNumber}</h2>
+                    {returnCount > 0 && (
+                        <span className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/20 text-orange-400">
+                            <RotateCcw size={9} />
+                            {returnCount} dev.
+                        </span>
+                    )}
+                </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                     <Clock size={11} className="text-[#3D506A]" />
                     {showBothDates ? (
@@ -650,6 +681,72 @@ function CompareView({ currentSale, originalSale, loading }: { currentSale: any;
                     </span>
                 </div>
             </div>
+        </div>
+    )
+}
+
+function ReturnsTab({ returns }: { returns: ReturnRecord[] }) {
+    return (
+        <div className="overflow-y-auto" style={{ maxHeight: 420 }}>
+            {returns.map((ret) => {
+                const inItems = ret.items.filter(i => i.direction === 'IN')
+                const outItems = ret.items.filter(i => i.direction === 'OUT')
+                return (
+                    <div key={ret.id} className="px-5 py-4 border-b border-[#192030] last:border-0">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                                <span className="text-[13px] font-semibold text-[#E4ECF7]">Devolución #{ret.returnNumber}</span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/20 text-orange-400">
+                                    {ret.type === 'CAMBIO' ? 'Cambio' : 'Devolución'}
+                                </span>
+                            </div>
+                            <span className="text-[11px] text-[#3D506A]">{crTime(ret.date.toISOString())}</span>
+                        </div>
+                        {ret.employeeName && (
+                            <p className="text-[11px] text-[#3D506A] mb-2">
+                                Cajero: <span className="text-[#7A8FAA]">{ret.employeeName}</span>
+                            </p>
+                        )}
+                        {inItems.length > 0 && (
+                            <div className="mb-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-red-400/70 mb-1">Devuelto por cliente</p>
+                                {inItems.map(item => (
+                                    <div key={item.id} className="flex items-center justify-between text-[12px] py-0.5">
+                                        <span className="text-[#7A8FAA]">{item.productName} ×{item.quantity}</span>
+                                        <span className="text-red-400">{formatCurrency(item.subtotal)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {outItems.length > 0 && (
+                            <div className="mb-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400/70 mb-1">Entregado al cliente</p>
+                                {outItems.map(item => (
+                                    <div key={item.id} className="flex items-center justify-between text-[12px] py-0.5">
+                                        <span className="text-[#7A8FAA]">{item.productName} ×{item.quantity}</span>
+                                        <span className="text-emerald-400">{formatCurrency(item.subtotal)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <div className="flex items-center justify-between pt-2 border-t border-[#192030] mt-1">
+                            <span className="text-[11px] text-[#3D506A]">
+                                {ret.netCash === 0
+                                    ? 'Sin cambio de efectivo'
+                                    : ret.netCash > 0
+                                        ? 'Devuelto en efectivo al cliente'
+                                        : 'Cobrado al cliente'}
+                            </span>
+                            <span className={cn(
+                                'text-[12px] font-semibold',
+                                ret.netCash === 0 ? 'text-cyan-400' : ret.netCash > 0 ? 'text-emerald-400' : 'text-red-400'
+                            )}>
+                                {ret.netCash === 0 ? 'Exacto' : formatCurrency(Math.abs(ret.netCash))}
+                            </span>
+                        </div>
+                    </div>
+                )
+            })}
         </div>
     )
 }

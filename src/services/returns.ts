@@ -173,6 +173,44 @@ export async function getRecentSales(limit = 50): Promise<RecentSaleRow[]> {
     return data ?? []
 }
 
+export async function getReturnsBySaleId(saleId: string): Promise<ReturnRecord[]> {
+    if (window.electronAPI) {
+        const rows = await window.electronAPI.dbQuery(`
+            SELECT r.*, s.saleNumber as originalSaleNumber
+            FROM "Return" r
+            LEFT JOIN Sale s ON r.originalSaleId = s.id
+            WHERE r.originalSaleId = ?
+            ORDER BY r.date ASC
+        `, [saleId])
+        const results: ReturnRecord[] = []
+        for (const r of rows) {
+            const items = await window.electronAPI.dbQuery(`
+                SELECT ri.*, p.name as productName FROM ReturnItem ri
+                LEFT JOIN Product p ON ri.productId = p.id
+                WHERE ri.returnId = ?
+            `, [r.id])
+            results.push({
+                ...r,
+                date: new Date(r.date),
+                items: items.map((i: any) => ({ ...i, productName: i.productName ?? i.productId })),
+            })
+        }
+        return results
+    }
+    const { data, error } = await supabase
+        .from('Return')
+        .select('*, originalSale:Sale(saleNumber), items:ReturnItem(*, product:Product(name))')
+        .eq('originalSaleId', saleId)
+        .order('date', { ascending: true })
+    if (error) throw error
+    return (data ?? []).map((r: any) => ({
+        ...r,
+        originalSaleNumber: r.originalSale?.saleNumber ?? null,
+        date: new Date(r.date),
+        items: (r.items ?? []).map((i: any) => ({ ...i, productName: i.product?.name ?? i.productId })),
+    }))
+}
+
 export async function getReturnWithItems(returnId: string): Promise<ReturnRecord | null> {
     if (window.electronAPI) {
         const ret = await window.electronAPI.dbGet(`

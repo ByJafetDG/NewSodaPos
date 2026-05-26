@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getReturns, createReturn, getReturnWithItems, getRecentSales } from '@/services/returns'
+import { getReturns, createReturn, getReturnWithItems, getRecentSales, getReturnsBySaleId } from '@/services/returns'
 
 export function useReturns() {
     return useQuery({
@@ -26,12 +26,22 @@ export function useRecentSales() {
     })
 }
 
+export function useReturnsBySaleId(saleId: string | null | undefined) {
+    return useQuery({
+        queryKey: ['returns-by-sale', saleId],
+        queryFn: () => getReturnsBySaleId(saleId!),
+        enabled: !!saleId,
+        staleTime: 30_000,
+    })
+}
+
 export function useCreateReturn() {
     const qc = useQueryClient()
     return useMutation({
         mutationFn: createReturn,
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['returns'] })
+            qc.invalidateQueries({ queryKey: ['returns-by-sale'] })
             qc.invalidateQueries({ queryKey: ['cash-audit'] })
             qc.invalidateQueries({ queryKey: ['products'] })
         },

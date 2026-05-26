@@ -704,10 +704,44 @@ async function pullSync() {
             });
         }
 
+        // 17. Sync Returns (depends on Sale)
+        const { data: returns, error: returnsError } = await supabase.from('Return').select('*, items:ReturnItem(*)').order('date', { ascending: false }).limit(500);
+        if (returnsError && returnsError.code !== 'PGRST205') throw returnsError;
+        if (returns) {
+            transaction(() => {
+                for (const ret of returns) {
+                    const localRet = get('SELECT syncStatus FROM "Return" WHERE id = ?', [ret.id]) as { syncStatus: string } | undefined;
+                    if (localRet?.syncStatus === 'PENDING') continue;
+                    execute(`
+                        INSERT INTO "Return" (id, returnNumber, originalSaleId, type, cashRegisterId, netCash, employeeName, notes, date, syncStatus, createdAt, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            returnNumber = excluded.returnNumber,
+                            originalSaleId = excluded.originalSaleId,
+                            type = excluded.type,
+                            cashRegisterId = excluded.cashRegisterId,
+                            netCash = excluded.netCash,
+                            employeeName = excluded.employeeName,
+                            notes = excluded.notes,
+                            date = excluded.date,
+                            syncStatus = 'SYNCED',
+                            updatedAt = excluded.updatedAt
+                    `, [ret.id, ret.returnNumber, ret.originalSaleId ?? null, ret.type, ret.cashRegisterId ?? null, ret.netCash, ret.employeeName ?? null, ret.notes ?? null, ret.date, ret.createdAt, ret.updatedAt]);
+                    execute(`DELETE FROM ReturnItem WHERE returnId = ?`, [ret.id]);
+                    for (const item of (ret.items ?? [])) {
+                        execute(`
+                            INSERT OR IGNORE INTO ReturnItem (id, returnId, direction, productId, quantity, unitPrice, subtotal)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        `, [item.id, item.returnId, item.direction, item.productId, item.quantity, item.unitPrice, item.subtotal]);
+                    }
+                }
+            });
+        }
+
         console.log('[SyncEngine] Pull items success.');
 
         // Notificar UI para que React Query invalide todas las queries afectadas
-        for (const table of ['Product', 'Category', 'Subcategory', 'Client', 'Company', 'Employee', 'BusinessConfig', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment', 'Sorteo', 'TombolaEntry']) {
+        for (const table of ['Product', 'Category', 'Subcategory', 'Client', 'Company', 'Employee', 'BusinessConfig', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment', 'Sorteo', 'TombolaEntry', 'Return']) {
             notifyUI(table);
         }
     } catch (err) {
@@ -766,11 +800,12 @@ async function _pushSync(): Promise<string[]> {
     const pendingSinpe = query(`SELECT * FROM SinpeMessage WHERE syncStatus = 'PENDING'`) as DbSinpeMessageRow[];
     const pendingTombolaEntries = query(`SELECT * FROM TombolaEntry WHERE syncStatus = 'PENDING'`) as DbTombolaEntryRow[];
     const pendingSorteos = query(`SELECT * FROM Sorteo WHERE syncStatus = 'PENDING'`) as DbSorteoRow[];
+    const pendingReturns = query(`SELECT * FROM "Return" WHERE syncStatus = 'PENDING'`) as any[];
 
     const totalPending = pendingSales.length + pendingExpenses.length + pendingMovements.length +
         pendingRegisters.length + pendingPayments.length + pendingEmployees.length +
         pendingCompanies.length + pendingClients.length + pendingProducts.length + pendingCategories.length + pendingSubcategories.length +
-        pendingConfig.length + pendingSinpe.length + pendingTombolaEntries.length + pendingSorteos.length;
+        pendingConfig.length + pendingSinpe.length + pendingTombolaEntries.length + pendingSorteos.length + pendingReturns.length;
 
     if (totalPending === 0) return [];
 
@@ -1243,6 +1278,47 @@ async function _pushSync(): Promise<string[]> {
             logError(msg);
             errors.push(msg);
             persistSyncError('TombolaEntry', entry.id, msg);
+        }
+    }
+
+    // 14. Returns — after Sale (originalSaleId FK)
+    for (const ret of pendingReturns) {
+        try {
+            const items = query(`SELECT * FROM ReturnItem WHERE returnId = ?`, [ret.id]) as any[];
+            const { error: retError } = await supabase.from('Return').upsert({
+                id: ret.id,
+                returnNumber: ret.returnNumber,
+                originalSaleId: ret.originalSaleId ?? null,
+                type: ret.type,
+                cashRegisterId: ret.cashRegisterId ?? null,
+                netCash: ret.netCash,
+                employeeName: ret.employeeName ?? null,
+                notes: ret.notes ?? null,
+                date: ret.date,
+                syncStatus: 'SYNCED',
+                createdAt: ret.createdAt,
+                updatedAt: new Date().toISOString(),
+            });
+            if (retError) throw retError;
+            await supabase.from('ReturnItem').delete().eq('returnId', ret.id);
+            for (const item of items) {
+                const { error: itemError } = await supabase.from('ReturnItem').upsert({
+                    id: item.id,
+                    returnId: item.returnId,
+                    direction: item.direction,
+                    productId: item.productId,
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice,
+                    subtotal: item.subtotal,
+                });
+                if (itemError) throw itemError;
+            }
+            execute(`UPDATE "Return" SET syncStatus = 'SYNCED' WHERE id = ?`, [ret.id]);
+        } catch (err: any) {
+            const msg = `Return ${ret.id}: ${err?.message ?? err}`;
+            logError(msg);
+            errors.push(msg);
+            persistSyncError('Return', ret.id, msg);
         }
     }
 

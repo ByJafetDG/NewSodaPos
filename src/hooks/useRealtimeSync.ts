@@ -73,6 +73,11 @@ function invalidateForTable(qc: QueryClient, table: string) {
         case 'TombolaEntry':
             qc.invalidateQueries({ queryKey: ['tombola-entries'] })
             break
+        case 'Return':
+            qc.invalidateQueries({ queryKey: ['returns'] })
+            qc.invalidateQueries({ queryKey: ['returns-by-sale'] })
+            qc.invalidateQueries({ queryKey: ['cash-audit'] })
+            break
     }
 }
 
