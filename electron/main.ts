@@ -157,11 +157,15 @@ ipcMain.handle('sync:force-push', async () => {
         return { totalRemaining: 0, remaining: {}, pushErrors: ['[DEV MODE] Push deshabilitado — ejecuta el build de producción para sincronizar.'] };
     }
     const tables = ['Sale', 'Expense', 'Payment', 'InventoryMovement', 'CashRegister', 'Employee', 'Client', 'Category', 'Subcategory', 'Product', 'BusinessConfig', 'Return'];
-    for (const table of tables) {
-        try {
-            execute(`UPDATE ${table} SET syncStatus = 'PENDING' WHERE syncStatus = 'SYNCED' OR syncStatus IS NULL`, []);
-        } catch { /* table may not have syncStatus */ }
-    }
+    // Reintentar registros que fallaron anteriormente
+    try {
+        const syncErrors = query(`SELECT tableName, recordId FROM SyncError`, []) as { tableName: string; recordId: string }[];
+        for (const err of syncErrors) {
+            try {
+                execute(`UPDATE "${err.tableName}" SET syncStatus = 'PENDING' WHERE id = ? AND syncStatus != 'PENDING'`, [err.recordId]);
+            } catch {}
+        }
+    } catch {}
     const pushErrors = await pushSync();
     const remaining: Record<string, number> = {};
     let totalRemaining = 0;
