@@ -69,6 +69,7 @@ export function usePOSSale(params: UsePOSSaleParams) {
             removeItems(data.selectedCartItems.map(i => i.id))
             qc.invalidateQueries({ queryKey: ['credit-sales'] })
             qc.invalidateQueries({ queryKey: ['active-register'] })
+            pendingSaleLoad.clearModifying()
             params.onCreditSplitComplete()
             toast.success(`Crédito dividido entre ${data.clientAssignments.length} cuentas`)
 
