@@ -44,16 +44,20 @@ export async function getNextSaleNumber(): Promise<number> {
     }
 
     // Try to get remote max for extra safety (avoid collisions with other devices)
+    // Timeout: 1.5s max — slow network must not block sale creation
     try {
-        const { data: remoteData, error } = await supabase
+        const timeout = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+        const query = supabase
             .from('Sale')
             .select('saleNumber')
             .order('saleNumber', { ascending: false })
             .limit(1)
             .maybeSingle()
+            .then(r => r)
 
-        if (!error && remoteData) {
-            const remoteMax = remoteData.saleNumber ?? 0;
+        const result = await Promise.race([query, timeout]) as Awaited<typeof query> | null
+        if (result && !result.error && result.data) {
+            const remoteMax = result.data.saleNumber ?? 0;
             return Math.max(localMax, remoteMax) + 1;
         }
     } catch (err) {

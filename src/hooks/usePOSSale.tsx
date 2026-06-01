@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { sileo } from 'sileo'
 import { useCartStore } from '@/store/cartStore'
 import { useHeldOrdersStore } from '@/store/heldOrdersStore'
@@ -56,8 +56,11 @@ export function usePOSSale(params: UsePOSSaleParams) {
     const createSale = useCreateSale()
 
     const [splitCreditPending, setSplitCreditPending] = useState(false)
+    const processingRef = useRef(false)
 
     const handleSplitCreditConfirm = async (data: SplitCreditData) => {
+        if (processingRef.current) return
+        processingRef.current = true
         setSplitCreditPending(true)
         try {
             const sales = await createSplitCreditSales({
@@ -139,10 +142,13 @@ export function usePOSSale(params: UsePOSSaleParams) {
             toast.error('Error al procesar crédito dividido')
         } finally {
             setSplitCreditPending(false)
+            processingRef.current = false
         }
     }
 
     const processSale = async ({ isCredit = false, clientId = null as string | null, method = params.paymentMethod, companyId = null as string | null } = {}) => {
+        if (processingRef.current) return
+        processingRef.current = true
         try {
             const saleItems = items
             const cartOnlyTotal = getTotal()
@@ -667,6 +673,7 @@ export function usePOSSale(params: UsePOSSaleParams) {
                 }
             }
         } catch (err) { console.error(err) }
+        finally { processingRef.current = false }
     }
 
     return { processSale, splitCreditPending, handleSplitCreditConfirm }
