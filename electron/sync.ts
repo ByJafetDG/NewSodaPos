@@ -1,4 +1,6 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, app } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import { supabase } from '../src/lib/supabase'; // We'll need to make sure this is compatible with Node.js
 import db, { query, execute, get, transaction } from './db';
 import type {
@@ -11,6 +13,23 @@ import type {
 let windowRef: BrowserWindow | null = null;
 let isPushing = false;
 let pushDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function cacheProductImage(productId: string, url: string): Promise<void> {
+    const { default: https } = await import('https')
+    const { default: http } = await import('http')
+    const dir = path.join(app.getPath('userData'), 'product-images')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const buf = await new Promise<Buffer>((resolve, reject) => {
+        const client = url.startsWith('https') ? https : http
+        client.get(url, res => {
+            const chunks: Buffer[] = []
+            res.on('data', (c: Buffer) => chunks.push(c))
+            res.on('end', () => resolve(Buffer.concat(chunks)))
+            res.on('error', reject)
+        }).on('error', reject)
+    })
+    fs.writeFileSync(path.join(dir, `${productId}.jpg`), buf)
+}
 
 export function triggerPush() {
     if (pushDebounceTimer) clearTimeout(pushDebounceTimer);
@@ -312,6 +331,16 @@ async function pullSync() {
           `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, dZ(prod.updatedAt)]);
                 }
             });
+
+            // Download images for products missing local cache (non-blocking)
+            const imgDir = path.join(app.getPath('userData'), 'product-images')
+            for (const prod of products) {
+                if (!prod.imageUrl) continue
+                const filePath = path.join(imgDir, `${prod.id}.jpg`)
+                if (!fs.existsSync(filePath)) {
+                    cacheProductImage(prod.id, prod.imageUrl).catch(() => {})
+                }
+            }
         }
 
         // 3. Sync Companies
@@ -1501,6 +1530,9 @@ function setupRealtimeSubscriptions() {
             syncStatus =    CASE WHEN Product.syncStatus = 'PENDING' THEN 'PENDING'             ELSE 'SYNCED'               END,
             updatedAt =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.updatedAt     ELSE excluded.updatedAt     END
         `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, dZ(prod.updatedAt)]);
+                if (prod.imageUrl && (payload.eventType === 'INSERT' || (payload.old as any)?.imageUrl !== prod.imageUrl)) {
+                    cacheProductImage(prod.id, prod.imageUrl).catch(() => {})
+                }
                 notifyUI('Product');
             }
         })
