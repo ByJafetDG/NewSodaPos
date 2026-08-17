@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
     X, ArrowLeft, Check, Package, Droplets, Layers, Utensils,
     ScanLine, Tag, ChevronRight, DollarSign, ImagePlus, Link2, Upload, ClipboardPaste,
+    Type, Tags,
 } from 'lucide-react'
 import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { useKeyboardStore } from '@/store/keyboardStore'
@@ -16,7 +17,41 @@ import type { Product, Category, ProductUnit, Subcategory } from '@/types'
 
 type WizardStep = 'draft-prompt' | 'name' | 'barcode' | 'unit' | 'category' | 'subcategory' | 'numbers' | 'image' | 'recap'
 const STEP_ORDER: WizardStep[] = ['name', 'image', 'barcode', 'unit', 'category', 'subcategory', 'numbers', 'recap']
-const PROGRESS_STEPS: WizardStep[] = ['name', 'barcode', 'unit', 'category', 'numbers']
+
+/**
+ * Pasos navegables de la barra superior, en el orden del flujo.
+ *
+ * Reemplaza la barra de progreso que solo se miraba: ahora cada tramo es un botón
+ * para saltar directo — editar el precio de un producto no debería obligar a pasar
+ * por nombre, imagen, código, unidad y categoría.
+ *
+ * Creando un producto solo se puede saltar hacia atrás, a lo ya recorrido; editando
+ * uno existente todo está lleno desde el principio, así que todo está habilitado.
+ */
+const NAV_STEPS: { id: WizardStep; label: string; icon: React.ElementType }[] = [
+    { id: 'name',        label: 'Nombre',    icon: Type       },
+    { id: 'image',       label: 'Imagen',    icon: ImagePlus  },
+    { id: 'barcode',     label: 'Código',    icon: ScanLine   },
+    { id: 'unit',        label: 'Unidad',    icon: Package    },
+    { id: 'category',    label: 'Categoría', icon: Layers     },
+    { id: 'subcategory', label: 'Subcat.',   icon: Tags       },
+    { id: 'numbers',     label: 'Precio',    icon: DollarSign },
+    { id: 'recap',       label: 'Resumen',   icon: Check      },
+]
+const navIdx = (s: WizardStep) => NAV_STEPS.findIndex(n => n.id === s)
+const LAST_NAV_IDX = NAV_STEPS.length - 1
+
+/**
+ * Hasta dónde se puede saltar al retomar un borrador. El historial de pasos no se
+ * guarda, así que se deduce de los datos: si hay precio, ya pasó por Precio; si hay
+ * código, por Código. Nunca alcanza para el Resumen sin un precio cargado.
+ */
+function reachedFromDraft(d: WizardData): number {
+    if (parseFloat(d.price) > 0) return navIdx('numbers')
+    if (d.barcode.trim()) return navIdx('barcode')
+    if (d.imageUrl) return navIdx('image')
+    return 0
+}
 
 const DRAFT_KEY_NEW = 'pos_product_draft_new'
 const draftKeyEdit = (id: string) => `pos_product_draft_edit_${id}`
@@ -63,6 +98,9 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
     const [step, setStep] = useState<WizardStep>('name')
     const [dir, setDir]   = useState(1)
     const [data, setData] = useState<WizardData>(EMPTY)
+    // Marca de agua: el paso más lejano al que se llegó. Es lo que habilita los saltos
+    // creando un producto — solo se puede volver a lo ya recorrido, nunca adelantarse.
+    const [maxStepIdx, setMaxStepIdx] = useState(0)
     const [isUploading, setIsUploading] = useState(false)
     const { data: allSubcategories = [] } = useSubcategories()
 
@@ -85,14 +123,19 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
             }
             if (draft?.name) { setData(draft); setStep('draft-prompt') }
             else             { setData(base);  setStep('name') }
+            // Editando, el producto ya tiene todo cargado: cualquier paso es alcanzable.
+            setMaxStepIdx(LAST_NAV_IDX)
         } else {
             if (initialBarcode) {
                 setData({ ...EMPTY, categoryId: categories[0]?.id ?? '', barcode: initialBarcode })
                 setStep('name')
+                setMaxStepIdx(0)
             } else if (draft?.name) {
                 setData(draft); setStep('draft-prompt')
+                setMaxStepIdx(reachedFromDraft(draft))
             } else {
                 setData({ ...EMPTY, categoryId: categories[0]?.id ?? '' }); setStep('name')
+                setMaxStepIdx(0)
             }
         }
         setDir(1)
@@ -108,6 +151,8 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
         useKeyboardStore.getState().close()
         setDir(direction)
         setStep(next)
+        const idx = navIdx(next)
+        if (idx >= 0) setMaxStepIdx(m => Math.max(m, idx))
     }
 
     function advance(next: WizardStep) { go(next, 1) }
@@ -131,6 +176,25 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
 
     async function handleConfirm() {
         if (isPending || isUploading) return
+
+        // Con los saltos habilitados ya no alcanza con que cada paso valide lo suyo: se
+        // puede llegar al resumen sin pasar por el precio, o borrarlo y volver. Estas
+        // guardas son las mismas condiciones que deshabilitan el botón de cada paso.
+        if (!data.name.trim()) {
+            toast.error('El producto necesita un nombre')
+            go('name', -1)
+            return
+        }
+        if (!data.categoryId) {
+            toast.error('Elegí una categoría para el producto')
+            go('category', -1)
+            return
+        }
+        if (!(parseFloat(data.price) > 0)) {
+            toast.error('El precio debe ser mayor a ₡0')
+            go('numbers', -1)
+            return
+        }
 
         let finalImageUrl = data.imageUrl
 
@@ -169,12 +233,16 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
             ? { name: product.name, barcode: product.barcode ?? '', unit: product.unit, categoryId: product.categoryId, subcategoryIds: product.subcategoryIds ?? [], price: String(product.price), stockQty: String(product.stockQty), minStock: String(product.minStock), isInfinite: product.isInfinite, isActive: product.isActive, imageUrl: product.imageUrl ?? null }
             : { ...EMPTY, categoryId: categories[0]?.id ?? '' }
         setData(base)
-        go('name', 1)
+        // Se descartó lo escrito: los saltos vuelven a bloquearse (salvo editando, donde
+        // el producto original sigue completo).
+        setMaxStepIdx(product ? LAST_NAV_IDX : 0)
+        setStep('name')
+        setDir(1)
+        useKeyboardStore.getState().close()
     }
 
     function handleClose() { useKeyboardStore.getState().close(); onClose() }
 
-    const progressIdx = PROGRESS_STEPS.indexOf(step)
     const activeCategories = categories.filter(c => c.isActive)
     const catName = activeCategories.find(c => c.id === data.categoryId)?.name ?? '—'
     const catSubcats = allSubcategories.filter(s => s.categoryId === data.categoryId && s.isActive)
@@ -220,17 +288,43 @@ export function ProductFormModal({ isOpen, onClose, onConfirm, product, categori
                                 </div>
                             )}
 
-                            {/* Progress bar */}
-                            {progressIdx >= 0 && (
-                                <div className="flex gap-1 px-5 pb-4">
-                                    {PROGRESS_STEPS.map((_, i) => (
-                                        <div key={i} className={cn(
-                                            'h-1 rounded-full transition-all duration-300',
-                                            i < progressIdx ? 'bg-orange-500 flex-1' :
-                                            i === progressIdx ? 'bg-orange-500 flex-[2]' :
-                                            'bg-[#1E2A40] flex-1'
-                                        )} />
-                                    ))}
+                            {/* Pasos navegables */}
+                            {step !== 'draft-prompt' && (
+                                <div className="flex items-center gap-1 px-5 pb-4">
+                                    {NAV_STEPS.map(({ id, label, icon: StepIcon }) => {
+                                        // La subcategoría solo existe si la categoría elegida tiene.
+                                        if (id === 'subcategory' && catSubcats.length === 0) return null
+
+                                        const idx = navIdx(id)
+                                        const isActive = step === id
+                                        const unlocked = idx <= maxStepIdx
+
+                                        return (
+                                            <button
+                                                key={id}
+                                                type="button"
+                                                onClick={() => unlocked && !isActive && goToStep(id)}
+                                                disabled={!unlocked}
+                                                title={unlocked ? label : `${label} — completá los pasos anteriores`}
+                                                aria-label={label}
+                                                aria-current={isActive ? 'step' : undefined}
+                                                className={cn(
+                                                    'h-7 rounded-lg flex items-center justify-center gap-1.5 px-1.5 min-w-0',
+                                                    'transition-all duration-300',
+                                                    isActive
+                                                        ? 'flex-[2] bg-orange-500/15 border border-orange-500/40 text-orange-300'
+                                                        : unlocked
+                                                            ? 'flex-1 bg-[#1E2A40] text-[#7A8FAA] hover:bg-[#26334D] hover:text-[#E4ECF7] cursor-pointer active:scale-95'
+                                                            : 'flex-1 bg-[#141B28] text-[#2A3852] cursor-not-allowed'
+                                                )}
+                                            >
+                                                <StepIcon size={12} className="shrink-0" />
+                                                {isActive && (
+                                                    <span className="text-[10px] font-semibold truncate">{label}</span>
+                                                )}
+                                            </button>
+                                        )
+                                    })}
                                 </div>
                             )}
 

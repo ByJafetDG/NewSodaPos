@@ -48,8 +48,10 @@ export interface ElectronAPI {
     downloadProductImage: (productId: string, url: string) => Promise<{ success: boolean; error?: string }>
     getProductLocalImage: (productId: string) => Promise<string | null>
     // Updates
-    onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void
+    getUpdateState: () => Promise<import('@/types/updates').UpdateState>
+    onUpdateState: (callback: (state: import('@/types/updates').UpdateState) => void) => () => void
     installUpdate: () => Promise<void>
+    downloadUpdate: () => Promise<void>
     checkForUpdate: () => Promise<void>
     openDevTools: () => Promise<void>
     // SINPE

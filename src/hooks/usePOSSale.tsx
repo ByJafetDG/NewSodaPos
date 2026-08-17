@@ -301,16 +301,37 @@ export function usePOSSale(params: UsePOSSaleParams) {
             const mainPaymentMethod2 = capturedHasEfectivo && capturedHasSinpe ? 'SINPE' : null
             const mainAmount2 = capturedHasEfectivo && capturedHasSinpe ? params.splitAmountNum : null
             const paymentTotal = capturedDebt ? saleTotal - capturedCreditAmt : mainTotal
-            const mainAmountReceived = isCredit ? null
-                : capturedDebt ? null
-                : capturedHasEfectivo ? saleReceived
-                    : capturedHasSinpe ? paymentTotal
-                        : (method === 'EFECTIVO' ? saleReceived : paymentTotal)
             const cashNeeded = paymentTotal - (capturedHasSinpe ? params.splitAmountNum : 0)
-            const mainChange = isCredit ? 0
-                : capturedDebt ? 0
-                : capturedHasEfectivo ? Math.max(0, saleReceived - cashNeeded)
-                    : (method === 'EFECTIVO' ? Math.max(0, saleReceived - paymentTotal) : 0)
+            // Cuando además se salda una deuda, el efectivo recibido y el vuelto se
+            // guardaban como null/0. La pantalla y el ticket sí mostraban el vuelto real,
+            // así que el detalle del arqueo quedaba contando otra historia. No afecta el
+            // total de caja (ese se calcula con `total`, no con estos campos), pero el
+            // registro tiene que decir lo que de verdad pasó en el mostrador.
+            const paysCash = !isCredit && (capturedIsMixed ? capturedHasEfectivo : method === 'EFECTIVO')
+            const mainAmountReceived = isCredit ? null : paysCash ? saleReceived : paymentTotal
+            const mainChange = isCredit ? 0 : paysCash ? Math.max(0, saleReceived - cashNeeded) : 0
+
+            // ── Datos del ticket ────────────────────────────────────────────────
+            // El papel que se lleva el cliente tiene que decir lo mismo que la pantalla
+            // y que lo guardado. Antes el vuelto impreso se calculaba contra el total
+            // completo (saleReceived - saleTotal), ignorando la parte pagada por SINPE o
+            // cargada a cuenta: en un pago mixto el ticket imprimía ₡0 de vuelto mientras
+            // la pantalla y la venta decían otra cosa.
+            const printedHasCash = !isCredit && (capturedIsMixed ? capturedHasEfectivo : method === 'EFECTIVO')
+            const printedCashDue = capturedIsMixed ? cashNeeded : saleTotal
+            const printedReceived = printedHasCash ? saleReceived : null
+            const printedChange = printedHasCash ? Math.max(0, saleReceived - printedCashDue) : 0
+            // Un pago mixto ya no se imprime como "EFECTIVO" a secas: el desglose existía
+            // en la base (paymentMethod2/amount2) pero no llegaba al comprobante.
+            const printedMethod = isCredit
+                ? 'CREDITO'
+                : capturedIsMixed
+                    ? [
+                        capturedHasEfectivo ? 'EFECTIVO' : null,
+                        capturedHasSinpe ? 'SINPE' : null,
+                        capturedHasCuenta ? 'CUENTA' : null,
+                    ].filter(Boolean).join(' + ')
+                    : method
             const saleInput = {
                 items: saleItems, subtotal: saleSubtotal, discount: saleDiscount, total: mainTotal,
                 paymentMethod: mainPaymentMethod as any,
@@ -522,9 +543,9 @@ export function usePOSSale(params: UsePOSSaleParams) {
                         total: s.total,
                     })) : undefined,
                     total: saleTotal,
-                    paymentMethod: isCredit ? 'CREDITO' : method,
-                    amountReceived: method === 'EFECTIVO' && !isCredit ? saleReceived : null,
-                    change: method === 'EFECTIVO' && !isCredit ? Math.max(0, saleReceived - saleTotal) : 0,
+                    paymentMethod: printedMethod,
+                    amountReceived: printedReceived,
+                    change: printedChange,
                     footer: config?.ticketFooter || '¡Gracias por su compra!',
                     showCashier: tOpts.showCashier ?? true,
                     showChange: tOpts.showChange ?? true,
@@ -672,7 +693,36 @@ export function usePOSSale(params: UsePOSSaleParams) {
                     }
                 }
             }
-        } catch (err) { console.error(err) }
+        } catch (err: any) {
+            // Antes esto era `console.error(err)` y nada más: el cajero apretaba Cobrar,
+            // no pasaba nada y no había forma de saber por qué. El caso más común es el
+            // stock que cambió por sync entre armar el carrito y cobrar — y ese error
+            // trae un mensaje escrito para que alguien lo lea.
+            console.error('[POS] La venta no se completó:', err)
+            sileo.error({
+                title: 'No se pudo completar la venta',
+                description: (
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{
+                            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+                            borderRadius: 10, padding: '9px 12px',
+                        }}>
+                            <div style={{ fontSize: 9, color: '#EF4444', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>
+                                Motivo
+                            </div>
+                            <div style={{ fontSize: 11, color: '#FCA5A5', lineHeight: 1.4 }}>
+                                {err?.message ?? 'Error desconocido'}
+                            </div>
+                        </div>
+                        <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
+                            El carrito quedó intacto. Corregí el problema y volvé a cobrar.
+                        </div>
+                    </div>
+                ),
+                position: 'top-right',
+                duration: 10000,
+            })
+        }
         finally { processingRef.current = false }
     }
 

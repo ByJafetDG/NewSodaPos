@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { autoUpdater } from 'electron-updater'
 import dotenv from 'dotenv'
 import fs from 'fs'
 
@@ -22,7 +21,9 @@ if (isDev) {
 }
 
 import { initDb, query, execute, get, executeMany } from './db'
-import { startSyncEngine, pushSync, pullSinpeMessages, triggerPush } from './sync'
+import { startSyncEngine, pushSync, pullSinpeMessages, triggerPush, cacheProductImage } from './sync'
+import { downloadBuffer } from './http'
+import { initUpdater } from './updater'
 
 // Disable GPU acceleration for better compatibility on some systems
 app.disableHardwareAcceleration()
@@ -81,9 +82,9 @@ app.whenReady().then(async () => {
     const win = createWindow()
     if (win) {
         startSyncEngine(win, isDev)
-        autoUpdater.checkForUpdates()
-        setInterval(() => autoUpdater.checkForUpdates(), 30 * 60 * 1000)
     }
+    // initUpdater agenda la primera búsqueda y el intervalo; no bloquea el arranque.
+    initUpdater()
     const sinpeCfg = readSinpeConfig()
     await startSinpeServer(sinpeCfg.port, sinpeCfg.senderFilter)
 
@@ -194,28 +195,20 @@ ipcMain.handle('sync:trigger-push', async () => {
 const TICKET_LOGO_PATH = () => path.join(app.getPath('userData'), 'ticket-logo.bin')
 const TICKET_LOGO_URL_PATH = () => path.join(app.getPath('userData'), 'ticket-logo-url.txt')
 
-async function downloadBuffer(url: string): Promise<Buffer> {
-    const { default: https } = await import('https')
-    const { default: http } = await import('http')
-    return new Promise((resolve, reject) => {
-        const client = url.startsWith('https') ? https : http
-        client.get(url, res => {
-            const chunks: Buffer[] = []
-            res.on('data', chunk => chunks.push(chunk))
-            res.on('end', () => resolve(Buffer.concat(chunks)))
-            res.on('error', reject)
-        }).on('error', reject)
-    })
-}
+// downloadBuffer vive en ./http: valida statusCode, sigue redirecciones y aplica timeout.
+// La versión anterior guardaba el cuerpo de un 404 como si fuera la imagen.
 
 async function buildTicketLogoBytes(url: string): Promise<Buffer> {
-    const imgBuf = await downloadBuffer(url)
+    const imgBuf = await downloadBuffer(url, { requireImage: true, minBytes: 128 })
     const img = nativeImage.createFromBuffer(imgBuf)
     const orig = img.getSize()
+    if (orig.width === 0 || orig.height === 0) throw new Error('El logo descargado no es una imagen válida')
     const targetW = 150
     const targetH = Math.round(orig.height * targetW / orig.width)
     const resized = img.resize({ width: targetW, height: targetH, quality: 'good' })
-    const bitmap = resized.getBitmap() // BGRA
+    // toBitmap(), no getBitmap(): este último es un alias legacy deprecado que en los tipos
+    // de Electron devuelve void — de ahí los 4 errores al indexar bitmap[off + N].
+    const bitmap = resized.toBitmap() // BGRA
     const w = resized.getSize().width
     const h = resized.getSize().height
     const xBytes = Math.ceil(w / 8)
@@ -249,7 +242,7 @@ async function buildTicketLogoBytes(url: string): Promise<Buffer> {
 ipcMain.handle('printer:cache-ticket-logo', async (_, url: string) => {
     try {
         const logoBytes = await buildTicketLogoBytes(url)
-        fs.writeFileSync(TICKET_LOGO_PATH(), logoBytes)
+        fs.writeFileSync(TICKET_LOGO_PATH(), logoBytes as unknown as Uint8Array)
         fs.writeFileSync(TICKET_LOGO_URL_PATH(), url, 'utf8')
         return { success: true }
     } catch (err: any) {
@@ -463,7 +456,7 @@ ipcMain.handle('printer:print', async (_, portOrName: string, data: any) => {
         } else if (data.ticketLogoUrl) {
             try {
                 const logoBuffer = await buildTicketLogoBytes(data.ticketLogoUrl)
-                fs.writeFileSync(logoPath, logoBuffer)
+                fs.writeFileSync(logoPath, logoBuffer as unknown as Uint8Array)
                 bytes.push(...Array.from(logoBuffer))
                 bytes.push(LF, LF)
             } catch (err) {
@@ -896,29 +889,9 @@ ipcMain.handle('email:send', async (_, payload: { from: string; to: string[]; su
     }
 })
 
-// ===== Auto-updater events =====
-autoUpdater.on('update-available', () => {
-    mainWindow?.webContents.send('update-message', 'update-available')
-})
+// El updater vive en ./updater: estado completo (notas del release, tamaño, progreso,
+// motivo del error) en vez de los strings sueltos del canal 'update-message'.
 
-autoUpdater.on('update-not-available', () => {
-    mainWindow?.webContents.send('update-message', 'update-not-available')
-})
-
-autoUpdater.on('error', (err) => {
-    mainWindow?.webContents.send('update-message', `Error: ${err.message}`)
-})
-
-autoUpdater.on('download-progress', (progressObj) => {
-    mainWindow?.webContents.send('update-message', 'downloading', progressObj.percent)
-})
-
-autoUpdater.on('update-downloaded', () => {
-    mainWindow?.webContents.send('update-message', 'update-downloaded')
-})
-
-ipcMain.handle('update:install', () => autoUpdater.quitAndInstall())
-ipcMain.handle('update:check', () => autoUpdater.checkForUpdates())
 ipcMain.handle('devtools:open', () => mainWindow?.webContents.openDevTools())
 
 ipcMain.handle('assets:get-logo', () => {
@@ -1107,10 +1080,9 @@ const PRODUCT_IMAGES_DIR = () => path.join(app.getPath('userData'), 'product-ima
 
 ipcMain.handle('product-image:download', async (_, productId: string, url: string) => {
     try {
-        const dir = PRODUCT_IMAGES_DIR()
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        const imgBuf = await downloadBuffer(url)
-        fs.writeFileSync(path.join(dir, `${productId}.jpg`), imgBuf)
+        // cacheProductImage valida el status, exige Content-Type de imagen y marca las
+        // URLs muertas para no reintentarlas en cada pull.
+        await cacheProductImage(productId, url)
         return { success: true }
     } catch (err: any) {
         console.error('[ProductImage] Download failed:', err.message)

@@ -21,6 +21,8 @@ import { useKeyboardInput } from '@/hooks/useKeyboardInput'
 import { useKeyboardStore } from '@/store/keyboardStore'
 import { useEmployees, useDeactivateEmployee } from '@/hooks/useEmployees'
 import { useBusinessConfig, useUpdateConfig } from '@/hooks/useConfig'
+import { useUpdates } from '@/hooks/useUpdates'
+import { NEUTRAL_ERROR_KINDS, UPDATE_ERROR_MESSAGES, formatBytes } from '@/types/updates'
 import { useUIStore } from '@/store/uiStore'
 import { cn, crDateTime, crDateStr } from '@/lib/utils'
 import { getEmployeePrefs, useEmployeePrefs } from '@/hooks/useEmployeePrefs'
@@ -119,9 +121,8 @@ export function SettingsPage() {
     const [section, setSection] = useState<Section>('business')
     const { syncInfo } = useUIStore()
 
-    const [appVersion, setAppVersion] = useState('')
-    const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date'>('idle')
-    const [lastChecked, setLastChecked] = useState<Date | null>(null)
+    const { state: updateState, postponed, check: checkUpdate, openPrompt, hasPending } = useUpdates()
+    const lastChecked = updateState.lastCheckedAt ? new Date(updateState.lastCheckedAt) : null
     const [forcePushing, setForcePushing] = useState(false)
     const [showCloseConfirm, setShowCloseConfirm] = useState(false)
 
@@ -145,46 +146,34 @@ export function SettingsPage() {
     }
 
     useEffect(() => {
-        window.electronAPI?.getSystemInfo().then(info => setAppVersion(info.version))
         const unsubBarcode = window.electronAPI?.onBarcodeConflict(({ productName }) => {
-            toast.warning(`Barcode duplicado en "${productName}" — barcode eliminado. Revisa Ajustes → Sincronización.`, 8000)
+            toast.warning(`Código de barras duplicado en "${productName}". Revisa Ajustes → Sincronización.`, 8000)
             loadSyncErrors()
         })
-        const unsub = window.electronAPI?.onUpdateMessage((msg: string) => {
-            if (msg === 'update-not-available') {
-                setUpdateStatus('up-to-date')
-                setLastChecked(new Date())
-                toast.success('¡Estás al día! No hay actualizaciones disponibles.')
-            } else if (msg === 'update-available') {
-                setUpdateStatus('idle')
-                setLastChecked(new Date())
-            } else {
-                setUpdateStatus('idle')
-            }
-        })
-        return () => { unsub?.(); unsubBarcode?.() }
+        return () => { unsubBarcode?.() }
     }, [])
 
-    async function handleCheckUpdate() {
-        setUpdateStatus('checking')
-        try {
-            await window.electronAPI?.checkForUpdate()
-        } catch {
-            setLastChecked(new Date())
-            setUpdateStatus('idle')
+    // El resultado de la búsqueda ya no se adivina con un timeout: el main publica
+    // 'up-to-date' o 'available' y el estado lo dice. El aviso solo sale cuando el
+    // usuario buscó a mano — las búsquedas automáticas no interrumpen.
+    const manualCheckRef = useRef(false)
+    useEffect(() => {
+        if (!manualCheckRef.current) return
+        if (updateState.status === 'up-to-date') {
+            manualCheckRef.current = false
             toast.success('¡Estás al día! No hay actualizaciones disponibles.')
-            return
+        } else if (updateState.status === 'available') {
+            manualCheckRef.current = false
+            openPrompt()
+        } else if (updateState.status === 'error') {
+            manualCheckRef.current = false
+            toast.error(UPDATE_ERROR_MESSAGES[updateState.errorKind ?? 'unknown'], 6000)
         }
-        setTimeout(() => {
-            setUpdateStatus(s => {
-                if (s === 'checking') {
-                    setLastChecked(new Date())
-                    toast.success('¡Estás al día! No hay actualizaciones disponibles.')
-                    return 'idle'
-                }
-                return s
-            })
-        }, 15_000)
+    }, [updateState.status, updateState.errorKind, openPrompt])
+
+    function handleCheckUpdate() {
+        manualCheckRef.current = true
+        checkUpdate()
     }
 
     const { data: config } = useBusinessConfig()
@@ -1140,7 +1129,7 @@ export function SettingsPage() {
                                 <div className="rounded-xl bg-[#101520] border border-[#1E2A40] divide-y divide-[#192030]">
                                     <div className="flex items-center justify-between px-4 py-3">
                                         <span className="text-[12px] text-[#3D506A]">Versión instalada</span>
-                                        <span className="text-[12px] font-mono text-emerald-400">v{appVersion || '...'}</span>
+                                        <span className="text-[12px] font-mono text-emerald-400">v{updateState.currentVersion || '...'}</span>
                                     </div>
                                     <div className="flex items-center justify-between px-4 py-3">
                                         <span className="text-[12px] text-[#3D506A]">Última verificación</span>
@@ -1154,24 +1143,83 @@ export function SettingsPage() {
                                     </div>
                                 </div>
 
-                                {updateStatus === 'up-to-date' && (
+                                {/* Actualización pendiente: acá vive después de posponerla. Las notas
+                                    se repiten para poder decidir sin tener que reabrir el modal. */}
+                                {hasPending && updateState.version && (
+                                    <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 p-4 space-y-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                <Download size={16} className="text-blue-400 shrink-0" />
+                                                <span className="text-[13px] font-medium text-blue-400 truncate">
+                                                    {updateState.status === 'ready'
+                                                        ? `v${updateState.version} lista para instalar`
+                                                        : `v${updateState.version} disponible`}
+                                                </span>
+                                            </div>
+                                            <span className="text-[11px] font-mono text-[#3D506A] shrink-0">
+                                                {formatBytes(updateState.sizeBytes)}
+                                            </span>
+                                        </div>
+
+                                        {updateState.releaseNotes && (
+                                            <p className="text-[12px] leading-relaxed text-[#7A8FAA] whitespace-pre-line max-h-[140px] overflow-y-auto">
+                                                {updateState.releaseNotes}
+                                            </p>
+                                        )}
+
+                                        {postponed && (
+                                            <p className="text-[11px] text-[#3D506A]">
+                                                La pospusiste. Te recordamos cada 30 minutos.
+                                            </p>
+                                        )}
+
+                                        <Button variant="primary" size="md" onClick={openPrompt} className="gap-1.5">
+                                            {updateState.status === 'ready' ? 'Instalar ahora' : 'Ver e instalar'}
+                                        </Button>
+                                    </div>
+                                )}
+
+                                {updateState.status === 'up-to-date' && (
                                     <div className="flex items-center gap-3 p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
                                         <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
                                         <p className="text-[13px] text-emerald-400 font-medium">Tienes la última versión</p>
                                     </div>
                                 )}
 
-                                <Button
-                                    variant="primary"
-                                    size="md"
-                                    onClick={handleCheckUpdate}
-                                    loading={updateStatus === 'checking'}
-                                    disabled={!window.electronAPI}
-                                    className="gap-1.5"
-                                >
-                                    <RefreshCw size={14} />
-                                    {updateStatus === 'checking' ? 'Verificando...' : 'Buscar actualización'}
-                                </Button>
+                                {updateState.status === 'error' && (
+                                    <div className={cn(
+                                        'flex items-center gap-3 p-3.5 rounded-xl border',
+                                        NEUTRAL_ERROR_KINDS.includes(updateState.errorKind ?? 'unknown')
+                                            ? 'bg-[#101520] border-[#1E2A40] text-[#7A8FAA]'
+                                            : 'bg-red-500/5 border-red-500/20 text-red-400'
+                                    )}>
+                                        <Info size={16} className="shrink-0" />
+                                        <p className="text-[13px] font-medium">
+                                            {UPDATE_ERROR_MESSAGES[updateState.errorKind ?? 'unknown']}
+                                        </p>
+                                    </div>
+                                )}
+
+                                {!hasPending && (
+                                    <Button
+                                        variant="primary"
+                                        size="md"
+                                        onClick={handleCheckUpdate}
+                                        loading={updateState.status === 'checking'}
+                                        disabled={!window.electronAPI || updateState.status === 'unsupported'}
+                                        className="gap-1.5"
+                                    >
+                                        <RefreshCw size={14} />
+                                        {updateState.status === 'checking' ? 'Verificando...' : 'Buscar actualización'}
+                                    </Button>
+                                )}
+
+                                {updateState.status === 'unsupported' && (
+                                    <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/5 border border-amber-500/15 text-[11px] text-amber-500/70">
+                                        <Info size={14} className="shrink-0" />
+                                        Las actualizaciones solo funcionan en la app instalada, no en modo desarrollo.
+                                    </div>
+                                )}
 
                                 {!window.electronAPI && (
                                     <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/5 border border-amber-500/15 text-[11px] text-amber-500/70">

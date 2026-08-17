@@ -64,16 +64,16 @@ const electronAPI = {
         return () => { ipcRenderer.removeListener('sync-log', subscription); };
     },
 
-    // Updates
-    onUpdateMessage: (callback: (message: string, percent?: number) => void) => {
-        const subscription = (_event: any, message: string, percent?: number) => callback(message, percent);
-        ipcRenderer.on('update-message', subscription);
-        return () => {
-            ipcRenderer.removeListener('update-message', subscription);
-        };
+    // Updates — el main publica un estado completo; el renderer solo lo mira y pide acciones.
+    getUpdateState: () => ipcRenderer.invoke('updates:get-state'),
+    onUpdateState: (callback: (state: any) => void) => {
+        const subscription = (_event: any, state: any) => callback(state);
+        ipcRenderer.on('updates:state', subscription);
+        return () => { ipcRenderer.removeListener('updates:state', subscription); };
     },
-    installUpdate: () => ipcRenderer.invoke('update:install'),
-    checkForUpdate: () => ipcRenderer.invoke('update:check'),
+    checkForUpdate: () => ipcRenderer.invoke('updates:check'),
+    downloadUpdate: () => ipcRenderer.invoke('updates:download'),
+    installUpdate: () => ipcRenderer.invoke('updates:install'),
     openDevTools: () => ipcRenderer.invoke('devtools:open'),
 
     // SINPE
@@ -139,8 +139,10 @@ export interface ElectronAPI {
     forcePush: () => Promise<void>;
     triggerSyncPush: () => Promise<void>;
     onDbChanged: (callback: (data: { table: string }) => void) => () => void;
-    onUpdateMessage: (callback: (message: string, percent?: number) => void) => () => void;
+    getUpdateState: () => Promise<any>;
+    onUpdateState: (callback: (state: any) => void) => () => void;
     installUpdate: () => Promise<void>;
+    downloadUpdate: () => Promise<void>;
     checkForUpdate: () => Promise<void>;
     getSinpeMessages: () => Promise<any[]>;
     getSinpeUnreadCount: () => Promise<number>;

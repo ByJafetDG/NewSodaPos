@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { cn, formatCurrency } from '@/lib/utils'
+import { useProductImage } from '@/hooks/useProductImage'
 import type { Product } from '@/types'
 
 interface ProductCardProps {
@@ -54,22 +55,12 @@ function StockBadge({ product, onImage = false }: { product: Product; onImage?: 
 export function ProductCard({ product, cartQty, onAdd, index, forceNoImage = false }: ProductCardProps) {
     const isOutOfStock = !product.isInfinite && product.stockQty <= 0
     const inCart = cartQty > 0
-    const [imgSrc, setImgSrc] = useState<string | null>(product.imageUrl ?? null)
+    const imgSrc = useProductImage(product.id, product.imageUrl)
     const [imgError, setImgError] = useState(false)
     const accent = accentFor(product.name)
     const initial = product.name.charAt(0).toUpperCase()
 
-    useEffect(() => {
-        setImgSrc(product.imageUrl ?? null)
-        setImgError(false)
-    }, [product.imageUrl])
-
-    useEffect(() => {
-        if (!product.imageUrl || !window.electronAPI) return
-        window.electronAPI.getProductLocalImage(product.id)
-            .then(local => { if (local) setImgSrc(local) })
-            .catch(() => {})
-    }, [product.id, product.imageUrl])
+    useEffect(() => { setImgError(false) }, [imgSrc])
 
     const hasImage = !!imgSrc && !imgError && !forceNoImage
 

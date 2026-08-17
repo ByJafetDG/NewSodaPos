@@ -6,7 +6,8 @@ interface CartState {
     items: CartItem[]
     discount: number
     invoiceClient: HeldOrderInvoiceClient | null
-    addItem: (product: Product, qty?: number) => void
+    /** Devuelve false si el stock no alcanzaba y no se agregó nada. */
+    addItem: (product: Product, qty?: number) => boolean
     removeItem: (productId: string) => void
     removeItems: (ids: string[]) => void
     updateQuantity: (productId: string, qty: number) => void
@@ -28,7 +29,9 @@ export const useCartStore = create<CartState>()(
             addItem: (product, qty = 1) => {
                 const existing = get().items.find(i => i.id === product.id)
                 const currentQty = existing ? existing.quantity : 0
-                if (!product.isInfinite && product.stockQty !== undefined && currentQty + qty > product.stockQty) return
+                // Antes esto retornaba sin avisar: quien llamaba creía que había agregado.
+                // Ahora el rechazo es visible y el llamador decide qué decirle al cajero.
+                if (!product.isInfinite && product.stockQty !== undefined && currentQty + qty > product.stockQty) return false
                 set(state => {
                     const ex = state.items.find(i => i.id === product.id)
                     if (ex) {
@@ -46,6 +49,7 @@ export const useCartStore = create<CartState>()(
                         }]
                     }
                 })
+                return true
             },
             removeItem: (id) => set(s => ({ items: s.items.filter(i => i.id !== id) })),
             removeItems: (ids) => set(s => ({ items: s.items.filter(i => !ids.includes(i.id)) })),

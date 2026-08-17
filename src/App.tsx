@@ -18,6 +18,7 @@ import { SinpePage } from '@/pages/SinpePage'
 import { StartupCajaModal } from '@/components/modals/StartupCajaModal'
 import { SplashScreen } from '@/components/layout/SplashScreen'
 import { UpdateModal } from '@/components/modals/UpdateModal'
+import { UpdatesProvider } from '@/hooks/useUpdates'
 
 function PageRenderer() {
     const { currentPage } = useUIStore()
@@ -371,7 +372,10 @@ export default function App() {
     }, [])
 
     return (
-        <>
+        // UpdatesProvider envuelve todo: el modal y la pantalla de Ajustes miran el mismo
+        // estado, y el recordatorio de "más tarde" tiene que seguir corriendo aunque el
+        // usuario esté en cualquier otra página.
+        <UpdatesProvider>
             <AppLayout>
                 <PageRenderer />
             </AppLayout>
@@ -380,6 +384,6 @@ export default function App() {
             <StartupCajaModal />
             <UpdateModal />
             <SplashScreen />
-        </>
+        </UpdatesProvider>
     )
 }

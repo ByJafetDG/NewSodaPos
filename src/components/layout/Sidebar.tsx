@@ -3,9 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
     ShoppingCart, Package, Users, Wallet,
     BarChart3, Settings2, Ticket, RotateCcw,
-    Wifi, WifiOff, RefreshCw, CloudOff, Sparkles, MessageSquare,
+    Wifi, WifiOff, RefreshCw, CloudOff, Sparkles, MessageSquare, Power,
 } from 'lucide-react'
 import { useUIStore } from '@/store/uiStore'
+import { useUpdates } from '@/hooks/useUpdates'
+import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
 import { cn, formatTime } from '@/lib/utils'
 import type { AppPage } from '@/types'
 import logo from '@/assets/logo-pospelon.png'
@@ -199,6 +201,8 @@ function NavButton({ item, isActive, onClick, badge }: {
 export function Sidebar() {
     const { currentPage, setCurrentPage, syncInfo, sinpeUnread } = useUIStore()
     const [time, setTime] = useState(new Date())
+    const [confirmClose, setConfirmClose] = useState(false)
+    const { state: updateState } = useUpdates()
 
     useEffect(() => {
         const t = setInterval(() => setTime(new Date()), 1000)
@@ -207,6 +211,16 @@ export function Sidebar() {
 
     const crNow = new Date(time.getTime() - 6 * 60 * 60 * 1000)
     const crDate = `${String(crNow.getUTCDate()).padStart(2,'0')}/${String(crNow.getUTCMonth()+1).padStart(2,'0')}/${crNow.getUTCFullYear()}`
+
+    // El texto del aviso cambia según lo que de verdad pasa al cerrar. Los cambios sin
+    // subir no se pierden (viven en la base local y suben al volver a abrir), pero sí
+    // conviene decirlo; y con una actualización descargada, cerrar es lo que la instala.
+    const updateReady = updateState.status === 'ready'
+    const closeDescription = updateReady
+        ? `Se instalará la actualización v${updateState.version} y el POS se cerrará. Vuelve a abrirlo cuando termine.`
+        : syncInfo.pendingCount > 0
+            ? `Hay ${syncInfo.pendingCount} cambio(s) sin subir. No se pierden: quedan guardados y se sincronizan al volver a abrir.`
+            : '¿Cerrar el sistema POS?'
 
     return (
         <nav
@@ -256,40 +270,82 @@ export function Sidebar() {
             {/* ── Status footer ────────────────────────── */}
             {/* safe-edge from bottom */}
             <div className="px-4 pb-[18px]">
-                <div className="bg-[#101520] border border-[#192030] rounded-xl px-3 py-2.5 space-y-2">
-                    {/* Connection */}
-                    <div className="flex items-center justify-between">
-                        <div className={cn(
-                            'flex items-center gap-1.5 text-[11px] font-medium',
-                            syncInfo.isOnline ? 'text-emerald-400' : 'text-red-400'
-                        )}>
-                            {syncInfo.isOnline
-                                ? <Wifi size={12} />
-                                : <WifiOff size={12} />
-                            }
-                            {syncInfo.isOnline ? crDate : 'Sin conexión'}
+                {/* Dos columnas: la info en bloque y el botón de cerrar en su propia
+                    columna, centrado contra las dos líneas. Compartiendo renglón con la
+                    hora quedaba flotando contra el borde y sin alineación con nada. */}
+                <div className="bg-[#101520] border border-[#192030] rounded-xl px-3 py-2.5 flex items-center gap-2.5">
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                        {/* Connection */}
+                        <div className="flex items-center justify-between gap-2">
+                            <div className={cn(
+                                'flex items-center gap-1.5 text-[11px] font-medium',
+                                syncInfo.isOnline ? 'text-emerald-400' : 'text-red-400'
+                            )}>
+                                {syncInfo.isOnline
+                                    ? <Wifi size={12} />
+                                    : <WifiOff size={12} />
+                                }
+                                {syncInfo.isOnline ? crDate : 'Sin conexión'}
+                            </div>
+
+                            {/* Sync badge — sin la palabra "Sync...": con el botón de cerrar
+                                ocupando su columna, el texto ya no entra (51px de badge
+                                contra 44px libres) y le comía el ancho a la fecha. */}
+                            {syncInfo.isSyncing ? (
+                                <div className="shrink-0 text-[#7A8FAA]" title="Sincronizando...">
+                                    <RefreshCw size={12} className="animate-spin" />
+                                </div>
+                            ) : syncInfo.pendingCount > 0 ? (
+                                <div className="flex items-center gap-1 text-[11px] text-amber-400 shrink-0">
+                                    <CloudOff size={11} />
+                                    <span>{syncInfo.pendingCount}</span>
+                                </div>
+                            ) : null}
                         </div>
 
-                        {/* Sync badge */}
-                        {syncInfo.isSyncing ? (
-                            <div className="flex items-center gap-1 text-[11px] text-[#7A8FAA]">
-                                <RefreshCw size={11} className="animate-spin" />
-                                <span>Sync...</span>
-                            </div>
-                        ) : syncInfo.pendingCount > 0 ? (
-                            <div className="flex items-center gap-1 text-[11px] text-amber-400">
-                                <CloudOff size={11} />
-                                <span>{syncInfo.pendingCount}</span>
-                            </div>
-                        ) : null}
+                        {/* Time */}
+                        <div className="text-[12px] font-semibold text-[#7A8FAA] tabular-nums leading-none">
+                            {formatTime(time)}
+                        </div>
                     </div>
 
-                    {/* Time */}
-                    <div className="text-[12px] font-semibold text-[#7A8FAA] tabular-nums">
-                        {formatTime(time)}
-                    </div>
+                    {/* Único punto de salida a mano: la ventana no tiene barra de título
+                        propia y el otro cierre vive enterrado en Ajustes. Discreto a
+                        propósito — es la acción menos frecuente de la app y no debería
+                        competir con lo que se usa todo el día. */}
+                    {window.electronAPI && (
+                        <button
+                            onClick={() => setConfirmClose(true)}
+                            title="Cerrar el sistema"
+                            aria-label="Cerrar el sistema"
+                            className={cn(
+                                'relative w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
+                                'bg-white/[0.03] border border-[#192030]',
+                                'text-[#3D506A] hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/25',
+                                'transition-colors cursor-pointer active:scale-95'
+                            )}
+                        >
+                            <Power size={15} strokeWidth={2} />
+                            {updateReady && (
+                                <span
+                                    title="Actualización lista: se instala al cerrar"
+                                    className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#101520]"
+                                />
+                            )}
+                        </button>
+                    )}
                 </div>
             </div>
+
+            <DeleteConfirmModal
+                isOpen={confirmClose}
+                onClose={() => setConfirmClose(false)}
+                onConfirm={() => window.electronAPI?.closeWindow()}
+                title={updateReady ? 'Cerrar e instalar actualización' : 'Cerrar el sistema'}
+                description={closeDescription}
+                confirmLabel={updateReady ? 'Cerrar e instalar' : 'Sí, cerrar'}
+                confirmVariant={updateReady ? 'primary' : 'danger'}
+            />
         </nav>
     )
 }

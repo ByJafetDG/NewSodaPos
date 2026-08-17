@@ -7,7 +7,7 @@ import { NumericPad } from '@/components/molecules/NumericPad'
 import { TotalsPanel } from '@/components/molecules/TotalsPanel'
 import { Button } from '@/components/atoms/Button'
 import { DeleteConfirmModal } from '@/components/modals/DeleteConfirmModal'
-import { Trash2, Ticket, X, CreditCard, SplitSquareHorizontal, Smartphone, Inbox, UserCircle2, Search, Banknote } from 'lucide-react'
+import { Trash2, Ticket, X, CreditCard, SplitSquareHorizontal, Smartphone, Inbox, UserCircle2, Search, Banknote, AlertTriangle } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
 
 interface ClientOption { id: string; name: string; code?: string | null }
@@ -46,6 +46,8 @@ interface PaymentPanelProps {
     invoiceClient?: { name: string; cedula: string; email: string; extraEmail?: string; existingId?: string } | null
     onOpenInvoiceModal?: () => void
     onClearInvoiceClient?: () => void
+    /** No hay caja abierta: las ventas no entrarán en el cierre. */
+    noActiveRegister?: boolean
 }
 
 export function PaymentPanel({
@@ -58,6 +60,7 @@ export function PaymentPanel({
     creditAmount, onChangeCreditAmount,
     creditClientId, onSelectCreditClient, clients = [],
     invoiceClient, onOpenInvoiceModal, onClearInvoiceClient,
+    noActiveRegister = false,
 }: PaymentPanelProps) {
     const [confirmClearDebt, setConfirmClearDebt] = useState(false)
     const [splitFocus, setSplitFocus] = useState<'sinpe' | 'cash' | 'credit'>('sinpe')
@@ -414,6 +417,24 @@ export function PaymentPanel({
                                 <X size={11} />
                             </button>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* ── Caja cerrada ─────────────────────────────
+                Vender sin caja abierta se permite, pero la venta queda sin
+                cashRegisterId y no entra en el cierre. Antes no se avisaba en
+                ningún lado: el descuadre aparecía al cerrar, sin pista del motivo. */}
+            {noActiveRegister && (
+                <div className="px-4 pb-2 shrink-0">
+                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/25">
+                        <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+                        <div className="min-w-0">
+                            <p className="text-[11px] font-semibold text-amber-300">Caja cerrada</p>
+                            <p className="text-[10px] text-amber-400/60 leading-snug">
+                                Estas ventas no entran en el cierre de caja
+                            </p>
+                        </div>
                     </div>
                 </div>
             )}

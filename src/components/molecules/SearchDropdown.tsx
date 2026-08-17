@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ShoppingCart, Package } from 'lucide-react'
 import { cn, formatCurrency, normalizeStr } from '@/lib/utils'
+import { useProductImage } from '@/hooks/useProductImage'
 import type { Product, CartItem, Category } from '@/types'
 
 interface SearchDropdownProps {
@@ -14,20 +15,10 @@ interface SearchDropdownProps {
 }
 
 function ProductThumb({ product, inCart }: { product: Product; inCart: boolean }) {
-    const [imgSrc, setImgSrc] = useState<string | null>(product.imageUrl ?? null)
+    const imgSrc = useProductImage(product.id, product.imageUrl)
     const [imgError, setImgError] = useState(false)
 
-    useEffect(() => {
-        setImgSrc(product.imageUrl ?? null)
-        setImgError(false)
-    }, [product.imageUrl])
-
-    useEffect(() => {
-        if (!product.imageUrl || !window.electronAPI) return
-        window.electronAPI.getProductLocalImage(product.id)
-            .then(local => { if (local) setImgSrc(local) })
-            .catch(() => {})
-    }, [product.id, product.imageUrl])
+    useEffect(() => { setImgError(false) }, [imgSrc])
 
     const hasImage = !!imgSrc && !imgError
 

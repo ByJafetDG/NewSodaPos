@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { invalidateProductImage } from '@/hooks/useProductImage'
 import type { Product } from '@/types'
 
 export async function getProducts(activeOnly = true): Promise<Product[]> {
@@ -131,7 +132,12 @@ export async function createProduct(input: Partial<Product>): Promise<Product> {
         }
 
         const result = { ...productInput, id, isActive: true, subcategoryIds: subcategoryIds ?? [], updatedAt: now } as unknown as Product
-        if (result.imageUrl) window.electronAPI.downloadProductImage(result.id, result.imageUrl).catch(() => {})
+        if (result.imageUrl) {
+            invalidateProductImage(result.id)
+            window.electronAPI.downloadProductImage(result.id, result.imageUrl)
+                .then(() => invalidateProductImage(result.id))
+                .catch(() => { })
+        }
         return result
     }
 
@@ -190,7 +196,12 @@ export async function updateProduct(id: string, input: Partial<Product>): Promis
             isInfinite: !!rows[0].isInfinite,
             subcategoryIds: rows[0].subcatIds ? rows[0].subcatIds.split(',') : [],
         } as unknown as Product
-        if (updated.imageUrl) window.electronAPI.downloadProductImage(updated.id, updated.imageUrl).catch(() => {})
+        if (updated.imageUrl) {
+            invalidateProductImage(updated.id)
+            window.electronAPI.downloadProductImage(updated.id, updated.imageUrl)
+                .then(() => invalidateProductImage(updated.id))
+                .catch(() => { })
+        }
         return updated
     }
 

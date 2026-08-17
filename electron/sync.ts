@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { supabase } from '../src/lib/supabase'; // We'll need to make sure this is compatible with Node.js
 import db, { query, execute, get, transaction } from './db';
+import { downloadBuffer, HttpDownloadError } from './http';
 import type {
     DbEmployeeRow, DbCategoryRow, DbCompanyRow, DbClientRow, DbProductRow,
     DbProductSubcategoryRow, DbSinpeMessageRow, DbCashRegisterRow, DbSaleRow,
@@ -12,32 +13,115 @@ import type {
 
 let windowRef: BrowserWindow | null = null;
 let isPushing = false;
+let isPulling = false;
+let pushQueued = false;
+let pullQueued = false;
 let pushDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-async function cacheProductImage(productId: string, url: string): Promise<void> {
-    const { default: https } = await import('https')
-    const { default: http } = await import('http')
-    const dir = path.join(app.getPath('userData'), 'product-images')
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    const buf = await new Promise<Buffer>((resolve, reject) => {
-        const client = url.startsWith('https') ? https : http
-        client.get(url, res => {
-            const chunks: Buffer[] = []
-            res.on('data', (c: Buffer) => chunks.push(c))
-            res.on('end', () => resolve(Buffer.concat(chunks)))
-            res.on('error', reject)
-        }).on('error', reject)
-    })
-    fs.writeFileSync(path.join(dir, `${productId}.jpg`), buf)
+/** Reintentar una URL de imagen fallida solo después de este lapso (7 días). */
+const IMAGE_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
+
+function productImagesDir(): string {
+    const dir = path.join(app.getPath('userData'), 'product-images');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return dir;
 }
 
+/**
+ * Marca una URL como muerta para no volver a pedirla en cada pull.
+ * El marcador guarda la URL: si el usuario cambia la imagen del producto, se reintenta enseguida.
+ */
+function markImageFailed(productId: string, url: string) {
+    try {
+        fs.writeFileSync(
+            path.join(productImagesDir(), `${productId}.fail`),
+            JSON.stringify({ url, at: Date.now() })
+        );
+    } catch { }
+}
+
+function shouldSkipImage(productId: string, url: string): boolean {
+    try {
+        const marker = path.join(productImagesDir(), `${productId}.fail`);
+        if (!fs.existsSync(marker)) return false;
+        const info = JSON.parse(fs.readFileSync(marker, 'utf8')) as { url?: string; at?: number };
+        if (info.url !== url) return false;               // cambió la imagen → reintentar
+        return Date.now() - (info.at ?? 0) < IMAGE_RETRY_MS;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Limpieza única del caché de imágenes.
+ *
+ * La versión anterior guardaba el cuerpo de las respuestas 404 como `${id}.jpg`; como el
+ * archivo existía, nunca se reintentaba y la miniatura quedaba rota para siempre. Esto
+ * borra los archivos que no son imágenes reales para que se vuelvan a descargar.
+ */
+function cleanupCorruptImageCache() {
+    try {
+        const done = get(`SELECT value FROM LocalConfig WHERE key = 'imageCacheCleanedAt'`) as { value?: string } | undefined;
+        if (done?.value) return;
+
+        const dir = productImagesDir();
+        let removed = 0;
+        for (const file of fs.readdirSync(dir)) {
+            if (!file.endsWith('.jpg')) continue;
+            const full = path.join(dir, file);
+            try {
+                const head = Buffer.alloc(12);
+                const fd = fs.openSync(full, 'r');
+                const bytesRead = fs.readSync(fd, head as unknown as Uint8Array, 0, 12, 0);
+                fs.closeSync(fd);
+
+                const isJpeg = head[0] === 0xFF && head[1] === 0xD8;
+                const isPng = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47;
+                const isGif = head.subarray(0, 3).toString('ascii') === 'GIF';
+                const isWebp = head.subarray(0, 4).toString('ascii') === 'RIFF';
+
+                if (bytesRead < 12 || (!isJpeg && !isPng && !isGif && !isWebp)) {
+                    fs.unlinkSync(full);
+                    removed++;
+                }
+            } catch { }
+        }
+        execute(
+            `INSERT INTO LocalConfig (key, value) VALUES ('imageCacheCleanedAt', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+            [new Date().toISOString()]
+        );
+        if (removed > 0) console.log(`[SyncEngine] Caché de imágenes: ${removed} archivo(s) inválido(s) eliminados.`);
+    } catch (err: any) {
+        console.error('[SyncEngine] cleanupCorruptImageCache:', err?.message ?? err);
+    }
+}
+
+export async function cacheProductImage(productId: string, url: string): Promise<void> {
+    const dir = productImagesDir();
+    try {
+        // requireImage + minBytes evitan guardar el cuerpo de un 404 como si fuera la foto
+        const buf = await downloadBuffer(url, { requireImage: true, minBytes: 256 });
+        fs.writeFileSync(path.join(dir, `${productId}.jpg`), buf as unknown as Uint8Array);
+        try { fs.unlinkSync(path.join(dir, `${productId}.fail`)); } catch { }
+    } catch (err: any) {
+        if (err instanceof HttpDownloadError && err.permanent) markImageFailed(productId, url);
+        throw err;
+    }
+}
+
+/**
+ * Agenda un push tras una ráfaga de escrituras.
+ *
+ * OJO: antes esta función ponía `isPushing = true` y después llamaba a `pushSync()`,
+ * que arranca con `if (isPushing) return []` — o sea, el push por evento nunca corría
+ * y todo cambio esperaba al intervalo de 15 min. Ahora `pushSync()` maneja su propia
+ * bandera y encola si está ocupado.
+ */
 export function triggerPush() {
     if (pushDebounceTimer) clearTimeout(pushDebounceTimer);
-    pushDebounceTimer = setTimeout(async () => {
-        if (isPushing) return;
-        isPushing = true;
-        try { await pushSync(); } finally { isPushing = false; }
-    }, 500);
+    pushDebounceTimer = setTimeout(() => {
+        pushSync().catch(err => logError(`triggerPush: ${err?.message ?? err}`));
+    }, 800);
 }
 
 // Supabase devuelve timestamps con espacio ('2026-05-19 15:40:xx'), SQLite los compara como strings.
@@ -89,20 +173,123 @@ function clearResolvedSyncErrors() {
 }
 
 /**
+ * Marca una fila como SYNCED **solo si sigue idéntica** al snapshot que se subió.
+ *
+ * El push lee las filas PENDING al inicio y luego hace decenas de round-trips de red.
+ * Si el usuario edita una fila durante esa ventana, marcarla SYNCED a ciegas descarta
+ * su edición: el push ya subió el valor viejo y el siguiente pull sobrescribe el nuevo.
+ * Con el guard, la fila se queda PENDING y se reintenta en el próximo ciclo.
+ *
+ * @param guard columnas del snapshot que deben coincidir (usa IS para tolerar NULL)
+ * @returns true si se marcó SYNCED, false si la fila cambió y sigue PENDING
+ */
+function markSynced(table: string, id: string, guard: Record<string, unknown> = {}): boolean {
+    const keys = Object.keys(guard);
+    const conditions = keys.map(k => `"${k}" IS ?`).join(' AND ');
+    const sql = `UPDATE "${table}" SET syncStatus = 'SYNCED' WHERE id = ?${conditions ? ` AND ${conditions}` : ''}`;
+    try {
+        const res = execute(sql, [id, ...keys.map(k => guard[k] ?? null)]) as { changes?: number };
+        const ok = (res?.changes ?? 0) > 0;
+        if (!ok) {
+            console.log(`[SyncEngine] ${table} ${id} cambió durante el push — se mantiene PENDING para reintento.`);
+        }
+        return ok;
+    } catch (err: any) {
+        logError(`markSynced ${table} ${id}: ${err?.message ?? err}`);
+        return false;
+    }
+}
+
+/** Tamaño de página del pull. PostgREST corta en 1000 filas por defecto. */
+const PAGE_SIZE = 1000;
+
+/**
+ * Trae una tabla completa de Supabase paginando.
+ *
+ * `select('*')` sin rango devuelve como máximo 1000 filas y no avisa: al pasar ese
+ * número los registros extra dejaban de sincronizar en silencio.
+ */
+async function fetchAllRows<T = any>(table: string, orderBy = 'id', columns = '*'): Promise<T[]> {
+    const rows: T[] = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+        const { data, error } = await supabase
+            .from(table)
+            .select(columns)
+            .order(orderBy, { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        rows.push(...(data as T[]));
+        if (data.length < PAGE_SIZE) break;
+    }
+    return rows;
+}
+
+/**
+ * Corre una transacción con las FK desactivadas.
+ *
+ * El pull inserta filas remotas en un orden que no respeta las FK locales, pero antes
+ * el PRAGMA se apagaba al inicio del pull y se restauraba al final: durante todos esos
+ * `await` de red, las escrituras del cajero también corrían sin FK. Ahora la ventana
+ * es solo la transacción, sin `await` en medio.
+ */
+function transactionNoFk(fn: () => void) {
+    execute('PRAGMA foreign_keys = OFF');
+    try {
+        transaction(fn);
+    } finally {
+        execute('PRAGMA foreign_keys = ON');
+    }
+}
+
+/** ¿La fila local tiene cambios sin subir? Si sí, lo remoto no la puede pisar. */
+function isPendingLocally(table: string, id: string | null | undefined): boolean {
+    if (!id) return false;
+    try {
+        const row = get(`SELECT syncStatus FROM "${table}" WHERE id = ?`, [id]) as { syncStatus?: string } | undefined;
+        return row?.syncStatus === 'PENDING';
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Aplica un cambio recibido por Realtime: transacción con FK apagadas, error contenido
+ * y aviso a la UI solo si la escritura funcionó. Antes un fallo de FK reventaba el
+ * callback del canal sin dejar rastro.
+ */
+function applyRemote(table: string, fn: () => void) {
+    try {
+        transactionNoFk(fn);
+        notifyUI(table);
+    } catch (err: any) {
+        logError(`Realtime ${table}: ${err?.message ?? err}`);
+    }
+}
+
+/**
  * Sync Engine - Handles background synchronization between SQLite and Supabase
  */
 export async function startSyncEngine(mainWindow?: BrowserWindow, readOnly = false) {
     if (mainWindow) windowRef = mainWindow;
     console.log(`[SyncEngine] Starting... ${readOnly ? '(READ-ONLY — push disabled in dev mode)' : ''}`);
 
-    // In dev/read-only mode, reset all local PENDING records to SYNCED so the
-    // initial pullSync overwrites them with Supabase data instead of preserving stale local data.
+    cleanupCorruptImageCache();
+
+    // En modo dev/read-only NO se tocan los syncStatus.
+    // Antes se reseteaba todo PENDING → SYNCED para que el pull sobrescribiera; eso
+    // borraba cambios locales reales sin aviso (la BD de dev es una copia de producción).
+    // Ahora solo se avisa cuántos quedan pendientes y sin subir.
     if (readOnly) {
         const masterTables = ['Product', 'Category', 'Client', 'Employee', 'Subcategory', 'CashRegister', 'Sale', 'Expense', 'InventoryMovement', 'Payment'];
+        let pending = 0;
         for (const t of masterTables) {
-            try { execute(`UPDATE ${t} SET syncStatus = 'SYNCED' WHERE syncStatus = 'PENDING' OR syncStatus IS NULL`, []); } catch {}
+            try {
+                const row = get(`SELECT COUNT(*) as count FROM ${t} WHERE syncStatus = 'PENDING'`, []) as { count?: number } | undefined;
+                pending += row?.count ?? 0;
+            } catch { }
         }
-        console.log('[SyncEngine] Dev mode: reset local syncStatus to SYNCED — Supabase will overwrite on pull.');
+        console.log(`[SyncEngine] Dev mode: push deshabilitado. ${pending} registro(s) local(es) quedan PENDING y se conservan.`);
     }
 
     // Resolve saleNumber conflicts: reassign pending local sales that collide with Supabase.
@@ -269,7 +456,25 @@ async function processEmailQueue() {
  * PULL SYNC: Supabase -> SQLite
  * Downloads master data (Products, Categories, Clients)
  */
-async function pullSync() {
+async function pullSync(): Promise<void> {
+    if (isPulling) return;
+    if (isPushing) {
+        pullQueued = true;
+        return;
+    }
+    isPulling = true;
+    try {
+        await _pullSync();
+    } finally {
+        isPulling = false;
+        if (pullQueued) {
+            pullQueued = false;
+            setTimeout(() => { pullSync().catch(err => logError(`pull encolado: ${err?.message ?? err}`)); }, 1000);
+        }
+    }
+}
+
+async function _pullSync() {
     console.log('[SyncEngine] Pulling updates from Supabase...');
     let lastPullAt: string | null = null;
     try {
@@ -278,36 +483,44 @@ async function pullSync() {
     } catch {}
     const pullStartedAt = new Date().toISOString();
     console.log(`[SyncEngine] Pull mode: ${lastPullAt ? `incremental (since ${lastPullAt})` : 'initial full pull'}`);
+
+    // InventoryMovement y Payment no tienen updatedAt en Supabase: su cursor es `date`, que es
+    // la fecha del hecho, no la de subida. Una terminal que estuvo sin internet sube filas con
+    // fecha vieja y quedaban por debajo del cursor de las demás — nunca las veían. Con una
+    // ventana de gracia de 7 días esas filas sí entran (son pocas filas por ciclo).
+    const dateCursorLookback = lastPullAt
+        ? new Date(Date.parse(lastPullAt) - 7 * 24 * 60 * 60 * 1000).toISOString()
+        : null;
     try {
-        execute('PRAGMA foreign_keys = OFF');
         // 1. Sync Categories
-        const { data: categories, error: catError } = await supabase.from('Category').select('*');
-        if (catError) throw catError;
+        const categories = await fetchAllRows('Category');
 
         if (categories) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const cat of categories) {
+                    // Guard PENDING: sin él, una categoría editada localmente y todavía sin
+                    // subir se perdía en el siguiente pull.
                     execute(`
-            INSERT INTO Category (id, name, type, icon, sortOrder, isActive, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO Category (id, name, type, icon, sortOrder, isActive, syncStatus, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
-              name = excluded.name,
-              type = excluded.type,
-              icon = excluded.icon,
-              sortOrder = excluded.sortOrder,
-              isActive = excluded.isActive,
-              updatedAt = excluded.updatedAt
-          `, [cat.id, cat.name, cat.type, cat.icon, cat.sortOrder, cat.isActive ? 1 : 0, cat.updatedAt]);
+              name =       CASE WHEN Category.syncStatus = 'PENDING' THEN Category.name      ELSE excluded.name      END,
+              type =       CASE WHEN Category.syncStatus = 'PENDING' THEN Category.type      ELSE excluded.type      END,
+              icon =       CASE WHEN Category.syncStatus = 'PENDING' THEN Category.icon      ELSE excluded.icon      END,
+              sortOrder =  CASE WHEN Category.syncStatus = 'PENDING' THEN Category.sortOrder ELSE excluded.sortOrder END,
+              isActive =   CASE WHEN Category.syncStatus = 'PENDING' THEN Category.isActive  ELSE excluded.isActive  END,
+              syncStatus = CASE WHEN Category.syncStatus = 'PENDING' THEN 'PENDING'          ELSE 'SYNCED'           END,
+              updatedAt =  CASE WHEN Category.syncStatus = 'PENDING' THEN Category.updatedAt ELSE excluded.updatedAt END
+          `, [cat.id, cat.name, cat.type, cat.icon, cat.sortOrder, cat.isActive ? 1 : 0, dZ(cat.updatedAt)]);
                 }
             });
         }
 
         // 2. Sync Products
-        const { data: products, error: prodError } = await supabase.from('Product').select('*');
-        if (prodError) throw prodError;
+        const products = await fetchAllRows('Product');
 
         if (products) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const prod of products) {
                     execute(`
             INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, price, cost, unit, stockQty, minStock, isActive, isInfinite, isDeleted, imageUrl, syncStatus, updatedAt)
@@ -332,22 +545,26 @@ async function pullSync() {
                 }
             });
 
-            // Download images for products missing local cache (non-blocking)
-            const imgDir = path.join(app.getPath('userData'), 'product-images')
-            for (const prod of products) {
-                if (!prod.imageUrl) continue
-                const filePath = path.join(imgDir, `${prod.id}.jpg`)
-                if (!fs.existsSync(filePath)) {
-                    cacheProductImage(prod.id, prod.imageUrl).catch(() => {})
+            // Descarga de imágenes faltantes, en serie y sin reintentar URLs muertas.
+            // Antes se disparaban decenas de descargas en paralelo en cada pull y, como no
+            // se revisaba el status, el cuerpo de un 404 quedaba guardado como .jpg.
+            void (async () => {
+                const imgDir = productImagesDir();
+                for (const prod of products) {
+                    if (!prod.imageUrl) continue;
+                    if (fs.existsSync(path.join(imgDir, `${prod.id}.jpg`))) continue;
+                    if (shouldSkipImage(prod.id, prod.imageUrl)) continue;
+                    try {
+                        await cacheProductImage(prod.id, prod.imageUrl);
+                    } catch { /* ya quedó marcada si es permanente */ }
                 }
-            }
+            })();
         }
 
         // 3. Sync Companies
-        const { data: companies, error: companyError } = await supabase.from('Company').select('*');
-        if (companyError) throw companyError;
+        const companies = await fetchAllRows('Company');
         if (companies) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const co of companies) {
                     execute(`
             INSERT INTO Company (id, name, taxId, billingEmail, phone, notes, isActive, isDeleted, deletedAt, syncStatus, updatedAt)
@@ -369,11 +586,10 @@ async function pullSync() {
         }
 
         // 3b. Sync Clients
-        const { data: clients, error: clientError } = await supabase.from('Client').select('*');
-        if (clientError) throw clientError;
+        const clients = await fetchAllRows('Client');
 
         if (clients) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const client of clients) {
                     execute(`
             INSERT INTO Client (id, name, phone, email, type, company, cedula, code, companyId, notes, isActive, isDeleted, deletedAt, syncStatus, updatedAt)
@@ -399,10 +615,9 @@ async function pullSync() {
         }
 
         // 4. Sync Expense Categories
-        const { data: expCats, error: expCatError } = await supabase.from('ExpenseCategory').select('*');
-        if (expCatError) throw expCatError;
+        const expCats = await fetchAllRows('ExpenseCategory');
         if (expCats) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const cat of expCats) {
                     execute(`
             INSERT INTO ExpenseCategory (id, name, createdAt)
@@ -414,10 +629,9 @@ async function pullSync() {
         }
 
         // 5. Sync Business Config
-        const { data: configs, error: configError } = await supabase.from('BusinessConfig').select('*');
-        if (configError) throw configError;
+        const configs = await fetchAllRows('BusinessConfig');
         if (configs) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const conf of configs) {
                     execute(`
             INSERT INTO BusinessConfig (id, name, address, phone, ticketHeader, ticketFooter, printerPort, printerModel, drawerEnabled, syncStatus, updatedAt)
@@ -439,62 +653,70 @@ async function pullSync() {
         }
 
         // 6. Sync Employees
-        const { data: employees, error: empError } = await supabase.from('Employee').select('*');
-        if (empError) throw empError;
+        const employees = await fetchAllRows('Employee');
         if (employees) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const emp of employees) {
-                    // We only overwrite monthlySales from remote if local is already SYNCED
-                    // to avoid local increments being lost before they push
+                    // Guard PENDING completo: antes name/role/pin se sobrescribían siempre y
+                    // un empleado editado localmente volvía a su versión remota.
                     execute(`
             INSERT INTO Employee (id, name, role, pin, isActive, monthlySales, lastResetMonth, syncStatus, updatedAt)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
-              name = excluded.name,
-              role = excluded.role,
-              pin = excluded.pin,
-              isActive = excluded.isActive,
-              monthlySales = CASE WHEN syncStatus = 'SYNCED' THEN excluded.monthlySales ELSE monthlySales END,
-              lastResetMonth = CASE WHEN syncStatus = 'SYNCED' THEN excluded.lastResetMonth ELSE lastResetMonth END,
-              syncStatus = 'SYNCED',
-              updatedAt = excluded.updatedAt
-          `, [emp.id, emp.name, emp.role, emp.pin, emp.isActive ? 1 : 0, emp.monthlySales || 0, emp.lastResetMonth, emp.updatedAt]);
-                }
-            });
-        }
-        // 7. Sync ProductSubcategory junction table
-        const { data: productSubcats, error: psError } = await supabase.from('ProductSubcategory').select('*');
-        if (psError) throw psError;
-        if (productSubcats) {
-            transaction(() => {
-                execute('DELETE FROM ProductSubcategory', []);
-                for (const ps of productSubcats) {
-                    execute(
-                        'INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId) VALUES (?, ?)',
-                        [ps.productId, ps.subcategoryId]
-                    );
+              name =           CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.name           ELSE excluded.name           END,
+              role =           CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.role           ELSE excluded.role           END,
+              pin =            CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.pin            ELSE excluded.pin            END,
+              isActive =       CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.isActive       ELSE excluded.isActive       END,
+              monthlySales =   CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.monthlySales   ELSE excluded.monthlySales   END,
+              lastResetMonth = CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.lastResetMonth ELSE excluded.lastResetMonth END,
+              syncStatus =     CASE WHEN Employee.syncStatus = 'PENDING' THEN 'PENDING'               ELSE 'SYNCED'                END,
+              updatedAt =      CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.updatedAt      ELSE excluded.updatedAt      END
+          `, [emp.id, emp.name, emp.role, emp.pin, emp.isActive ? 1 : 0, emp.monthlySales || 0, emp.lastResetMonth, dZ(emp.updatedAt)]);
                 }
             });
         }
 
-        // 8. Sync Subcategories (referenced by Product)
-        const { data: subcategories, error: subError } = await supabase.from('Subcategory').select('*');
-        if (subError) throw subError;
+        // 7. Sync Subcategories (referenciadas por Product y ProductSubcategory)
+        const subcategories = await fetchAllRows('Subcategory');
         if (subcategories) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const sub of subcategories) {
                     execute(`
                         INSERT INTO Subcategory (id, categoryId, name, showDays, sortOrder, isActive, syncStatus, updatedAt)
                         VALUES (?, ?, ?, ?, ?, ?, 'SYNCED', ?)
                         ON CONFLICT(id) DO UPDATE SET
-                          categoryId = excluded.categoryId,
-                          name = excluded.name,
-                          showDays = excluded.showDays,
-                          sortOrder = excluded.sortOrder,
-                          isActive = excluded.isActive,
-                          syncStatus = 'SYNCED',
-                          updatedAt = excluded.updatedAt
-                    `, [sub.id, sub.categoryId, sub.name, sub.showDays ?? null, sub.sortOrder, sub.isActive ? 1 : 0, sub.updatedAt]);
+                          categoryId = CASE WHEN Subcategory.syncStatus = 'PENDING' THEN Subcategory.categoryId ELSE excluded.categoryId END,
+                          name =       CASE WHEN Subcategory.syncStatus = 'PENDING' THEN Subcategory.name       ELSE excluded.name       END,
+                          showDays =   CASE WHEN Subcategory.syncStatus = 'PENDING' THEN Subcategory.showDays   ELSE excluded.showDays   END,
+                          sortOrder =  CASE WHEN Subcategory.syncStatus = 'PENDING' THEN Subcategory.sortOrder  ELSE excluded.sortOrder  END,
+                          isActive =   CASE WHEN Subcategory.syncStatus = 'PENDING' THEN Subcategory.isActive   ELSE excluded.isActive   END,
+                          syncStatus = CASE WHEN Subcategory.syncStatus = 'PENDING' THEN 'PENDING'              ELSE 'SYNCED'            END,
+                          updatedAt =  CASE WHEN Subcategory.syncStatus = 'PENDING' THEN Subcategory.updatedAt  ELSE excluded.updatedAt  END
+                    `, [sub.id, sub.categoryId, sub.name, sub.showDays ?? null, sub.sortOrder, sub.isActive ? 1 : 0, dZ(sub.updatedAt)]);
+                }
+            });
+        }
+
+        // 8. Sync ProductSubcategory junction table
+        //
+        // Antes: DELETE FROM ProductSubcategory + reinsertar todo lo remoto. Eso borraba
+        // las asignaciones de productos que todavía no se habían subido, y el push posterior
+        // leía la tabla local ya vacía y borraba también las filas remotas (pérdida en ambos
+        // lados). Ahora los productos PENDING quedan intactos: son la versión autoritativa
+        // hasta que suban.
+        const productSubcats = await fetchAllRows('ProductSubcategory', 'productId');
+        if (productSubcats) {
+            transactionNoFk(() => {
+                const pendingRows = query(`SELECT id FROM Product WHERE syncStatus = 'PENDING'`) as { id: string }[];
+                const pendingIds = new Set(pendingRows.map(r => r.id));
+
+                execute(`DELETE FROM ProductSubcategory WHERE productId NOT IN (SELECT id FROM Product WHERE syncStatus = 'PENDING')`, []);
+                for (const ps of productSubcats) {
+                    if (pendingIds.has(ps.productId)) continue; // no pisar asignaciones locales sin subir
+                    execute(
+                        'INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId) VALUES (?, ?)',
+                        [ps.productId, ps.subcategoryId]
+                    );
                 }
             });
         }
@@ -506,7 +728,7 @@ async function pullSync() {
         const { data: registers, error: regError } = await cashRegQuery;
         if (regError) throw regError;
         if (registers) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const reg of registers) {
                     const localReg = get('SELECT syncStatus FROM CashRegister WHERE id = ?', [reg.id]) as { syncStatus: string } | undefined;
                     if (localReg?.syncStatus === 'PENDING') continue;
@@ -545,6 +767,7 @@ async function pullSync() {
                     // Skip if local sale is PENDING (not yet pushed) — avoid overwriting unsynced local changes
                     const localSale = get('SELECT syncStatus FROM Sale WHERE id = ?', [sale.id]) as { syncStatus: string } | undefined
                     if (localSale?.syncStatus === 'PENDING') continue
+                    transactionNoFk(() => {
                     // Supabase es autoritativo en pull — eliminar venta local con mismo saleNumber pero distinto id
                     execute(`DELETE FROM SaleItem WHERE saleId IN (SELECT id FROM Sale WHERE saleNumber = ? AND id != ?)`, [sale.saleNumber, sale.id]);
                     execute(`DELETE FROM Sale WHERE saleNumber = ? AND id != ?`, [sale.saleNumber, sale.id]);
@@ -577,6 +800,7 @@ async function pullSync() {
                             amount2 = excluded.amount2,
                             settledSaleIds = excluded.settledSaleIds
                     `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, dZ(sale.updatedAt), sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null, sale.settledSaleIds ?? null]);
+                    });
                 } catch (e) {
                     console.error(`[SyncEngine] Sale pull ${sale.id} (#${sale.saleNumber}):`, e);
                 }
@@ -592,7 +816,7 @@ async function pullSync() {
             if (chunkItems) allSaleItems.push(...chunkItems);
         }
         if (allSaleItems.length > 0) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const item of allSaleItems) {
                     execute(`
                         INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes)
@@ -616,8 +840,10 @@ async function pullSync() {
         const { data: expenses, error: expError } = await expQuery;
         if (expError && expError.code !== 'PGRST205') throw expError;
         if (expenses) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const exp of expenses) {
+                    const localExp = get('SELECT syncStatus FROM Expense WHERE id = ?', [exp.id]) as { syncStatus: string } | undefined;
+                    if (localExp?.syncStatus === 'PENDING') continue;
                     execute(`
                         INSERT INTO Expense (id, description, amount, categoryId, supplier, date, notes, cashRegisterId, syncStatus, updatedAt)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
@@ -638,13 +864,15 @@ async function pullSync() {
 
         // 12. Sync InventoryMovements (depends on Product)
         let movQuery = supabase.from('InventoryMovement').select('*').order('date', { ascending: false });
-        if (lastPullAt) movQuery = movQuery.gt('date', lastPullAt);
+        if (dateCursorLookback) movQuery = movQuery.gt('date', dateCursorLookback).limit(2000);
         else movQuery = movQuery.limit(2000);
         const { data: movements, error: movError } = await movQuery;
         if (movError) throw movError;
         if (movements) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const mov of movements) {
+                    const localMov = get('SELECT syncStatus FROM InventoryMovement WHERE id = ?', [mov.id]) as { syncStatus: string } | undefined;
+                    if (localMov?.syncStatus === 'PENDING') continue;
                     execute(`
                         INSERT INTO InventoryMovement (id, productId, type, quantity, cost, reference, notes, date, syncStatus)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED')
@@ -664,13 +892,15 @@ async function pullSync() {
 
         // 13. Sync Payments (depends on Client)
         let payQuery = supabase.from('Payment').select('*').order('date', { ascending: false });
-        if (lastPullAt) payQuery = payQuery.gt('date', lastPullAt);
+        if (dateCursorLookback) payQuery = payQuery.gt('date', dateCursorLookback).limit(1000);
         else payQuery = payQuery.limit(1000);
         const { data: payments, error: payError } = await payQuery;
         if (payError) throw payError;
         if (payments) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const pay of payments) {
+                    const localPay = get('SELECT syncStatus FROM Payment WHERE id = ?', [pay.id]) as { syncStatus: string } | undefined;
+                    if (localPay?.syncStatus === 'PENDING') continue;
                     execute(`
                         INSERT INTO Payment (id, clientId, amount, method, reference, notes, date, syncStatus)
                         VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED')
@@ -694,7 +924,7 @@ async function pullSync() {
         const { data: sorteos, error: sorteoError } = await supabase.from('Sorteo').select('*');
         if (sorteoError && sorteoError.code !== 'PGRST205') throw sorteoError;
         if (sorteos) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const s of sorteos) {
                     execute(`
                         INSERT INTO Sorteo (id, name, type, status, startAt, endAt, minSpinsBetweenPrizes,
@@ -735,8 +965,10 @@ async function pullSync() {
         const { data: tombolaEntries, error: tombolaError } = await supabase.from('TombolaEntry').select('*').order('createdAt', { ascending: false }).limit(5000);
         if (tombolaError && tombolaError.code !== 'PGRST205') throw tombolaError;
         if (tombolaEntries) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const entry of tombolaEntries) {
+                    const localEntry = get('SELECT syncStatus FROM TombolaEntry WHERE id = ?', [entry.id]) as { syncStatus: string } | undefined;
+                    if (localEntry?.syncStatus === 'PENDING') continue;
                     execute(`
                         INSERT INTO TombolaEntry (id, sorteoId, number, participantName, participantCedula,
                             participantEmail, paymentMethod, price, saleRegisteredAt, isWinner, prizePosition,
@@ -765,7 +997,7 @@ async function pullSync() {
         const { data: returns, error: returnsError } = await supabase.from('Return').select('*, items:ReturnItem(*)').order('date', { ascending: false }).limit(500);
         if (returnsError && returnsError.code !== 'PGRST205') throw returnsError;
         if (returns) {
-            transaction(() => {
+            transactionNoFk(() => {
                 for (const ret of returns) {
                     const localRet = get('SELECT syncStatus FROM "Return" WHERE id = ?', [ret.id]) as { syncStatus: string } | undefined;
                     if (localRet?.syncStatus === 'PENDING') continue;
@@ -826,9 +1058,9 @@ async function pullSync() {
         }
     } catch (err) {
         console.error('[SyncEngine] Pull failed:', err);
-    } finally {
-        execute('PRAGMA foreign_keys = ON');
+        logError(`Pull falló: ${(err as any)?.message ?? err}`);
     }
+    // Las FK ya no se apagan globalmente: cada transacción del pull usa transactionNoFk().
 }
 
 export async function pullSinpeMessages(): Promise<void> {
@@ -859,9 +1091,22 @@ export async function pullSinpeMessages(): Promise<void> {
  * Uploads transactional data (Sales, Expenses, Movements)
  */
 export async function pushSync(): Promise<string[]> {
-    if (isPushing) return [];
+    // Push y pull nunca corren a la vez: el pull traía datos remotos viejos y los
+    // aplicaba encima de filas que el push acababa de marcar SYNCED.
+    if (isPushing || isPulling) {
+        pushQueued = true;
+        return [];
+    }
     isPushing = true;
-    try { return await _pushSync(); } finally { isPushing = false; }
+    try {
+        return await _pushSync();
+    } finally {
+        isPushing = false;
+        if (pushQueued) {
+            pushQueued = false;
+            setTimeout(() => { pushSync().catch(err => logError(`push encolado: ${err?.message ?? err}`)); }, 1000);
+        }
+    }
 }
 
 async function _pushSync(): Promise<string[]> {
@@ -911,10 +1156,15 @@ async function _pushSync(): Promise<string[]> {
                 notes: reg.notes,
                 status: reg.status,
                 syncStatus: 'SYNCED',
+                // CashRegister/Sale/Expense se bajan de forma incremental con
+                // .gt('updatedAt', lastPullAt): acá updatedAt es el CURSOR de sincronización,
+                // así que debe ser la hora de subida. Si mandáramos el updatedAt real, una
+                // caja subida tarde (terminal que estuvo sin internet) quedaría por debajo
+                // del cursor de las otras terminales y nunca la verían.
                 updatedAt: new Date().toISOString()
             });
             if (error) throw error;
-            execute(`UPDATE CashRegister SET syncStatus = 'SYNCED' WHERE id = ?`, [reg.id]);
+            markSynced('CashRegister', reg.id, { updatedAt: reg.updatedAt });
         } catch (err: any) {
             const msg = `CashRegister ${reg.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -934,10 +1184,10 @@ async function _pushSync(): Promise<string[]> {
                 isActive: !!emp.isActive,
                 monthlySales: emp.monthlySales,
                 lastResetMonth: emp.lastResetMonth,
-                updatedAt: new Date().toISOString()
+                updatedAt: emp.updatedAt ?? new Date().toISOString()
             });
             if (error) throw error;
-            execute(`UPDATE Employee SET syncStatus = 'SYNCED' WHERE id = ?`, [emp.id]);
+            markSynced('Employee', emp.id, { updatedAt: emp.updatedAt });
         } catch (err: any) {
             const msg = `Employee ${emp.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -960,10 +1210,10 @@ async function _pushSync(): Promise<string[]> {
                 isDeleted: !!co.isDeleted,
                 deletedAt: co.deletedAt ?? null,
                 syncStatus: 'SYNCED',
-                updatedAt: new Date().toISOString(),
+                updatedAt: co.updatedAt ?? new Date().toISOString(),
             });
             if (error) throw error;
-            execute(`UPDATE Company SET syncStatus = 'SYNCED' WHERE id = ?`, [co.id]);
+            markSynced('Company', co.id, { updatedAt: co.updatedAt });
         } catch (err: any) {
             const msg = `Company ${co.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -990,10 +1240,10 @@ async function _pushSync(): Promise<string[]> {
                 isDeleted: !!client.isDeleted,
                 deletedAt: client.deletedAt ?? null,
                 syncStatus: 'SYNCED',
-                updatedAt: new Date().toISOString()
+                updatedAt: client.updatedAt ?? new Date().toISOString()
             });
             if (error) throw error;
-            execute(`UPDATE Client SET syncStatus = 'SYNCED' WHERE id = ?`, [client.id]);
+            markSynced('Client', client.id, { updatedAt: client.updatedAt });
         } catch (err: any) {
             const msg = `Client ${client.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1012,10 +1262,10 @@ async function _pushSync(): Promise<string[]> {
                 icon: cat.icon,
                 sortOrder: cat.sortOrder,
                 isActive: !!cat.isActive,
-                updatedAt: new Date().toISOString()
+                updatedAt: cat.updatedAt ?? new Date().toISOString()
             });
             if (error) throw error;
-            execute(`UPDATE Category SET syncStatus = 'SYNCED' WHERE id = ?`, [cat.id]);
+            markSynced('Category', cat.id, { updatedAt: cat.updatedAt });
         } catch (err: any) {
             const msg = `Category ${cat.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1037,10 +1287,10 @@ async function _pushSync(): Promise<string[]> {
                 printerPort: conf.printerPort,
                 printerModel: conf.printerModel,
                 drawerEnabled: !!conf.drawerEnabled,
-                updatedAt: new Date().toISOString()
+                updatedAt: conf.updatedAt ?? new Date().toISOString()
             });
             if (error) throw error;
-            execute(`UPDATE BusinessConfig SET syncStatus = 'SYNCED' WHERE id = ?`, [conf.id]);
+            markSynced('BusinessConfig', conf.id, { updatedAt: conf.updatedAt });
         } catch (err: any) {
             const msg = `BusinessConfig ${conf.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1060,10 +1310,10 @@ async function _pushSync(): Promise<string[]> {
                 sortOrder: sub.sortOrder,
                 isActive: !!sub.isActive,
                 syncStatus: 'SYNCED',
-                updatedAt: new Date().toISOString()
+                updatedAt: sub.updatedAt ?? new Date().toISOString()
             });
             if (error) throw error;
-            execute(`UPDATE Subcategory SET syncStatus = 'SYNCED' WHERE id = ?`, [sub.id]);
+            markSynced('Subcategory', sub.id, { updatedAt: sub.updatedAt });
         } catch (err: any) {
             const msg = `Subcategory ${sub.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1095,38 +1345,34 @@ async function _pushSync(): Promise<string[]> {
                 isDeleted: !!prod.isDeleted,
                 imageUrl: prod.imageUrl,
                 syncStatus: 'SYNCED',
-                updatedAt: new Date().toISOString()
+                updatedAt: prod.updatedAt ?? new Date().toISOString()
             });
             if (error) throw error;
-            execute(`UPDATE Product SET syncStatus = 'SYNCED' WHERE id = ?`, [prod.id]);
+            markSynced('Product', prod.id, { updatedAt: prod.updatedAt });
         } catch (err: any) {
             const errMsg: string = err?.message ?? String(err);
             if (errMsg.includes('Product_barcode_key')) {
-                // Barcode conflict — null it out locally and retry without it
-                execute(`UPDATE Product SET barcode = NULL WHERE id = ?`, [prod.id]);
+                // Conflicto de barcode: NO se borra el código del producto.
+                // Antes se hacía `UPDATE Product SET barcode = NULL` y se subía así — el
+                // cajero escaneaba y "el producto no existía". Ahora queda PENDING, se
+                // reporta en Ajustes → Sincronización y el usuario decide qué código va.
+                let owner = '';
                 try {
-                    const { error: retryErr } = await supabase.from('Product').upsert({
-                        id: prod.id, name: prod.name, barcode: null,
-                        categoryId: prod.categoryId, subcategoryId: prod.subcategoryId ?? null,
-                        price: prod.price, cost: prod.cost, unit: prod.unit,
-                        stockQty: prod.stockQty, minStock: prod.minStock,
-                        isActive: !!prod.isActive, isInfinite: !!prod.isInfinite,
-                        isDeleted: !!prod.isDeleted, imageUrl: prod.imageUrl,
-                        updatedAt: new Date().toISOString()
-                    });
-                    if (retryErr) throw retryErr;
-                    execute(`UPDATE Product SET syncStatus = 'SYNCED' WHERE id = ?`, [prod.id]);
-                    const barcodeMsg = `"${prod.name}": barcode duplicado — eliminado automáticamente`;
-                    console.log(`[SyncEngine] Product ${prod.id} (${prod.name}): barcode conflict resolved, barcode cleared.`);
-                    persistSyncError('Product', prod.id, barcodeMsg);
-                    if (windowRef && !windowRef.isDestroyed()) {
-                        windowRef.webContents.send('sync-barcode-conflict', { productId: prod.id, productName: prod.name });
+                    if (prod.barcode) {
+                        const { data: conflict } = await supabase
+                            .from('Product')
+                            .select('id, name')
+                            .eq('barcode', prod.barcode)
+                            .maybeSingle();
+                        if (conflict && conflict.id !== prod.id) owner = ` (ya lo usa "${conflict.name}")`;
                     }
-                } catch (retryErr: any) {
-                    const msg = `Product ${prod.id} (${prod.name}) retry: ${retryErr?.message ?? retryErr}`;
-                    logError(msg);
-                    errors.push(msg);
-                    persistSyncError('Product', prod.id, msg);
+                } catch { }
+                const barcodeMsg = `"${prod.name}": el código de barras ${prod.barcode ?? ''} está duplicado${owner}. Cambialo para que el producto pueda sincronizar.`;
+                logError(barcodeMsg);
+                errors.push(barcodeMsg);
+                persistSyncError('Product', prod.id, barcodeMsg);
+                if (windowRef && !windowRef.isDestroyed()) {
+                    windowRef.webContents.send('sync-barcode-conflict', { productId: prod.id, productName: prod.name });
                 }
             } else {
                 const msg = `Product ${prod.id} (${prod.name}): ${errMsg}`;
@@ -1136,17 +1382,24 @@ async function _pushSync(): Promise<string[]> {
             }
             continue;
         }
-        // Sync ProductSubcategory for this product
+        // Sync ProductSubcategory for this product.
+        // Se relee la tabla local justo antes de subir; si el usuario cambió las
+        // subcategorías durante el push, markSynced ya dejó el producto PENDING y el
+        // próximo ciclo vuelve a subir el set correcto.
         try {
             const subcatRows = query('SELECT subcategoryId FROM ProductSubcategory WHERE productId = ?', [prod.id]) as { subcategoryId: string }[];
             await supabase.from('ProductSubcategory').delete().eq('productId', prod.id);
             if (subcatRows.length > 0) {
-                await supabase.from('ProductSubcategory').insert(
+                const { error: insErr } = await supabase.from('ProductSubcategory').insert(
                     subcatRows.map(r => ({ productId: prod.id, subcategoryId: r.subcategoryId }))
                 );
+                if (insErr) throw insErr;
             }
         } catch (subErr: any) {
-            logError(`ProductSubcategory for ${prod.id}: ${subErr?.message ?? subErr}`);
+            const msg = `ProductSubcategory ${prod.id}: ${subErr?.message ?? subErr}`;
+            logError(msg);
+            errors.push(msg);
+            persistSyncError('Product', prod.id, msg);
         }
     }
 
@@ -1170,6 +1423,7 @@ async function _pushSync(): Promise<string[]> {
                 status: sale.status,
                 notes: sale.notes,
                 syncStatus: 'SYNCED',
+                // Cursor de sincronización (ver nota en CashRegister), no marca de edición.
                 updatedAt: new Date().toISOString(),
                 companyId: sale.companyId ?? null,
                 consumerName: sale.consumerName ?? null,
@@ -1198,7 +1452,9 @@ async function _pushSync(): Promise<string[]> {
                 });
                 if (itemError) throw itemError;
             }
-            execute(`UPDATE Sale SET syncStatus = 'SYNCED' WHERE id = ?`, [sale.id]);
+            // Toda mutación de venta (anular, editar en sitio, saldar) toca updatedAt,
+            // así que el guard también cubre cambios en los SaleItem.
+            markSynced('Sale', sale.id, { updatedAt: sale.updatedAt });
         } catch (err: any) {
             const msg = `Sale ${sale.id} (#${sale.saleNumber}): ${err?.message ?? err}`;
             logError(msg);
@@ -1219,10 +1475,11 @@ async function _pushSync(): Promise<string[]> {
                 date: exp.date,
                 notes: exp.notes,
                 cashRegisterId: exp.cashRegisterId,
+                // Cursor de sincronización (ver nota en CashRegister), no marca de edición.
                 updatedAt: new Date().toISOString()
             });
             if (error) throw error;
-            execute(`UPDATE Expense SET syncStatus = 'SYNCED' WHERE id = ?`, [exp.id]);
+            markSynced('Expense', exp.id, { updatedAt: exp.updatedAt });
         } catch (err: any) {
             const msg = `Expense ${exp.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1246,7 +1503,8 @@ async function _pushSync(): Promise<string[]> {
                 syncStatus: 'SYNCED'
             });
             if (error) throw error;
-            execute(`UPDATE InventoryMovement SET syncStatus = 'SYNCED' WHERE id = ?`, [mov.id]);
+            // InventoryMovement no tiene updatedAt: se compara lo mutable (quantity/cost/notes).
+            markSynced('InventoryMovement', mov.id, { quantity: mov.quantity, cost: mov.cost, notes: mov.notes });
         } catch (err: any) {
             const msg = `InventoryMovement ${mov.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1269,7 +1527,7 @@ async function _pushSync(): Promise<string[]> {
                 syncStatus: 'SYNCED'
             });
             if (error) throw error;
-            execute(`UPDATE Payment SET syncStatus = 'SYNCED' WHERE id = ?`, [pay.id]);
+            markSynced('Payment', pay.id, { amount: pay.amount, method: pay.method, notes: pay.notes });
         } catch (err: any) {
             const msg = `Payment ${pay.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1290,7 +1548,7 @@ async function _pushSync(): Promise<string[]> {
                 deletedAt: msg.deletedAt ?? null,
             });
             if (error) throw error;
-            execute(`UPDATE SinpeMessage SET syncStatus = 'SYNCED' WHERE id = ?`, [msg.id]);
+            markSynced('SinpeMessage', msg.id, { isRead: msg.isRead, deletedAt: msg.deletedAt });
         } catch (err: any) {
             const m = `SinpeMessage ${msg.id}: ${err?.message ?? err}`;
             logError(m);
@@ -1321,10 +1579,10 @@ async function _pushSync(): Promise<string[]> {
                 drawDate: s.drawDate ?? null,
                 tombPrizes: s.tombPrizes ?? null,
                 syncStatus: 'SYNCED',
-                updatedAt: new Date().toISOString(),
+                updatedAt: s.updatedAt ?? new Date().toISOString(),
             });
             if (error) throw error;
-            execute(`UPDATE Sorteo SET syncStatus = 'SYNCED' WHERE id = ?`, [s.id]);
+            markSynced('Sorteo', s.id, { updatedAt: s.updatedAt });
         } catch (err: any) {
             const msg = `Sorteo ${s.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1349,10 +1607,10 @@ async function _pushSync(): Promise<string[]> {
                 isWinner: !!entry.isWinner,
                 prizePosition: entry.prizePosition ?? null,
                 syncStatus: 'SYNCED',
-                updatedAt: new Date().toISOString(),
+                updatedAt: entry.updatedAt ?? new Date().toISOString(),
             });
             if (error) throw error;
-            execute(`UPDATE TombolaEntry SET syncStatus = 'SYNCED' WHERE id = ?`, [entry.id]);
+            markSynced('TombolaEntry', entry.id, { updatedAt: entry.updatedAt });
         } catch (err: any) {
             const msg = `TombolaEntry ${entry.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1377,7 +1635,7 @@ async function _pushSync(): Promise<string[]> {
                 date: ret.date,
                 syncStatus: 'SYNCED',
                 createdAt: ret.createdAt,
-                updatedAt: new Date().toISOString(),
+                updatedAt: ret.updatedAt ?? new Date().toISOString(),
             });
             if (retError) throw retError;
             await supabase.from('ReturnItem').delete().eq('returnId', ret.id);
@@ -1393,7 +1651,7 @@ async function _pushSync(): Promise<string[]> {
                 });
                 if (itemError) throw itemError;
             }
-            execute(`UPDATE "Return" SET syncStatus = 'SYNCED' WHERE id = ?`, [ret.id]);
+            markSynced('Return', ret.id, { updatedAt: ret.updatedAt });
         } catch (err: any) {
             const msg = `Return ${ret.id}: ${err?.message ?? err}`;
             logError(msg);
@@ -1421,22 +1679,21 @@ function setupRealtimeSubscriptions() {
             if (!emp || !emp.id) return;
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-                transaction(() => {
+                applyRemote('Employee', () => {
                     execute(`
             INSERT INTO Employee (id, name, role, pin, isActive, monthlySales, lastResetMonth, syncStatus, updatedAt)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
             ON CONFLICT(id) DO UPDATE SET
-              name = excluded.name,
-              role = excluded.role,
-              pin = excluded.pin,
-              isActive = excluded.isActive,
-              monthlySales = CASE WHEN syncStatus = 'SYNCED' THEN excluded.monthlySales ELSE monthlySales END,
-              lastResetMonth = CASE WHEN syncStatus = 'SYNCED' THEN excluded.lastResetMonth ELSE lastResetMonth END,
-              syncStatus = 'SYNCED',
-              updatedAt = excluded.updatedAt
-          `, [emp.id, emp.name, emp.role, emp.pin, emp.isActive ? 1 : 0, emp.monthlySales || 0, emp.lastResetMonth, emp.updatedAt]);
+              name =           CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.name           ELSE excluded.name           END,
+              role =           CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.role           ELSE excluded.role           END,
+              pin =            CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.pin            ELSE excluded.pin            END,
+              isActive =       CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.isActive       ELSE excluded.isActive       END,
+              monthlySales =   CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.monthlySales   ELSE excluded.monthlySales   END,
+              lastResetMonth = CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.lastResetMonth ELSE excluded.lastResetMonth END,
+              syncStatus =     CASE WHEN Employee.syncStatus = 'PENDING' THEN 'PENDING'               ELSE 'SYNCED'                END,
+              updatedAt =      CASE WHEN Employee.syncStatus = 'PENDING' THEN Employee.updatedAt      ELSE excluded.updatedAt      END
+          `, [emp.id, emp.name, emp.role, emp.pin, emp.isActive ? 1 : 0, emp.monthlySales || 0, emp.lastResetMonth, dZ(emp.updatedAt)]);
                 });
-                notifyUI('Employee');
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Category' }, (payload) => {
@@ -1445,37 +1702,40 @@ function setupRealtimeSubscriptions() {
             if (!cat || !cat.id) return;
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-                execute(`
-          INSERT INTO Category (id, name, type, icon, sortOrder, isActive, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+                applyRemote('Category', () => {
+                    execute(`
+          INSERT INTO Category (id, name, type, icon, sortOrder, isActive, syncStatus, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, 'SYNCED', ?)
           ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            type = excluded.type,
-            icon = excluded.icon,
-            sortOrder = excluded.sortOrder,
-            isActive = excluded.isActive,
-            updatedAt = excluded.updatedAt
-        `, [cat.id, cat.name, cat.type, cat.icon, cat.sortOrder, cat.isActive ? 1 : 0, cat.updatedAt]);
-                notifyUI('Category');
+            name =       CASE WHEN Category.syncStatus = 'PENDING' THEN Category.name      ELSE excluded.name      END,
+            type =       CASE WHEN Category.syncStatus = 'PENDING' THEN Category.type      ELSE excluded.type      END,
+            icon =       CASE WHEN Category.syncStatus = 'PENDING' THEN Category.icon      ELSE excluded.icon      END,
+            sortOrder =  CASE WHEN Category.syncStatus = 'PENDING' THEN Category.sortOrder ELSE excluded.sortOrder END,
+            isActive =   CASE WHEN Category.syncStatus = 'PENDING' THEN Category.isActive  ELSE excluded.isActive  END,
+            syncStatus = CASE WHEN Category.syncStatus = 'PENDING' THEN 'PENDING'          ELSE 'SYNCED'           END,
+            updatedAt =  CASE WHEN Category.syncStatus = 'PENDING' THEN Category.updatedAt ELSE excluded.updatedAt END
+        `, [cat.id, cat.name, cat.type, cat.icon, cat.sortOrder, cat.isActive ? 1 : 0, dZ(cat.updatedAt)]);
+                });
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Company' }, (payload) => {
             const co = payload.new as DbCompanyRow;
             if (!co?.id) return;
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-                execute(`
+                applyRemote('Company', () => {
+                    execute(`
           INSERT INTO Company (id, name, billingEmail, phone, notes, isActive, syncStatus, updatedAt)
           VALUES (?, ?, ?, ?, ?, ?, 'SYNCED', ?)
           ON CONFLICT(id) DO UPDATE SET
-            name =         excluded.name,
-            billingEmail = excluded.billingEmail,
-            phone =        excluded.phone,
-            notes =        excluded.notes,
-            isActive =     excluded.isActive,
-            syncStatus =   'SYNCED',
-            updatedAt =    excluded.updatedAt
+            name =         CASE WHEN Company.syncStatus = 'PENDING' THEN Company.name         ELSE excluded.name         END,
+            billingEmail = CASE WHEN Company.syncStatus = 'PENDING' THEN Company.billingEmail ELSE excluded.billingEmail END,
+            phone =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.phone        ELSE excluded.phone        END,
+            notes =        CASE WHEN Company.syncStatus = 'PENDING' THEN Company.notes        ELSE excluded.notes        END,
+            isActive =     CASE WHEN Company.syncStatus = 'PENDING' THEN Company.isActive     ELSE excluded.isActive     END,
+            syncStatus =   CASE WHEN Company.syncStatus = 'PENDING' THEN 'PENDING'            ELSE 'SYNCED'              END,
+            updatedAt =    CASE WHEN Company.syncStatus = 'PENDING' THEN Company.updatedAt    ELSE excluded.updatedAt    END
         `, [co.id, co.name, co.billingEmail ?? null, co.phone ?? null, co.notes ?? null, co.isActive ? 1 : 0, dZ(co.updatedAt)]);
-                notifyUI('Company');
+                });
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Client' }, (payload) => {
@@ -1484,24 +1744,25 @@ function setupRealtimeSubscriptions() {
             if (!client || !client.id) return;
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-                execute(`
+                applyRemote('Client', () => {
+                    execute(`
           INSERT INTO Client (id, name, phone, email, type, company, cedula, code, companyId, notes, isActive, syncStatus, updatedAt)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
           ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            phone = excluded.phone,
-            email = excluded.email,
-            type = excluded.type,
-            company = excluded.company,
-            cedula = excluded.cedula,
-            code = excluded.code,
-            companyId = excluded.companyId,
-            notes = excluded.notes,
-            isActive = excluded.isActive,
-            syncStatus = 'SYNCED',
-            updatedAt = excluded.updatedAt
+            name =       CASE WHEN Client.syncStatus = 'PENDING' THEN Client.name      ELSE excluded.name      END,
+            phone =      CASE WHEN Client.syncStatus = 'PENDING' THEN Client.phone     ELSE excluded.phone     END,
+            email =      CASE WHEN Client.syncStatus = 'PENDING' THEN Client.email     ELSE excluded.email     END,
+            type =       CASE WHEN Client.syncStatus = 'PENDING' THEN Client.type      ELSE excluded.type      END,
+            company =    CASE WHEN Client.syncStatus = 'PENDING' THEN Client.company   ELSE excluded.company   END,
+            cedula =     CASE WHEN Client.syncStatus = 'PENDING' THEN Client.cedula    ELSE excluded.cedula    END,
+            code =       CASE WHEN Client.syncStatus = 'PENDING' THEN Client.code      ELSE excluded.code      END,
+            companyId =  CASE WHEN Client.syncStatus = 'PENDING' THEN Client.companyId ELSE excluded.companyId END,
+            notes =      CASE WHEN Client.syncStatus = 'PENDING' THEN Client.notes     ELSE excluded.notes     END,
+            isActive =   CASE WHEN Client.syncStatus = 'PENDING' THEN Client.isActive  ELSE excluded.isActive  END,
+            syncStatus = CASE WHEN Client.syncStatus = 'PENDING' THEN 'PENDING'        ELSE 'SYNCED'           END,
+            updatedAt =  CASE WHEN Client.syncStatus = 'PENDING' THEN Client.updatedAt ELSE excluded.updatedAt END
         `, [client.id, client.name, client.phone, client.email, client.type, client.company ?? null, client.cedula ?? null, client.code ?? null, client.companyId ?? null, client.notes, client.isActive ? 1 : 0, dZ(client.updatedAt)]);
-                notifyUI('Client');
+                });
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Product' }, (payload) => {
@@ -1510,7 +1771,8 @@ function setupRealtimeSubscriptions() {
             if (!prod || !prod.id) return;
 
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-                execute(`
+                applyRemote('Product', () => {
+                    execute(`
           INSERT INTO Product (id, name, barcode, categoryId, subcategoryId, price, cost, unit, stockQty, minStock, isActive, isInfinite, isDeleted, imageUrl, syncStatus, updatedAt)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
           ON CONFLICT(id) DO UPDATE SET
@@ -1530,27 +1792,35 @@ function setupRealtimeSubscriptions() {
             syncStatus =    CASE WHEN Product.syncStatus = 'PENDING' THEN 'PENDING'             ELSE 'SYNCED'               END,
             updatedAt =     CASE WHEN Product.syncStatus = 'PENDING' THEN Product.updatedAt     ELSE excluded.updatedAt     END
         `, [prod.id, prod.name, prod.barcode, prod.categoryId, prod.subcategoryId ?? null, prod.price, prod.cost, prod.unit, prod.stockQty, prod.minStock, prod.isActive ? 1 : 0, prod.isInfinite ? 1 : 0, prod.isDeleted ? 1 : 0, prod.imageUrl, dZ(prod.updatedAt)]);
+                });
                 if (prod.imageUrl && (payload.eventType === 'INSERT' || (payload.old as any)?.imageUrl !== prod.imageUrl)) {
-                    cacheProductImage(prod.id, prod.imageUrl).catch(() => {})
+                    if (!shouldSkipImage(prod.id, prod.imageUrl)) {
+                        cacheProductImage(prod.id, prod.imageUrl).catch(() => { })
+                    }
                 }
-                notifyUI('Product');
             }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ProductSubcategory' }, (payload) => {
+            // Un producto PENDING es la versión autoritativa hasta que suba: no se le
+            // tocan las subcategorías desde remoto.
+            const isPendingProduct = (productId: string) => {
+                const row = get(`SELECT syncStatus FROM Product WHERE id = ?`, [productId]) as { syncStatus?: string } | undefined;
+                return row?.syncStatus === 'PENDING';
+            };
             if (payload.eventType === 'INSERT') {
                 const ps = payload.new as DbProductSubcategoryRow;
                 if (!ps?.productId || !ps?.subcategoryId) return;
-                try {
+                if (isPendingProduct(ps.productId)) return;
+                applyRemote('Product', () => {
                     execute('INSERT OR IGNORE INTO ProductSubcategory (productId, subcategoryId) VALUES (?, ?)', [ps.productId, ps.subcategoryId]);
-                } catch {}
-                notifyUI('Product');
+                });
             } else if (payload.eventType === 'DELETE') {
                 const ps = payload.old as DbProductSubcategoryRow;
                 if (!ps?.productId || !ps?.subcategoryId) return;
-                try {
+                if (isPendingProduct(ps.productId)) return;
+                applyRemote('Product', () => {
                     execute('DELETE FROM ProductSubcategory WHERE productId = ? AND subcategoryId = ?', [ps.productId, ps.subcategoryId]);
-                } catch {}
-                notifyUI('Product');
+                });
             }
         })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'SinpeMessage' }, (payload) => {
@@ -1573,7 +1843,8 @@ function setupRealtimeSubscriptions() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'CashRegister' }, (payload) => {
             const reg = payload.new as DbCashRegisterRow;
             if (!reg?.id) return;
-            try {
+            if (isPendingLocally('CashRegister', reg.id)) return;
+            applyRemote('CashRegister', () => {
                 execute(`
                     INSERT INTO CashRegister (id, openedAt, closedAt, initialAmount, finalAmount, salesCash, salesCard, salesSinpe, salesTransfer, salesCredit, expensesTotal, notes, status, syncStatus, updatedAt)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
@@ -1592,17 +1863,15 @@ function setupRealtimeSubscriptions() {
                         status = excluded.status,
                         syncStatus = 'SYNCED',
                         updatedAt = excluded.updatedAt
-                `, [reg.id, dZ(reg.openedAt), dZ(reg.closedAt) ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, reg.updatedAt]);
-            } catch (e) { console.error('[SyncRealtime] CashRegister:', e); }
-            notifyUI('CashRegister');
+                `, [reg.id, dZ(reg.openedAt), dZ(reg.closedAt) ?? null, reg.initialAmount, reg.finalAmount ?? null, reg.salesCash ?? null, reg.salesCard ?? null, reg.salesSinpe ?? null, reg.salesTransfer ?? null, reg.salesCredit ?? null, reg.expensesTotal ?? null, reg.notes ?? null, reg.status, dZ(reg.updatedAt)]);
+            });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Sale' }, (payload) => {
             const sale = payload.new as DbSaleRow;
             if (!sale?.id) return;
-            try {
-                // Skip if local sale is PENDING — avoid overwriting unsynced local changes
-                const localSale = get('SELECT syncStatus FROM Sale WHERE id = ?', [sale.id]) as { syncStatus: string } | undefined
-                if (localSale?.syncStatus === 'PENDING') return
+            // Skip if local sale is PENDING — avoid overwriting unsynced local changes
+            if (isPendingLocally('Sale', sale.id)) return;
+            applyRemote('Sale', () => {
                 execute(`
                     INSERT INTO Sale (id, saleNumber, date, subtotal, discount, total, paymentMethod, amountReceived, change, cashRegisterId, isCredit, clientId, status, notes, syncStatus, updatedAt, companyId, consumerName, physicalInvoiceNumber, originalSaleSnapshot, modifiedFromSaleId, paidAt, paymentMethod2, amount2)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1631,13 +1900,14 @@ function setupRealtimeSubscriptions() {
                         paymentMethod2 = excluded.paymentMethod2,
                         amount2 = excluded.amount2
                 `, [sale.id, sale.saleNumber, d(sale.date), sale.subtotal, sale.discount, sale.total, sale.paymentMethod, sale.amountReceived ?? null, sale.change ?? null, sale.cashRegisterId ?? null, sale.isCredit ? 1 : 0, sale.clientId ?? null, sale.status, sale.notes ?? null, dZ(sale.updatedAt), sale.companyId ?? null, sale.consumerName ?? null, sale.physicalInvoiceNumber ?? null, sale.originalSaleSnapshot ?? null, sale.modifiedFromSaleId ?? null, dZ(sale.paidAt), sale.paymentMethod2 ?? null, sale.amount2 ?? null]);
-            } catch (e) { console.error('[SyncRealtime] Sale:', e); }
-            notifyUI('Sale');
+            });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'SaleItem' }, (payload) => {
             const item = payload.new as DbSaleItemRow;
             if (!item?.id) return;
-            try {
+            // No tocar los ítems de una venta que todavía no subió: el push los reemplaza completos.
+            if (isPendingLocally('Sale', item.saleId)) return;
+            applyRemote('Sale', () => {
                 execute(`
                     INSERT INTO SaleItem (id, saleId, productId, quantity, unitPrice, subtotal, notes)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1649,13 +1919,13 @@ function setupRealtimeSubscriptions() {
                         subtotal = excluded.subtotal,
                         notes = excluded.notes
                 `, [item.id, item.saleId, item.productId, item.quantity, item.unitPrice, item.subtotal, item.notes ?? null]);
-            } catch (e) { console.error('[SyncRealtime] SaleItem:', e); }
-            notifyUI('Sale');
+            });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Expense' }, (payload) => {
             const exp = payload.new as DbExpenseRow;
             if (!exp?.id) return;
-            try {
+            if (isPendingLocally('Expense', exp.id)) return;
+            applyRemote('Expense', () => {
                 execute(`
                     INSERT INTO Expense (id, description, amount, categoryId, supplier, date, notes, cashRegisterId, syncStatus, updatedAt)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED', ?)
@@ -1670,13 +1940,13 @@ function setupRealtimeSubscriptions() {
                         syncStatus = 'SYNCED',
                         updatedAt = excluded.updatedAt
                 `, [exp.id, exp.description, exp.amount, exp.categoryId, exp.supplier ?? null, d(exp.date), exp.notes ?? null, exp.cashRegisterId ?? null, d(exp.updatedAt)]);
-            } catch (e) { console.error('[SyncRealtime] Expense:', e); }
-            notifyUI('Expense');
+            });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'InventoryMovement' }, (payload) => {
             const mov = payload.new as DbInventoryMovementRow;
             if (!mov?.id) return;
-            try {
+            if (isPendingLocally('InventoryMovement', mov.id)) return;
+            applyRemote('InventoryMovement', () => {
                 execute(`
                     INSERT INTO InventoryMovement (id, productId, type, quantity, cost, reference, notes, date, syncStatus)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYNCED')
@@ -1690,13 +1960,13 @@ function setupRealtimeSubscriptions() {
                         date = excluded.date,
                         syncStatus = 'SYNCED'
                 `, [mov.id, mov.productId, mov.type, mov.quantity, mov.cost ?? null, mov.reference ?? null, mov.notes ?? null, d(mov.date)]);
-            } catch (e) { console.error('[SyncRealtime] InventoryMovement:', e); }
-            notifyUI('InventoryMovement');
+            });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Payment' }, (payload) => {
             const pay = payload.new as DbPaymentRow;
             if (!pay?.id) return;
-            try {
+            if (isPendingLocally('Payment', pay.id)) return;
+            applyRemote('Payment', () => {
                 execute(`
                     INSERT INTO Payment (id, clientId, amount, method, reference, notes, date, syncStatus)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED')
@@ -1709,13 +1979,12 @@ function setupRealtimeSubscriptions() {
                         date = excluded.date,
                         syncStatus = 'SYNCED'
                 `, [pay.id, pay.clientId, pay.amount, pay.method, pay.reference ?? null, pay.notes ?? null, d(pay.date)]);
-            } catch (e) { console.error('[SyncRealtime] Payment:', e); }
-            notifyUI('Payment');
+            });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'Sorteo' }, (payload) => {
             const s = payload.new as Record<string, unknown>;
             if (!s?.id) return;
-            try {
+            applyRemote('Sorteo', () => {
                 execute(`
                     INSERT INTO Sorteo (id, name, type, status, startAt, endAt, minSpinsBetweenPrizes,
                         totalCards, prizeCount, slotsPerCard, cardSkin,
@@ -1746,13 +2015,13 @@ function setupRealtimeSubscriptions() {
                     s.totalNumbers ?? null, s.pricePerNumber ?? null,
                     s.sellStartDate ?? null, s.sellEndDate ?? null, s.drawDate ?? null,
                     s.tombPrizes ?? null, s.createdAt, s.updatedAt]);
-            } catch (e) { console.error('[SyncRealtime] Sorteo:', e); }
-            notifyUI('Sorteo');
+            });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'TombolaEntry' }, (payload) => {
             const entry = payload.new as DbTombolaEntryRow;
             if (!entry?.id) return;
-            try {
+            if (isPendingLocally('TombolaEntry', entry.id)) return;
+            applyRemote('TombolaEntry', () => {
                 execute(`
                     INSERT INTO TombolaEntry (id, sorteoId, number, participantName, participantCedula,
                         participantEmail, paymentMethod, price, saleRegisteredAt, isWinner, prizePosition,
@@ -1773,8 +2042,7 @@ function setupRealtimeSubscriptions() {
                     entry.participantEmail ?? null, entry.paymentMethod, entry.price,
                     entry.saleRegisteredAt ?? null, entry.isWinner ? 1 : 0, entry.prizePosition ?? null,
                     entry.createdAt, entry.updatedAt]);
-            } catch (e) { console.error('[SyncRealtime] TombolaEntry:', e); }
-            notifyUI('TombolaEntry');
+            });
         })
         .subscribe();
 }

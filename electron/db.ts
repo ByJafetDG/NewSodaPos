@@ -17,19 +17,35 @@ if (!isDev) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Copy local.db from resources if it doesn't exist OR is essentially empty (less than 50KB)
+  // Copiar la BD empaquetada SOLO en instalación limpia.
+  //
+  // Antes esto también disparaba cuando pos.db pesaba menos de 50 KB y borraba el archivo
+  // con fs.unlinkSync. En modo WAL los datos recién escritos viven en pos.db-wal hasta el
+  // checkpoint: tras un corte de luz el archivo principal puede quedar chico, y el arranque
+  // siguiente borraba la BD del negocio y la reemplazaba por el snapshot embebido — toda la
+  // operación del día volvía atrás. Ahora un archivo existente nunca se borra: si está
+  // corrupto o vacío se respalda y el fallo queda visible.
   const exists = fs.existsSync(dbPath);
   const size = exists ? fs.statSync(dbPath).size : 0;
+  const walPath = `${dbPath}-wal`;
+  const walSize = fs.existsSync(walPath) ? fs.statSync(walPath).size : 0;
+  const bundledDbPath = path.join(process.resourcesPath, 'local.db');
 
-  if (!exists || size < 50000) {
-    const bundledDbPath = path.join(process.resourcesPath, 'local.db');
+  if (!exists) {
     if (fs.existsSync(bundledDbPath)) {
-      console.log('Copying bundled database to:', dbPath);
-      // If it exists but is too small, we might want to backup or delete first
-      if (exists) fs.unlinkSync(dbPath);
+      console.log('Instalación nueva: copiando base empaquetada a', dbPath);
       fs.copyFileSync(bundledDbPath, dbPath);
     } else {
       console.error('Bundled local.db not found at:', bundledDbPath);
+    }
+  } else if (size < 50000 && walSize === 0) {
+    // Archivo existente sospechosamente pequeño y sin WAL pendiente: se respalda, no se borra.
+    const backup = `${dbPath}.${Date.now()}.bak`;
+    try {
+      fs.copyFileSync(dbPath, backup);
+      console.warn(`[DB] pos.db pesa ${size} bytes. Respaldo guardado en ${backup}.`);
+    } catch (err) {
+      console.error('[DB] No se pudo respaldar la base pequeña:', err);
     }
   }
 }

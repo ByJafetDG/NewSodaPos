@@ -11,6 +11,7 @@ import { useCategories } from '@/hooks/useCategories'
 import { useClients, useCreateClient, useUpdateClient, useCompanies } from '@/hooks/useClients'
 import { useEmployees } from '@/hooks/useEmployees'
 import { useCreateSale } from '@/hooks/useSales'
+import { useActiveRegister } from '@/hooks/useCashRegister'
 import { usePOSSorteo } from '@/hooks/usePOSSorteo'
 import { usePOSScanModals } from '@/hooks/usePOSScanModals'
 import { useCashierSelection } from '@/hooks/useCashierSelection'
@@ -237,6 +238,8 @@ export function POSPage() {
 
     const isChargingRef = useRef(false)
     const [isCharging, setIsCharging] = useState(false)
+    const { data: activeRegister } = useActiveRegister()
+    const noRegisterWarnedRef = useRef(false)
 
     // ── Derived ───────────────────────────────────────────────────────────────
     const canCharge =
@@ -624,6 +627,32 @@ export function POSPage() {
         setIsCharging(true)
         try {
             if (paymentMethod === 'CREDITO') { setShowCreditModal(true); return }
+            // Aviso único por sesión: sin caja abierta la venta se registra igual, pero
+            // queda fuera del cierre. Se dice una sola vez para no convertirlo en ruido
+            // que el cajero aprende a ignorar; el aviso permanente vive en el panel.
+            if (!activeRegister && !noRegisterWarnedRef.current) {
+                noRegisterWarnedRef.current = true
+                sileo.warning({
+                    title: 'No hay caja abierta',
+                    description: (
+                        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{
+                                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)',
+                                borderRadius: 10, padding: '9px 12px',
+                            }}>
+                                <div style={{ fontSize: 12, color: '#FCD34D', fontWeight: 600, lineHeight: 1.35 }}>
+                                    Las ventas se registran, pero no entran en el cierre de caja
+                                </div>
+                            </div>
+                            <div style={{ fontSize: 10, color: '#6B7280', lineHeight: 1.5 }}>
+                                Abrí la caja desde Caja → Abrir para que el arqueo cuadre.
+                            </div>
+                        </div>
+                    ),
+                    position: 'top-right',
+                    duration: 9000,
+                })
+            }
             await processSale({ method: paymentMethod })
         } finally {
             isChargingRef.current = false
@@ -812,8 +841,13 @@ export function POSPage() {
         if (!scanOutOfStock) return
         const newStock = makeInfinite ? scanOutOfStock.stockQty : scanOutOfStock.stockQty + qty
         await updateProduct.mutateAsync({ id: scanOutOfStock.id, input: { stockQty: newStock, isInfinite: makeInfinite } })
-        addItem({ ...scanOutOfStock, stockQty: newStock, isInfinite: makeInfinite })
-        toast.success(makeInfinite ? `${scanOutOfStock.name} ahora tiene stock infinito` : `+${qty} unidades agregadas`)
+        // addItem puede rechazar por stock. Antes se cantaba éxito igual, sin mirar.
+        const added = addItem({ ...scanOutOfStock, stockQty: newStock, isInfinite: makeInfinite })
+        if (added) {
+            toast.success(makeInfinite ? `${scanOutOfStock.name} ahora tiene stock infinito` : `+${qty} unidades agregadas`)
+        } else {
+            toast.warning(`Stock actualizado, pero "${scanOutOfStock.name}" no se agregó al carrito por falta de unidades`, 6000)
+        }
         setScanOutOfStock(null)
     }
 
@@ -967,6 +1001,7 @@ export function POSPage() {
                                 invoiceClient={invoiceClient}
                                 onOpenInvoiceModal={() => setShowInvoiceModal(true)}
                                 onClearInvoiceClient={() => setInvoiceClient(null)}
+                                noActiveRegister={!activeRegister}
                             />
                         </div>
                     </>
@@ -1052,6 +1087,7 @@ export function POSPage() {
                                     invoiceClient={invoiceClient}
                                     onOpenInvoiceModal={() => setShowInvoiceModal(true)}
                                     onClearInvoiceClient={() => setInvoiceClient(null)}
+                                    noActiveRegister={!activeRegister}
                                 />
                             </div>
                         </div>
